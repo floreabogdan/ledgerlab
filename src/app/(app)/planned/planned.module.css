@@ -1,0 +1,51 @@
+.reportingNotice {
+  margin: var(--space-4, 16px) var(--space-5, 20px) 0;
+}
+
+.moneyStack {
+  min-width: 124px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.moneyStack > strong {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.moneyStack > small {
+  max-width: 190px;
+  color: var(--ink-faint);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: var(--leading-snug);
+  text-align: right;
+  white-space: normal;
+}
+
+.moneyStack > .reportingEquivalent {
+  color: #315fa8;
+  font-weight: 650;
+}
+
+.moneyStack > .reportingUnavailable {
+  color: #805a1d;
+}
+
+@media (max-width: 700px) {
+  .reportingNotice {
+    margin-inline: var(--space-4, 16px);
+  }
+
+  .moneyStack {
+    min-width: 0;
+    align-items: flex-start;
+    white-space: normal;
+  }
+
+  .moneyStack > small {
+    text-align: left;
+  }
+}

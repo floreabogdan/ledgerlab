@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible LedgerLab defect using synthetic data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve LedgerLab. Search existing issues first.
+
+        **Privacy:** never attach a real database, backup, bank export, receipt, password, session cookie, token, email address, or unredacted financial screenshot. Replace all details and amounts with synthetic examples.
+  - type: input
+    id: version
+    attributes:
+      label: LedgerLab version
+      description: Release tag or commit hash. Do not write only “latest.”
+      placeholder: v1.0.0 or abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Docker Compose
+        - Docker without Compose
+        - npm / source checkout
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, Node.js version (for source installs), browser, and reverse proxy if any.
+      placeholder: Ubuntu 24.04 x86_64, Docker 28, Firefox 142, Caddy
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its user impact.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Use a fresh or disposable workspace and invented amounts.
+      placeholder: |
+        1. Create a cash account with opening balance USD 100.00
+        2. Add an expense of USD 10.00
+        3. Open ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Optional. Inspect every line and redact all personal and financial information before posting.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and read the troubleshooting guide.
+          required: true
+        - label: I reproduced this with synthetic data and removed all private information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a focused product improvement or internationally useful finance workflow.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the problem before prescribing an implementation. For country-specific behavior, include an authoritative public reference and explain how the feature remains optional elsewhere.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who has this problem, and what are they unable to do safely today?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Proposed workflow
+      description: Describe the user interaction and expected outcome without private financial data.
+    validations:
+      required: true
+  - type: dropdown
+    id: money_state
+    attributes:
+      label: Which money state does this affect?
+      options:
+        - Planned or forecast only
+        - Pending actual
+        - Cleared actual
+        - Multiple states
+        - No monetary records
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Correctness and edge cases
+      description: Consider transfers, currencies, rounding, recurring dates, archive/history, undo, and planned-versus-actual separation.
+    validations:
+      required: true
+  - type: textarea
+    id: regional
+    attributes:
+      label: Regional or legal context
+      description: If applicable, identify jurisdiction, optionality, and authoritative sources. LedgerLab suggestions are not legal advice.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I used only synthetic examples and included no personal financial data.
+          required: true

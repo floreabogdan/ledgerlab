@@ -1,0 +1,191 @@
+.topMetrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-4, 16px);
+  margin: 0;
+}
+
+.topMetrics > * { min-width: 0; }
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: minmax(340px, .95fr) minmax(420px, 1.05fr);
+  gap: var(--space-6, 24px);
+  align-items: start;
+}
+
+.dashboardColumn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6, 24px);
+}
+
+.accountList,
+.transactionList,
+.obligationList { display: flex; flex-direction: column; }
+
+.accountRow,
+.transactionRow,
+.obligationRow {
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--space-3, 12px) var(--space-5, 20px);
+  border-bottom: 1px solid var(--line-soft, #e5eaf3);
+  display: grid;
+  align-items: center;
+  gap: var(--space-3, 12px);
+}
+
+.accountRow:last-child,
+.transactionRow:last-child,
+.obligationRow:last-child { border-bottom: 0; }
+
+.accountRow { grid-template-columns: 36px minmax(0, 1fr) auto; }
+.accountIcon,
+.transactionIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--brand-soft, #e8f0ff);
+  color: var(--brand, #2563eb);
+  display: grid;
+  place-items: center;
+}
+
+.accountName,
+.transactionRow > span:nth-child(2),
+.obligationRow > span:nth-child(2) { min-width: 0; }
+
+.accountRow strong,
+.transactionRow strong,
+.obligationRow strong {
+  font-size: var(--text-sm, .875rem);
+  font-weight: 600;
+  line-height: var(--leading-snug, 1.35);
+}
+
+.accountRow small,
+.transactionRow small,
+.obligationRow small {
+  display: block;
+  overflow: hidden;
+  margin-top: var(--space-1, 4px);
+  color: var(--ink-faint, #5f6d84);
+  font-size: var(--text-xs, .8125rem);
+  line-height: var(--leading-snug, 1.35);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountRow > strong,
+.dueDate,
+.obligationAmount,
+.transactionAmount,
+.forecastHero > strong,
+.forecastRows strong {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.accountRow > strong,
+.obligationAmount > strong,
+.transactionAmount > strong {
+  font-size: .9375rem;
+  font-weight: 700;
+}
+
+.forecastHero {
+  padding: var(--space-6, 24px) var(--space-5, 20px);
+  border-bottom: 1px solid var(--line-soft, #e5eaf3);
+  background: linear-gradient(110deg, #edf4ff, #f8fbff 58%, #eefbff);
+}
+
+.forecastHero > span { display: block; color: var(--ink-faint, #5f6d84); font-size: var(--text-xs, .8125rem); font-weight: 600; line-height: var(--leading-snug, 1.35); }
+.forecastHero > strong { display: block; margin: var(--space-2, 8px) 0 var(--space-1, 4px); color: var(--brand-deep, #1e3a8a); font-size: clamp(var(--text-xl, 1.375rem), 2vw, 1.75rem); line-height: var(--leading-tight, 1.2); letter-spacing: var(--tracking-tight, -.02em); }
+.forecastHero small { color: var(--ink-faint, #5f6d84); font-size: var(--text-xs, .8125rem); line-height: var(--leading-snug, 1.35); }
+.forecastRows { padding: var(--space-1, 4px) var(--space-5, 20px); }
+.forecastRows > div { min-height: 52px; border-bottom: 1px solid var(--line-soft, #e5eaf3); display: flex; align-items: center; justify-content: space-between; gap: var(--space-5, 20px); font-size: var(--text-sm, .875rem); line-height: var(--leading-snug, 1.35); }
+.forecastRows > div:last-child { border-bottom: 0; }
+.forecastRows span { color: var(--ink-faint, #5f6d84); display: inline-flex; align-items: center; gap: var(--space-2, 8px); }
+.forecastRows strong { font-size: var(--text-sm, .875rem); }
+.sectionLink { min-height: 44px; padding: 0 var(--space-5, 20px); border-top: 1px solid var(--line-soft, #e5eaf3); color: var(--brand-hover, #1d4ed8); display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2, 8px); font-size: var(--text-sm, .875rem); font-weight: 600; line-height: var(--leading-snug, 1.35); text-decoration: none; }
+
+.obligationRow { grid-template-columns: 72px minmax(0, 1fr) auto; }
+.dueDate { padding-right: var(--space-3, 12px); border-right: 1px solid var(--line-soft, #e5eaf3); }
+.dueDate small { color: #a05146; }
+.obligationAmount,
+.transactionAmount { display: flex; align-items: flex-end; flex-direction: column; gap: var(--space-1, 4px); text-align: right; }
+.transactionRow { grid-template-columns: 36px minmax(0, 1fr) auto; }
+.transactionAmount .fxOriginal { max-width: 220px; margin-top: 0; line-height: var(--leading-snug, 1.35); text-align: right; text-transform: none; white-space: normal; }
+.positive { color: var(--positive, #17724f); }
+.negative { color: var(--negative, #b33d45); }
+
+.compactEmpty {
+  min-height: 176px;
+  padding: var(--space-8, 32px) var(--space-6, 24px);
+  color: var(--ink-faint, #5f6d84);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  font-size: var(--text-sm, .875rem);
+  line-height: var(--leading-normal, 1.5);
+  text-align: center;
+}
+
+.compactEmpty > svg { color: var(--brand, #2563eb); }
+.warningGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.warningItem { min-width: 0; min-height: 96px; padding: var(--space-4, 16px) var(--space-5, 20px); border-right: 1px solid var(--line-soft, #e5eaf3); border-bottom: 1px solid var(--line-soft, #e5eaf3); display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--space-3, 12px); align-items: start; }
+.warningItem:nth-child(2n) { border-right: 0; }
+.warningItem:nth-last-child(-n + 2) { border-bottom: 0; }
+.warningItem > svg { color: #b27626; }
+.warningItem strong { display: block; font-size: var(--text-sm, .875rem); line-height: var(--leading-snug, 1.35); }
+.warningItem small { display: block; margin-top: var(--space-1, 4px); color: var(--ink-faint, #5f6d84); font-size: var(--text-xs, .8125rem); line-height: var(--leading-normal, 1.5); }
+.noWarnings { padding: var(--space-6, 24px) var(--space-5, 20px); color: var(--ink-faint, #5f6d84); font-size: var(--text-sm, .875rem); line-height: var(--leading-normal, 1.5); text-align: center; }
+
+@media (max-width: 1320px) {
+  .topMetrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .topMetrics > * { grid-column: span 2; }
+  .topMetrics > :nth-last-child(-n + 2) { grid-column: span 3; }
+}
+
+@media (max-width: 1120px) {
+  .dashboardGrid { grid-template-columns: 1fr; }
+  .dashboardColumn { display: contents; }
+  .accountsSection { order: 1; }
+  .forecastSection { order: 2; }
+  .obligationsSection { order: 3; }
+  .activitySection { order: 4; }
+}
+
+@media (max-width: 700px) {
+  .topMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .topMetrics > *,
+  .topMetrics > :nth-last-child(-n + 2) { grid-column: auto; }
+  .topMetrics > :last-child { grid-column: 1 / -1; }
+  .warningGrid { grid-template-columns: 1fr; }
+  .warningItem,
+  .warningItem:nth-child(2n),
+  .warningItem:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid var(--line-soft, #e5eaf3); }
+  .warningItem:last-child { border-bottom: 0; }
+  .accountRow,
+  .transactionRow,
+  .obligationRow { padding-inline: var(--space-4, 16px); }
+  .obligationRow { grid-template-columns: 64px minmax(0, 1fr); }
+  .obligationAmount { grid-column: 2; align-items: center; flex-direction: row; justify-content: space-between; width: 100%; text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .accountRow,
+  .transactionRow { grid-template-columns: 36px minmax(0, 1fr); }
+  .accountRow > :last-child,
+  .transactionAmount { grid-column: 2; justify-self: end; }
+  .transactionAmount { align-items: center; flex-direction: row; }
+  .transactionAmountFx { align-items: flex-end; flex-direction: column; }
+}
+
+@media (max-width: 360px) {
+  .topMetrics { grid-template-columns: 1fr; }
+  .topMetrics > :last-child { grid-column: auto; }
+}

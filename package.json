@@ -1,0 +1,84 @@
+{
+  "name": "ledgerlab",
+  "version": "1.0.0",
+  "description": "A self-hosted personal finance workspace for actuals, plans, forecasts, and liabilities.",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "author": "Bogdan Florea",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/floreabogdan/ledgerlab.git"
+  },
+  "homepage": "https://github.com/floreabogdan/ledgerlab#readme",
+  "bugs": {
+    "url": "https://github.com/floreabogdan/ledgerlab/issues"
+  },
+  "keywords": [
+    "personal-finance",
+    "budgeting",
+    "self-hosted",
+    "sqlite",
+    "nextjs"
+  ],
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "postbuild": "node scripts/prepare-standalone.mjs",
+    "start": "node scripts/start.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "e2e:serve": "tsx scripts/prepare-e2e.ts && next dev --hostname 127.0.0.1 --port 3210",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed-demo.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.6.2",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^0.468.0",
+    "next": "16.2.12",
+    "papaparse": "^5.5.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "@types/papaparse": "^5.3.16",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "drizzle-kit": "^0.31.9",
+    "eslint": "^9.39.0",
+    "eslint-config-next": "16.2.12",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    },
+    "next": {
+      "postcss": "8.5.25",
+      "sharp": "0.35.3"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "better-sqlite3@12.6.2": true,
+    "sharp@0.35.3": true,
+    "unrs-resolver@1.12.2": true
+  }
+}
