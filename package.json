@@ -58,7 +58,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.31.9",
-    "eslint": "^9.39.0",
+    "eslint": "^10.8.0",
     "eslint-config-next": "16.2.12",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
