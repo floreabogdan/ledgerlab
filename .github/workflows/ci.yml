@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types, unit tests, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Type-check
+        run: npm run typecheck -- --incremental false
+      - name: Run unit and service tests
+        run: npm test
+      - name: Build production application
+        env:
+          DATABASE_URL: ":memory:"
+        run: npm run build
+
+  e2e:
+    name: Browser workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: true
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright workflows
+        run: npm run test:e2e
+
+  container:
+    name: Build and verify container
+    needs: [quality, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/floreabogdan/ledgerlab
+          flavor: latest=auto
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=long
+      - name: Build production image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ledgerlab-ci:${{ github.sha }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify container startup and persistence contract
+        env:
+          IMAGE: ledgerlab-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          container=ledgerlab-ci
+          volume=ledgerlab-ci-data
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          start_container() {
+            docker run --detach \
+              --name "$container" \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --mount "source=$volume,target=/app/data" \
+              --publish 127.0.0.1:3000:3000 \
+              "$IMAGE" >/dev/null
+          }
+          wait_for_health() {
+            for attempt in {1..30}; do
+              if curl --fail --silent --show-error http://127.0.0.1:3000/api/health >/dev/null; then
+                return
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                docker logs "$container"
+                return 1
+              fi
+              sleep 2
+            done
+          }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          start_container
+          wait_for_health
+          test "$(docker inspect --format '{{.Config.User}}' "$container")" = node
+          test "$(docker inspect --format '{{range $path, $_ := .Config.Volumes}}{{println $path}}{{end}}' "$container")" = /app/data
+          docker exec "$container" test -s /app/data/ledgerlab.db
+          docker exec "$container" sh -c 'printf preserved > /app/data/persistence-check'
+          docker rm --force "$container" >/dev/null
+          start_container
+          wait_for_health
+          docker exec "$container" test -s /app/data/ledgerlab.db
+          test "$(docker exec "$container" cat /app/data/persistence-check)" = preserved
+      - name: Sign in to GitHub Container Registry
+        if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image
+        if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          provenance: mode=max
+          sbom: true

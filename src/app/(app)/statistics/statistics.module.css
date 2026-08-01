@@ -1,0 +1,53 @@
+.tabContent { display: grid; gap: var(--space-6, 24px); }
+.chartEmpty { min-height: 160px; padding: var(--space-8, 32px) var(--space-6, 24px); color: var(--ink-faint, #5f6d84); display: grid; place-items: center; font-size: var(--text-sm, .875rem); line-height: var(--leading-normal, 1.5); text-align: center; }
+
+.groupedChart {
+  position: relative;
+  height: 280px;
+  padding: var(--space-6, 24px) var(--space-5, 20px) var(--space-10, 40px);
+  display: flex;
+  align-items: stretch;
+  gap: clamp(var(--space-1, 4px), 1vw, var(--space-3, 12px));
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(25% - 1px), var(--line-soft, #e5eaf3) 25%);
+}
+
+.group { min-width: 48px; flex: 1 0 48px; display: flex; flex-direction: column; align-items: center; gap: var(--space-2, 8px); }
+.barTrack { width: 100%; flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: var(--space-1, 4px); }
+.barTrack span { width: min(14px, 38%); min-height: 2px; border-radius: 2px 2px 0 0; }
+.incomeBar { background: var(--brand, #2563eb); }
+.expenseBar { background: #c15b58; }
+.group small { max-width: 100%; overflow: hidden; color: var(--ink-faint, #5f6d84); font-size: var(--text-2xs, .75rem); font-weight: 500; line-height: var(--leading-snug, 1.35); text-overflow: ellipsis; white-space: nowrap; }
+.chartLegend { position: absolute; left: var(--space-5, 20px); top: var(--space-3, 12px); display: flex; gap: var(--space-4, 16px); color: var(--ink-soft, #526078); font-size: var(--text-2xs, .75rem); font-weight: 600; line-height: var(--leading-snug, 1.35); }
+.chartLegend span { display: inline-flex; align-items: center; gap: var(--space-1, 4px); }
+.chartLegend i { width: 8px; height: 8px; border-radius: 2px; }
+.incomeKey { background: var(--brand, #2563eb); }
+.expenseKey { background: #c15b58; }
+
+.rankingList { display: flex; flex-direction: column; }
+.rankingRow { min-width: 0; min-height: 64px; padding: var(--space-3, 12px) var(--space-5, 20px); border-bottom: 1px solid var(--line-soft, #e5eaf3); display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--space-3, 12px); align-items: center; }
+.rankingRow:last-child { border-bottom: 0; }
+.rank { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-strong, #edf2fa); color: var(--ink-soft, #526078); display: grid; place-items: center; font-size: var(--text-2xs, .75rem); font-weight: 700; font-variant-numeric: tabular-nums lining-nums; }
+.rankingRow > span:nth-child(2) { min-width: 0; }
+.rankingRow > span:nth-child(2) > strong { display: block; overflow: hidden; margin-bottom: var(--space-2, 8px); font-size: var(--text-sm, .875rem); font-weight: 600; line-height: var(--leading-snug, 1.35); text-overflow: ellipsis; white-space: nowrap; }
+.rankingRow > span:last-child { text-align: right; }
+.rankingRow > span:last-child strong { display: block; font-size: var(--text-sm, .875rem); line-height: var(--leading-snug, 1.35); font-variant-numeric: tabular-nums lining-nums; }
+.rankingRow > span:last-child small { color: var(--ink-faint, #5f6d84); font-size: var(--text-xs, .8125rem); line-height: var(--leading-snug, 1.35); font-variant-numeric: tabular-nums lining-nums; }
+
+.comparisonChart { padding: var(--space-5, 20px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5, 20px); }
+.comparisonChart > div > strong { display: block; color: var(--ink-soft, #526078); font-size: var(--text-xs, .8125rem); font-weight: 600; line-height: var(--leading-snug, 1.35); text-align: center; }
+.changeList { display: flex; flex-direction: column; }
+.changeList > div { min-height: 48px; padding: var(--space-3, 12px) var(--space-4, 16px); border-bottom: 1px solid var(--line-soft, #e5eaf3); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4, 16px); font-size: var(--text-sm, .875rem); line-height: var(--leading-snug, 1.35); }
+.changeList > div:last-child { border-bottom: 0; }
+.changeList > div > span:first-child { min-width: 0; display: flex; align-items: center; gap: var(--space-2, 8px); }
+.changeList > div > span:last-child { font-variant-numeric: tabular-nums lining-nums; }
+
+@media (max-width: 700px) {
+  .groupedChart { height: 248px; padding: var(--space-6, 24px) var(--space-4, 16px) var(--space-10, 40px); gap: var(--space-2, 8px); }
+  .group { min-width: 48px; flex-basis: 48px; }
+  .comparisonChart { grid-template-columns: 1fr; }
+  .rankingRow { padding-inline: var(--space-4, 16px); }
+}

@@ -1,0 +1,147 @@
+.backLink {
+  width: fit-content;
+  min-height: 40px;
+  margin: -8px 0 -8px -8px;
+  padding: 0 var(--space-2, 8px);
+  color: var(--ink-soft, #526078);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  font-size: var(--text-sm, .875rem);
+  font-weight: 600;
+  line-height: var(--leading-snug, 1.35);
+  text-decoration: none;
+}
+
+.backLink:hover { color: var(--brand, #2563eb); }
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4, 16px);
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, .72fr);
+  gap: var(--space-6, 24px);
+  align-items: start;
+}
+
+.overviewGrid > * { min-width: 0; }
+
+.summaryList { padding: var(--space-1, 4px) var(--space-5, 20px); }
+
+.summaryRow {
+  min-height: 52px;
+  padding: var(--space-3, 12px) 0;
+  border-bottom: 1px solid var(--line-soft, #e5eaf3);
+  display: grid;
+  grid-template-columns: minmax(120px, .85fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: var(--space-5, 20px);
+  font-size: var(--text-sm, .875rem);
+  line-height: var(--leading-normal, 1.5);
+}
+
+.summaryRow:last-child { border-bottom: 0; }
+.summaryRow > span:first-child { color: var(--ink-faint, #64748b); }
+.summaryRow strong { min-width: 0; font-weight: 600; overflow-wrap: anywhere; text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+
+.notice {
+  padding: var(--space-4, 16px);
+  border: 1px solid #bed4e8;
+  background: #ecf4fa;
+  color: #376782;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 12px);
+  font-size: var(--text-sm, .875rem);
+  line-height: var(--leading-normal, 1.5);
+}
+
+.notice strong { color: #28566f; }
+.noticeWarning { border-color: #ead6aa; background: #fdf8eb; color: #805a1d; }
+.noticeOffset { margin: var(--space-4, 16px); }
+
+.sectionStack {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-6, 24px);
+}
+
+.statusCell { display: inline-flex; align-items: center; gap: var(--space-2, 8px); }
+.amount { font-variant-numeric: tabular-nums lining-nums; font-weight: 600; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+.capitalize { text-transform: none; }
+.emptyCell { padding: var(--space-6, 24px) !important; color: var(--ink-faint, #5f6d84) !important; text-align: center !important; }
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-4, 16px);
+  row-gap: var(--space-5, 20px);
+}
+
+.formSpan { grid-column: 1 / -1; }
+
+.allocation {
+  grid-column: 1 / -1;
+  min-height: 56px;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border: 1px solid var(--line, #dbe3f1);
+  background: var(--surface-subtle, #f8faff);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  font-size: var(--text-sm, .875rem);
+  line-height: var(--leading-snug, 1.35);
+}
+
+.allocation span { color: var(--ink-faint, #5f6d84); }
+.allocation strong { font-size: var(--text-lg, 1.125rem); line-height: var(--leading-tight, 1.2); font-variant-numeric: tabular-nums lining-nums; }
+
+.profileFooter {
+  padding: var(--space-4, 16px) var(--space-5, 20px);
+  border-top: 1px solid var(--line-soft, #e5eaf3);
+  background: var(--surface-subtle, #f8faff);
+  color: var(--ink-faint, #5f6d84);
+  font-size: var(--text-xs, .8125rem);
+  line-height: var(--leading-normal, 1.5);
+}
+
+.utilizationTrack {
+  height: 8px;
+  margin: var(--space-3, 12px) var(--space-5, 20px) var(--space-5, 20px);
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--line-soft, #e5eaf3);
+}
+
+.utilizationTrack span { display: block; height: 100%; background: var(--brand, #2563eb); border-radius: inherit; }
+.utilizationTrack span[data-warning="true"] { background: #be8124; }
+.utilizationTrack span[data-over="true"] { background: #bd4e4e; }
+
+@media (max-width: 1120px) {
+  .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overviewGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .formGrid { grid-template-columns: 1fr; }
+  .formSpan { grid-column: 1; }
+}
+
+@media (max-width: 520px) {
+  .summaryRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-1, 4px);
+  }
+
+  .summaryRow strong { text-align: left; }
+}
+
+@media (max-width: 360px) {
+  .metricGrid { grid-template-columns: 1fr; }
+}
