@@ -15,3 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Persistent local authentication, first-user registration policy, user-scoped data access, and security-oriented request validation.
 - Responsive desktop and mobile interface with date-range controls and accessible keyboard workflows.
 - Docker image, database migrations, project documentation, unit and browser tests, and continuous integration.
+- Screenshot-led project overview using an isolated synthetic workspace.
+
+### Changed
+
+- Updated compatible direct dependencies, including `better-sqlite3` 13, `lucide-react` 1, and TypeScript 6; retained Node 24 LTS and ESLint 9 to match the supported runtime and lint toolchain.
+- Bound Docker quick-start examples to the host loopback interface by default.

@@ -40,10 +40,10 @@
     "db:seed": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
-    "better-sqlite3": "12.6.2",
+    "better-sqlite3": "13.0.2",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.28.0",
     "next": "16.2.12",
     "papaparse": "^5.5.3",
     "react": "^19.2.0",
@@ -52,16 +52,16 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.0.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.13.3",
     "@types/papaparse": "^5.3.16",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.31.9",
-    "eslint": "^9.39.0",
+    "eslint": "^9.39.5",
     "eslint-config-next": "16.2.12",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0",
+    "typescript": "^6.0.3",
     "vitest": "^4.0.0"
   },
   "overrides": {
@@ -77,7 +77,7 @@
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
-    "better-sqlite3@12.6.2": true,
+    "better-sqlite3@13.0.2": true,
     "sharp@0.35.3": true,
     "unrs-resolver@1.12.2": true
   }

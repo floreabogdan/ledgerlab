@@ -20,7 +20,7 @@ Published images are available from GitHub Container Registry:
 ```bash
 docker pull ghcr.io/floreabogdan/ledgerlab:latest
 docker volume create ledgerlab-data
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
 Open <http://localhost:3000>. The container runs as an unprivileged user and stores all mutable application data under `/app/data`:
@@ -31,6 +31,8 @@ Open <http://localhost:3000>. The container runs as an unprivileged user and sto
 
 The `ledgerlab-data` named volume survives container replacement and image rebuilds. Inspect it with `docker volume inspect ledgerlab-data`. Never remove the volume as part of a routine deployment or upgrade.
 
+The example publishes the port only on the host loopback interface. Keep that default for local use. A remote deployment should put an HTTPS reverse proxy in front of LedgerLab or deliberately change the bind address only after the first account has claimed the installation.
+
 For repeatable production deployments, pin a released version tag or image digest after evaluating it. The `latest` tag is convenient for initial setup, but it changes when a new stable image is published.
 
 ### Build from source
@@ -40,7 +42,7 @@ The repository contains a multi-stage production `Dockerfile`:
 ```bash
 docker build --tag ledgerlab:local .
 docker volume create ledgerlab-data
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ledgerlab:local
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ledgerlab:local
 ```
 
 ### Change the port or registration policy
@@ -48,7 +50,7 @@ docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:300
 The first number in `--publish` is the host port. This example exposes LedgerLab at <http://localhost:8080>:
 
 ```bash
-docker run --detach --name ledgerlab --restart unless-stopped --publish 8080:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:8080:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
 Use `REGISTRATION_MODE=closed` to disable every new registration. Use `REGISTRATION_MODE=open` only for an intentionally shared installation where anyone who can reach the registration page may create an account. See [Configuration](configuration.md#registration-policy).
@@ -99,7 +101,7 @@ For the `latest` image, the container replacement is:
 docker pull ghcr.io/floreabogdan/ledgerlab:latest
 docker stop ledgerlab
 docker rm ledgerlab
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
 Migrations move forward. Rolling back application code may require restoring the matching pre-upgrade database backup.

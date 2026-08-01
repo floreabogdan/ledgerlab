@@ -17,7 +17,7 @@ Pull the published image, create a persistent volume, and start one container:
 ```bash
 docker pull ghcr.io/floreabogdan/ledgerlab:latest
 docker volume create ledgerlab-data
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
 Open <http://localhost:3000>. You can inspect startup output with:
@@ -25,6 +25,8 @@ Open <http://localhost:3000>. You can inspect startup output with:
 ```bash
 docker logs ledgerlab
 ```
+
+The command binds LedgerLab to the host's loopback interface, so it is reachable locally without being exposed to the surrounding network. Read [Deployment](deployment.md) before changing that bind address or adding a reverse proxy.
 
 The `ledgerlab-data` volume is mounted at `/app/data`. It contains the SQLite database, uploaded receipt files, and SQLite sidecar files. Database migrations run when the application opens the database.
 
@@ -43,7 +45,7 @@ If you prefer to build from a source checkout, use the same persistent volume wi
 ```bash
 docker build --tag ledgerlab:local .
 docker volume create ledgerlab-data
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ledgerlab:local
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ledgerlab:local
 ```
 
 ## Create your workspace
@@ -77,7 +79,7 @@ Before updating or moving LedgerLab, create a full backup from **Data & backups*
 docker pull ghcr.io/floreabogdan/ledgerlab:latest
 docker stop ledgerlab
 docker rm ledgerlab
-docker run --detach --name ledgerlab --restart unless-stopped --publish 3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
+docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
 Read [Deployment](deployment.md) before placing LedgerLab behind a reverse proxy or exposing it outside a trusted network. Read [Backups and recovery](backups-and-recovery.md) before moving the volume or restoring data.
