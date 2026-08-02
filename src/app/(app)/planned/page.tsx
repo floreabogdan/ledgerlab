@@ -15,7 +15,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDateRange } from "@/components/date-range-context";
 import { CurrencyCombobox } from "@/components/ui/currency-combobox";
+import { useTranslations, useTranslator } from "@/i18n/client";
 import { DEFAULT_CURRENCY, isSupportedCurrency } from "@/lib/currencies";
+import { parseApiError, translateApiError } from "@/lib/api-error";
 import { currencyMinorUnitDigits } from "@/lib/domain/currency";
 import { monthBounds } from "@/lib/domain/dates";
 import {
@@ -63,6 +65,7 @@ import ui from "../_components/pages.module.css";
 import styles from "./planned.module.css";
 
 type Row = Record<string, unknown>;
+type Translate = ReturnType<typeof useTranslations>;
 type ViewMode = "list" | "calendar";
 type PaymentFilter = "upcoming" | "overdue" | "paid" | "all";
 type LiabilitySource = "credit_card_statement" | "loan_schedule";
@@ -84,8 +87,16 @@ function formatRate(value: number, rateScale = FX_RATE_SCALE) {
     .format(value / rateScale);
 }
 
-function paymentName(row: Row) {
-  return stringFrom(row.name ?? row.title ?? row.merchantName ?? row.merchant, "Planned payment");
+function paymentName(row: Row, t: Translate) {
+  const source = liabilitySource(row);
+  const account = stringFrom(row.liabilityAccountName, t("planning.shared.fallback.account"));
+  if (source === "credit_card_statement") {
+    return t("planning.plannedPayments.type.cardStatementName", { account });
+  }
+  if (source === "loan_schedule") {
+    return t("planning.plannedPayments.type.loanInstalmentName", { account });
+  }
+  return stringFrom(row.name ?? row.title ?? row.merchantName ?? row.merchant, t("planning.shared.fallback.plannedPayment"));
 }
 
 function statusTone(status: string) {
@@ -200,14 +211,39 @@ function nativePrincipalMinor(row: Row) {
   return Math.max(0, optionalNumber(row, "nativePrincipalAmountMinor", "principalAmountMinor") ?? 0);
 }
 
-function obligationType(row: Row) {
+function obligationType(row: Row, t: Translate) {
   const source = liabilitySource(row);
-  if (source === "credit_card_statement") return "Card statement";
-  if (source === "loan_schedule") return "Loan instalment";
-  return stringFrom(row.direction, "expense") === "income" ? "Planned income" : "Planned expense";
+  if (source === "credit_card_statement") return t("planning.plannedPayments.type.cardStatement");
+  if (source === "loan_schedule") return t("planning.plannedPayments.type.loanInstalment");
+  return stringFrom(row.direction, "expense") === "income"
+    ? t("planning.plannedPayments.type.plannedIncome")
+    : t("planning.plannedPayments.type.plannedExpense");
+}
+
+function paymentStatusLabel(status: string, t: Translate) {
+  if (status === "planned") return t("planning.plannedPayments.status.planned");
+  if (status === "scheduled") return t("planning.plannedPayments.status.scheduled");
+  if (status === "overdue") return t("planning.plannedPayments.status.overdue");
+  if (status === "paid") return t("planning.plannedPayments.status.paid");
+  if (status === "cancelled") return t("planning.plannedPayments.status.cancelled");
+  if (status === "skipped") return t("planning.plannedPayments.status.skipped");
+  return t("planning.plannedPayments.status.unknown");
+}
+
+function paymentRecurrenceLabel(row: Row, t: Translate) {
+  if (liabilitySource(row)) return t("planning.plannedPayments.recurrence.debtSchedule");
+  if (!(row.ruleId ?? row.recurrenceRuleId)) return t("planning.plannedPayments.recurrence.oneTime");
+  const interval = Math.max(1, numberFrom(row.interval, 1));
+  const frequency = stringFrom(row.frequency);
+  if (frequency === "weekly") return t("planning.plannedPayments.recurrence.weekly", { interval });
+  if (frequency === "monthly") return t("planning.plannedPayments.recurrence.monthly", { interval });
+  if (frequency === "yearly") return t("planning.plannedPayments.recurrence.yearly", { interval });
+  return t("planning.plannedPayments.recurrence.recurring");
 }
 
 export default function PlannedPaymentsPage() {
+  const t = useTranslations();
+  const translator = useTranslator();
   const router = useRouter();
   const { range, label: rangeLabel, locale, setRange, timeZone } = useDateRange();
   const plannedUrl = useMemo(() => {
@@ -262,7 +298,7 @@ export default function PlannedPaymentsPage() {
   const filtered = (filter === "all" ? occurrences : filter === "overdue" ? overdue : filter === "paid" ? paid : upcoming)
     .filter((item) => {
       const row = readRecord(item);
-      return !search || [paymentName(row), obligationType(row), row.categoryName, row.category, row.accountName, row.account, row.notes, row.note].filter(Boolean).join(" ").toLocaleLowerCase(locale).includes(search.toLocaleLowerCase(locale));
+      return !search || [paymentName(row, t), obligationType(row, t), row.categoryName, row.category, row.accountName, row.account, row.notes, row.note].filter(Boolean).join(" ").toLocaleLowerCase(locale).includes(search.toLocaleLowerCase(locale));
     })
     .sort((a, b) => normalizeDate(readRecord(a).dueDate).localeCompare(normalizeDate(readRecord(b).dueDate)));
 
@@ -298,66 +334,66 @@ export default function PlannedPaymentsPage() {
       await requestJson(`/api/planned/${encodeURIComponent(String(row.id))}/${action}`, {
         method: "POST",
         body: JSON.stringify({ occurrenceId: row.id }),
-      });
+      }, translator);
       if (action === "cancel") setCancelling(null);
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : `Could not ${action} this occurrence`);
+      setActionError(caught instanceof Error ? caught.message : t("planning.plannedPayments.feedback.actionFailed", { action }));
     }
   }
 
   return (
     <Page>
       <ViewHeader
-        eyebrow="Future money"
-        title="Planned payments"
-        description="Expected obligations live here before actual activity exists. Debt payments show their cash impact separately from the portion that counts as spending."
-        actions={<AddButton onClick={() => setCreateOpen(true)}>Plan payment</AddButton>}
+        eyebrow={t("planning.plannedPayments.header.eyebrow")}
+        title={t("planning.plannedPayments.header.title")}
+        description={t("planning.plannedPayments.header.description")}
+        actions={<AddButton onClick={() => setCreateOpen(true)}>{t("planning.plannedPayments.actions.planPayment")}</AddButton>}
       />
 
       <div className={ui.metricGrid}>
-        <Metric label="Cash payments due" value={cashDueTotal === null ? "—" : formatMoney(cashDueTotal, currency)} detail={cashDueTotal === null ? "Reporting conversion unavailable" : `${rangeLabel} · ${currency} reporting value`} tone="accent" info="Remaining cash expected to leave an account, converted to profile currency by due date. Native planned amounts remain unchanged." />
-        <Metric label="Counts as spending" value={spendingDueTotal === null ? "—" : formatMoney(spendingDueTotal, currency)} detail={spendingDueTotal === null ? "Reporting conversion unavailable" : `Planned expense impact · ${currency}`} tone="warning" info="Expected expense impact in profile currency. Credit-card statements and loan principal do not count as new spending." />
-        <Metric label="Overdue" value={overdueTotal === null ? "—" : formatMoney(overdueTotal, currency)} detail={overdueTotal === null ? "Reporting conversion unavailable" : `${overdue.length} occurrence${overdue.length === 1 ? "" : "s"} · ${currency}`} tone={overdue.length ? "negative" : "default"} info="Unpaid remainder on overdue occurrences, expressed in profile currency without changing native denominations." />
-        <Metric label="Paid occurrences" value={paid.length} detail="Linked to actual transactions" tone="positive" />
+        <Metric label={t("planning.plannedPayments.metrics.cashDue.label")} value={cashDueTotal === null ? t("planning.shared.labels.notAvailable") : formatMoney(cashDueTotal, currency)} detail={cashDueTotal === null ? t("planning.plannedPayments.metrics.conversionUnavailable") : t("planning.plannedPayments.metrics.cashDue.rangeDetail", { range: rangeLabel, currency })} tone="accent" info={t("planning.plannedPayments.metrics.cashDue.info")} />
+        <Metric label={t("planning.plannedPayments.metrics.spending.label")} value={spendingDueTotal === null ? t("planning.shared.labels.notAvailable") : formatMoney(spendingDueTotal, currency)} detail={spendingDueTotal === null ? t("planning.plannedPayments.metrics.conversionUnavailable") : t("planning.plannedPayments.metrics.spending.detail", { currency })} tone="warning" info={t("planning.plannedPayments.metrics.spending.info")} />
+        <Metric label={t("planning.plannedPayments.metrics.overdue.label")} value={overdueTotal === null ? t("planning.shared.labels.notAvailable") : formatMoney(overdueTotal, currency)} detail={overdueTotal === null ? t("planning.plannedPayments.metrics.conversionUnavailable") : t("planning.plannedPayments.metrics.overdue.detail", { count: overdue.length, currency })} tone={overdue.length ? "negative" : "default"} info={t("planning.plannedPayments.metrics.overdue.info")} />
+        <Metric label={t("planning.plannedPayments.metrics.paid.label")} value={paid.length} detail={t("planning.plannedPayments.metrics.paid.detail")} tone="positive" />
       </div>
 
       <Section
-        title="Obligations schedule"
-        description={`Due in ${rangeLabel}; planned, pending and actual values are labelled separately`}
+        title={t("planning.plannedPayments.schedule.title")}
+        description={t("planning.plannedPayments.schedule.description", { range: rangeLabel })}
         action={
           <div className={ui.toolbarGroup}>
-            <Button variant={view === "list" ? "secondary" : "ghost"} icon={<List size={15} />} onClick={() => setView("list")}>List</Button>
-            <Button variant={view === "calendar" ? "secondary" : "ghost"} icon={<CalendarDays size={15} />} onClick={() => setView("calendar")}>Calendar</Button>
+            <Button variant={view === "list" ? "secondary" : "ghost"} icon={<List size={15} />} onClick={() => setView("list")}>{t("planning.plannedPayments.actions.list")}</Button>
+            <Button variant={view === "calendar" ? "secondary" : "ghost"} icon={<CalendarDays size={15} />} onClick={() => setView("calendar")}>{t("planning.plannedPayments.actions.calendar")}</Button>
           </div>
         }
       >
         <Tabs
           id="payment-status"
           panelId="payment-status-panel"
-          label="Payment status"
+          label={t("planning.plannedPayments.schedule.tabLabel")}
           value={filter}
           onChange={setFilter}
           items={[
-            { value: "upcoming", label: "Upcoming", count: upcoming.length },
-            { value: "overdue", label: "Overdue", count: overdue.length },
-            { value: "paid", label: "Paid", count: paid.length },
-            { value: "all", label: "All", count: occurrences.length },
+            { value: "upcoming", label: t("planning.plannedPayments.schedule.upcoming"), count: upcoming.length },
+            { value: "overdue", label: t("planning.plannedPayments.schedule.overdue"), count: overdue.length },
+            { value: "paid", label: t("planning.plannedPayments.schedule.paid"), count: paid.length },
+            { value: "all", label: t("planning.plannedPayments.schedule.all"), count: occurrences.length },
           ]}
         />
         <div id="payment-status-panel" role="tabpanel" aria-labelledby={`payment-status-${filter}-tab`}>
           <div className={`${ui.toolbar} ${ui.sectionToolbar}`}>
-            <SearchField value={search} onChange={setSearch} placeholder="Search planned payments…" />
+            <SearchField value={search} onChange={setSearch} placeholder={t("planning.plannedPayments.schedule.searchPlaceholder")} />
             <div className={ui.statusSummary}>
-              <span><i className={ui.statusPlanned} /> Planned</span>
-              <span><i className={ui.statusScheduled} /> Scheduled / pending</span>
-              <span><i className={ui.statusPaid} /> Actual / paid</span>
+              <span><i className={ui.statusPlanned} /> {t("planning.plannedPayments.schedule.legendPlanned")}</span>
+              <span><i className={ui.statusScheduled} /> {t("planning.plannedPayments.schedule.legendScheduled")}</span>
+              <span><i className={ui.statusPaid} /> {t("planning.plannedPayments.schedule.legendPaid")}</span>
             </div>
           </div>
           <FormMessage error={actionError} />
           {reportingTotalsUnavailable ? (
             <div className={`${ui.inlineNotice} ${ui.inlineNoticeWarning} ${styles.reportingNotice}`} role="status">
-              Some obligations use a different native currency, but this response does not include their reporting-currency equivalents. Native amounts remain visible; aggregate totals are withheld rather than adding unlike currencies.
+              {t("planning.plannedPayments.schedule.reportingUnavailable")}
             </div>
           ) : null}
 
@@ -366,9 +402,9 @@ export default function PlannedPaymentsPage() {
             error={error}
             onRetry={reload}
             empty={!occurrences.length}
-            emptyTitle="No future payments planned"
-            emptyDescription="Add a one-time or repeating obligation so it appears in the selected range before any transaction exists."
-            action={<AddButton onClick={() => setCreateOpen(true)}>Plan a payment</AddButton>}
+            emptyTitle={t("planning.plannedPayments.schedule.emptyTitle")}
+            emptyDescription={t("planning.plannedPayments.schedule.emptyDescription")}
+            action={<AddButton onClick={() => setCreateOpen(true)}>{t("planning.plannedPayments.actions.planAPayment")}</AddButton>}
           >
             {view === "list" ? (
               <PaymentList rows={filtered} accounts={accounts} reportingCurrency={currency} onPay={openPayment} onAction={occurrenceAction} onCancel={setCancelling} />
@@ -385,11 +421,11 @@ export default function PlannedPaymentsPage() {
         <Modal
           open
           onClose={() => { setCancelling(null); setActionError(null); }}
-          title="Cancel this occurrence?"
-          description={`${paymentName(cancelling)} · due ${formatDate(cancelling.dueDate)}`}
-          footer={<><Button variant="ghost" onClick={() => setCancelling(null)}>Keep occurrence</Button><Button variant="danger" onClick={() => void occurrenceAction(cancelling, "cancel")}>Cancel occurrence</Button></>}
+          title={t("planning.plannedPayments.cancel.title")}
+          description={t("planning.plannedPayments.cancel.description", { name: paymentName(cancelling, t), date: formatDate(cancelling.dueDate) })}
+          footer={<><Button variant="ghost" onClick={() => setCancelling(null)}>{t("planning.plannedPayments.actions.keepOccurrence")}</Button><Button variant="danger" onClick={() => void occurrenceAction(cancelling, "cancel")}>{t("planning.plannedPayments.actions.cancelOccurrence")}</Button></>}
         >
-          <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><Ban size={16} />Cancellation removes this occurrence from forecasts without changing the recurring rule or any other occurrence. You can restore it later.</div>
+          <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><Ban size={16} />{t("planning.plannedPayments.cancel.notice")}</div>
           <FormMessage error={actionError} />
         </Modal>
       ) : null}
@@ -412,26 +448,28 @@ function MoneyStack({
   detail: string;
   tone?: string;
 }) {
-  if (!nativeAmount) return <span className={styles.moneyStack}><strong className={ui.muted}>—</strong><small>{detail}</small></span>;
+  const t = useTranslations();
+  if (!nativeAmount) return <span className={styles.moneyStack}><strong className={ui.muted}>{t("planning.shared.labels.notAvailable")}</strong><small>{detail}</small></span>;
   const showEquivalent = denomination !== reportingCurrency || reportingAmount !== nativeAmount;
   return (
     <span className={styles.moneyStack}>
       <strong className={tone}>{formatMoney(nativeAmount, denomination)}</strong>
-      <small>{detail} · {denomination}</small>
+      <small>{t("planning.plannedPayments.money.nativeDetail", { detail, currency: denomination })}</small>
       {showEquivalent ? (
         reportingAmount === null
-          ? <small className={styles.reportingUnavailable}>Reporting value unavailable</small>
-          : <small className={styles.reportingEquivalent}>≈ {formatMoney(reportingAmount, reportingCurrency)} reporting</small>
+          ? <small className={styles.reportingUnavailable}>{t("planning.plannedPayments.money.reportingUnavailable")}</small>
+          : <small className={styles.reportingEquivalent}>{t("planning.plannedPayments.money.reportingEquivalent", { amount: formatMoney(reportingAmount, reportingCurrency) })}</small>
       ) : null}
     </span>
   );
 }
 
 function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCancel }: { rows: Row[]; accounts: Row[]; reportingCurrency: string; onPay: (row: Row) => void; onAction: (row: Row, action: "skip" | "cancel" | "undo") => Promise<void>; onCancel: (row: Row) => void }) {
-  if (!rows.length) return <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><Clock3 size={16} />No occurrences match this view.</div>;
+  const t = useTranslations();
+  if (!rows.length) return <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><Clock3 size={16} />{t("planning.plannedPayments.table.empty")}</div>;
   return (
-    <ResponsiveTable label="Planned payment occurrences">
-      <thead><tr><th>Due</th><th>Payment</th><th>Type / category</th><th>Recurrence</th><th>Status</th><th>Cash due</th><th>Counts as spending</th><th>Applied / actual</th><th>Actions</th></tr></thead>
+    <ResponsiveTable label={t("planning.plannedPayments.table.label")}>
+      <thead><tr><th>{t("planning.plannedPayments.table.due")}</th><th>{t("planning.plannedPayments.table.payment")}</th><th>{t("planning.plannedPayments.table.typeCategory")}</th><th>{t("planning.plannedPayments.table.recurrence")}</th><th>{t("planning.plannedPayments.table.status")}</th><th>{t("planning.plannedPayments.table.cashDue")}</th><th>{t("planning.plannedPayments.table.spending")}</th><th>{t("planning.plannedPayments.table.appliedActual")}</th><th>{t("planning.plannedPayments.table.actions")}</th></tr></thead>
       <tbody>
         {rows.map((item, index) => {
           const row = readRecord(item);
@@ -447,22 +485,22 @@ function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCan
           const canPay = ["planned", "scheduled", "overdue"].includes(status);
           return (
             <tr key={stringFrom(row.id, String(index))}>
-              <td className={ui.nowrap}><strong>{formatDate(row.dueDate, { day: "2-digit", month: "short", year: "2-digit" })}</strong>{normalizeDate(row.dueDate) < isoToday() && status !== "paid" ? <small className={ui.negative}>Past due</small> : null}</td>
-              <td className={ui.paymentName}><span className={ui.tablePrimary}>{paymentName(row)}</span><span className={ui.tableSecondary}>{stringFrom(row.notes ?? row.note)}</span></td>
-              <td><Pill tone={source ? "info" : "neutral"}>{obligationType(row)}</Pill><small>{source === "credit_card_statement" ? "Payment is a transfer" : source === "loan_schedule" ? "Interest and fees are expenses" : stringFrom(row.categoryName ?? row.category, "Uncategorised")}</small></td>
-              <td>{source ? "Debt schedule" : stringFrom(row.recurrenceLabel ?? row.frequency, row.ruleId ?? row.recurrenceRuleId ? "Recurring" : "One-time")}{!source && (row.ruleId ?? row.recurrenceRuleId) ? <small>Occurrence only</small> : row.isEstimate ? <small>Current-rate estimate</small> : null}</td>
-              <td><Pill tone={statusTone(status)}>{status}</Pill>{paid > 0 && status !== "paid" ? <small>{formatMoney(cashDue, denomination)} remains</small> : null}</td>
-              <td className={ui.amount}><MoneyStack nativeAmount={cashDue} nativeCurrency={denomination} reportingAmount={reportingCashDue} reportingCurrency={reportingCurrency} detail={cashDue ? "native cash projection" : "settled"} tone={cashDue ? ui.warning : ui.muted} /></td>
-              <td className={ui.amount}><MoneyStack nativeAmount={spendingDue} nativeCurrency={denomination} reportingAmount={reportingSpendingDue} reportingCurrency={reportingCurrency} detail={source === "credit_card_statement" ? "no new spending" : source === "loan_schedule" ? `${formatMoney(nativePrincipalMinor(row), denomination)} principal excluded` : spendingDue ? "native planned expense" : "not an expense"} tone={spendingDue ? ui.negative : ui.muted} /></td>
-              <td className={ui.amount}><MoneyStack nativeAmount={paid} nativeCurrency={denomination} reportingAmount={reportingPaid} reportingCurrency={reportingCurrency} detail={paid ? "applied to this plan" : "not posted"} tone={paid ? ui.positive : ui.muted} /></td>
+              <td className={ui.nowrap}><strong>{formatDate(row.dueDate, { day: "2-digit", month: "short", year: "2-digit" })}</strong>{normalizeDate(row.dueDate) < isoToday() && status !== "paid" ? <small className={ui.negative}>{t("planning.plannedPayments.table.pastDue")}</small> : null}</td>
+              <td className={ui.paymentName}><span className={ui.tablePrimary}>{paymentName(row, t)}</span><span className={ui.tableSecondary}>{stringFrom(row.notes ?? row.note)}</span></td>
+              <td><Pill tone={source ? "info" : "neutral"}>{obligationType(row, t)}</Pill><small>{source === "credit_card_statement" ? t("planning.plannedPayments.table.cardTransfer") : source === "loan_schedule" ? t("planning.plannedPayments.table.loanExpense") : stringFrom(row.categoryName ?? row.category, t("planning.shared.labels.uncategorised"))}</small></td>
+              <td>{paymentRecurrenceLabel(row, t)}{!source && (row.ruleId ?? row.recurrenceRuleId) ? <small>{t("planning.plannedPayments.recurrence.occurrenceOnly")}</small> : row.isEstimate ? <small>{t("planning.plannedPayments.recurrence.currentRateEstimate")}</small> : null}</td>
+              <td><Pill tone={statusTone(status)}>{paymentStatusLabel(status, t)}</Pill>{paid > 0 && status !== "paid" ? <small>{t("planning.plannedPayments.table.amountRemains", { amount: formatMoney(cashDue, denomination) })}</small> : null}</td>
+              <td className={ui.amount}><MoneyStack nativeAmount={cashDue} nativeCurrency={denomination} reportingAmount={reportingCashDue} reportingCurrency={reportingCurrency} detail={cashDue ? t("planning.plannedPayments.money.nativeCashProjection") : t("planning.plannedPayments.money.settled")} tone={cashDue ? ui.warning : ui.muted} /></td>
+              <td className={ui.amount}><MoneyStack nativeAmount={spendingDue} nativeCurrency={denomination} reportingAmount={reportingSpendingDue} reportingCurrency={reportingCurrency} detail={source === "credit_card_statement" ? t("planning.plannedPayments.money.noNewSpending") : source === "loan_schedule" ? t("planning.plannedPayments.money.principalExcluded", { amount: formatMoney(nativePrincipalMinor(row), denomination) }) : spendingDue ? t("planning.plannedPayments.money.nativePlannedExpense") : t("planning.plannedPayments.money.notExpense")} tone={spendingDue ? ui.negative : ui.muted} /></td>
+              <td className={ui.amount}><MoneyStack nativeAmount={paid} nativeCurrency={denomination} reportingAmount={reportingPaid} reportingCurrency={reportingCurrency} detail={paid ? t("planning.plannedPayments.money.appliedToPlan") : t("planning.plannedPayments.money.notPosted")} tone={paid ? ui.positive : ui.muted} /></td>
               <td>
                 <div className={ui.paymentActions}>
-                  {source ? <Button variant="secondary" onClick={() => onPay(row)}>{canPay ? "Record payment" : "View account"}</Button> : null}
-                  {!source && canPay ? <Button variant="secondary" onClick={() => onPay(row)}>{paid ? "Pay remainder" : "Mark paid"}</Button> : null}
-                  {!source && canPay ? <IconButton label="Skip this cycle without paying" onClick={() => void onAction(row, "skip")}><SkipForward size={15} /></IconButton> : null}
-                  {!source && canPay && !paid ? <IconButton label="Cancel a withdrawn obligation" onClick={() => onCancel(row)}><Ban size={15} /></IconButton> : null}
-                  {!source && (status === "paid" || paid > 0) ? <IconButton label="Undo linked payment" onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
-                  {!source && !paid && ["skipped", "cancelled"].includes(status) ? <IconButton label="Restore this occurrence" onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
+                  {source ? <Button variant="secondary" onClick={() => onPay(row)}>{canPay ? t("planning.plannedPayments.actions.recordPayment") : t("planning.plannedPayments.actions.viewAccount")}</Button> : null}
+                  {!source && canPay ? <Button variant="secondary" onClick={() => onPay(row)}>{paid ? t("planning.plannedPayments.actions.payRemainder") : t("planning.plannedPayments.actions.markPaid")}</Button> : null}
+                  {!source && canPay ? <IconButton label={t("planning.plannedPayments.actions.skipCycle")} onClick={() => void onAction(row, "skip")}><SkipForward size={15} /></IconButton> : null}
+                  {!source && canPay && !paid ? <IconButton label={t("planning.plannedPayments.actions.cancelWithdrawn")} onClick={() => onCancel(row)}><Ban size={15} /></IconButton> : null}
+                  {!source && (status === "paid" || paid > 0) ? <IconButton label={t("planning.plannedPayments.actions.undoPayment")} onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
+                  {!source && !paid && ["skipped", "cancelled"].includes(status) ? <IconButton label={t("planning.plannedPayments.actions.restoreOccurrence")} onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
                 </div>
               </td>
             </tr>
@@ -474,6 +512,7 @@ function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCan
 }
 
 function PaymentCalendar({ rows, accounts, reportingCurrency, month, setMonth, onSelect }: { rows: Row[]; accounts: Row[]; reportingCurrency: string; month: string; setMonth: (value: string) => void; onSelect: (row: Row) => void }) {
+  const t = useTranslations();
   const days = useMemo(() => {
     const [year, monthNumber] = month.split("-").map(Number);
     const first = new Date(year, monthNumber - 1, 1, 12);
@@ -490,7 +529,15 @@ function PaymentCalendar({ rows, accounts, reportingCurrency, month, setMonth, o
     <div className={ui.calendarOverflow}>
       <div className={ui.calendarHeader}><MonthStepper value={month} onChange={setMonth} /></div>
       <div className={ui.calendarGrid}>
-        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((day) => <div className={ui.calendarWeekday} key={day}>{day}</div>)}
+        {[
+          t("planning.plannedPayments.calendar.monday"),
+          t("planning.plannedPayments.calendar.tuesday"),
+          t("planning.plannedPayments.calendar.wednesday"),
+          t("planning.plannedPayments.calendar.thursday"),
+          t("planning.plannedPayments.calendar.friday"),
+          t("planning.plannedPayments.calendar.saturday"),
+          t("planning.plannedPayments.calendar.sunday"),
+        ].map((day) => <div className={ui.calendarWeekday} key={day}>{day}</div>)}
         {days.map((day) => {
           const key = dateKey(day);
           const items = rows.filter((item) => normalizeDate(readRecord(item).dueDate) === key);
@@ -505,22 +552,34 @@ function PaymentCalendar({ rows, accounts, reportingCurrency, month, setMonth, o
                   const denomination = nativeCurrency(row, accounts, reportingCurrency);
                   const cashDue = nativeCashDueMinor(row);
                   const reportingCashDue = reportingCashDueMinor(row, accounts, reportingCurrency);
-                  const reportingLabel = reportingCashDue !== null && denomination !== reportingCurrency
-                    ? ` · approximately ${formatMoney(reportingCashDue, reportingCurrency)} reporting`
-                    : "";
+                  const hasReporting = reportingCashDue !== null && denomination !== reportingCurrency;
+                  const source = liabilitySource(row);
+                  const titleValues = {
+                    name: paymentName(row, t),
+                    amount: formatMoney(cashDue, denomination),
+                    reportingAmount: reportingCashDue === null ? "" : formatMoney(reportingCashDue, reportingCurrency),
+                    type: obligationType(row, t),
+                  };
+                  const itemTitle = hasReporting && source
+                    ? t("planning.plannedPayments.calendar.itemTitleReportingLiability", titleValues)
+                    : hasReporting
+                      ? t("planning.plannedPayments.calendar.itemTitleReporting", titleValues)
+                      : source
+                        ? t("planning.plannedPayments.calendar.itemTitleLiability", titleValues)
+                        : t("planning.plannedPayments.calendar.itemTitle", titleValues);
                   return (
                     <button
                       type="button"
                       onClick={() => onSelect(row)}
                       className={`${ui.calendarItem} ${status === "paid" ? ui.calendarItemPaid : status === "overdue" ? ui.calendarItemOverdue : ""}`}
                       key={stringFrom(row.id, String(index))}
-                      title={`${paymentName(row)} — ${formatMoney(cashDue, denomination)} native cash due${reportingLabel}${liabilitySource(row) ? ` · ${obligationType(row)}` : ""}`}
+                      title={itemTitle}
                     >
-                      <span>{paymentName(row)}</span><strong>{formatMoney(cashDue, denomination)}</strong>
+                      <span>{paymentName(row, t)}</span><strong>{formatMoney(cashDue, denomination)}</strong>
                     </button>
                   );
                 })}
-                {items.length > 4 ? <small>+{items.length - 4} more</small> : null}
+                {items.length > 4 ? <small>{t("planning.plannedPayments.calendar.more", { count: items.length - 4 })}</small> : null}
               </div>
             </div>
           );
@@ -531,6 +590,8 @@ function PaymentCalendar({ rows, accounts, reportingCurrency, month, setMonth, o
 }
 
 function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, accounts, categories }: { open: boolean; onClose: () => void; onCreated: () => Promise<void>; reportingCurrency: string; timeZone: string; accounts: Row[]; categories: Row[] }) {
+  const t = useTranslations();
+  const translator = useTranslator();
   const [name, setName] = useState("");
   const [direction, setDirection] = useState("expense");
   const [expectedAmount, setExpectedAmount] = useState("");
@@ -551,10 +612,10 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
 
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
     const expectedAmountMinor = moneyInputToMinor(expectedAmount, normalizedPlannedCurrency);
-    if (!name.trim()) throw new Error("Enter a payment name.");
-    if (!plannedCurrencyValid) throw new Error("Choose a supported ISO 4217 currency.");
-    if (expectedAmountMinor === null || expectedAmountMinor <= 0) throw new Error("Expected amount must be greater than zero.");
-    if (recurring && (!Number.isInteger(Number(interval)) || Number(interval) < 1)) throw new Error("Recurrence interval must be a positive whole number.");
+    if (!name.trim()) throw new Error(t("planning.plannedPayments.form.paymentNameError"));
+    if (!plannedCurrencyValid) throw new Error(t("planning.plannedPayments.form.currencyError"));
+    if (expectedAmountMinor === null || expectedAmountMinor <= 0) throw new Error(t("planning.plannedPayments.form.positiveAmountError"));
+    if (recurring && (!Number.isInteger(Number(interval)) || Number(interval) < 1)) throw new Error(t("planning.plannedPayments.form.intervalError"));
     await requestJson("/api/planned", {
       method: "POST",
       body: JSON.stringify({
@@ -572,7 +633,7 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
         recurrenceInterval: recurring ? Number(interval) : null,
         recurrenceEndDate: recurring ? endDate || null : null,
       }),
-    });
+    }, translator);
     setName(""); setExpectedAmount(""); setNotes(""); setRecurring(false);
     onClose();
     await onCreated();
@@ -582,17 +643,17 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
     <Modal
       open={open}
       onClose={() => { setSubmitError(null); onClose(); }}
-      title="Plan a payment"
-      description="Create an expected payment without changing an actual balance."
+      title={t("planning.plannedPayments.form.title")}
+      description={t("planning.plannedPayments.form.description")}
       wide
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Planning…" : "Create planned payment"}</Button></>}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("planning.plannedPayments.form.cancel")}</Button><Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("planning.plannedPayments.form.planning") : t("planning.plannedPayments.form.create")}</Button></>}
     >
       <form onSubmit={(event) => void submit(event)}>
         <div className={ui.formGrid}>
-          <Field label="Payment name" className={ui.formSpan}><Input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Electricity bill" maxLength={120} /></Field>
-          <Field label="Direction"><Select value={direction} onValueChange={(value) => setDirection(value)}><option value="expense">Expected expense</option><option value="income">Expected income</option></Select></Field>
-          <Field label={`Expected amount (${normalizedPlannedCurrency || reportingCurrency})`} hint="This stays in the planned payment's native currency."><Input inputMode="decimal" value={expectedAmount} onChange={(event) => setExpectedAmount(event.target.value)} placeholder={minorToInput(0, normalizedPlannedCurrency || reportingCurrency)} /></Field>
-          <Field htmlFor="planned-payment-currency" label="Planned currency" hint={accountId ? `Expected account ledger: ${selectedAccountCurrency}` : `No account selected · defaults to profile currency ${reportingCurrency}`}>
+          <Field label={t("planning.plannedPayments.form.paymentName")} className={ui.formSpan}><Input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={t("planning.plannedPayments.form.paymentNamePlaceholder")} maxLength={120} /></Field>
+          <Field label={t("planning.plannedPayments.form.direction")}><Select value={direction} onValueChange={(value) => setDirection(value)}><option value="expense">{t("planning.plannedPayments.form.expectedExpense")}</option><option value="income">{t("planning.plannedPayments.form.expectedIncome")}</option></Select></Field>
+          <Field label={t("planning.plannedPayments.form.expectedAmount", { currency: normalizedPlannedCurrency || reportingCurrency })} hint={t("planning.plannedPayments.form.expectedAmountHint")}><Input inputMode="decimal" value={expectedAmount} onChange={(event) => setExpectedAmount(event.target.value)} placeholder={minorToInput(0, normalizedPlannedCurrency || reportingCurrency)} /></Field>
+          <Field htmlFor="planned-payment-currency" label={t("planning.plannedPayments.form.plannedCurrency")} hint={accountId ? t("planning.plannedPayments.form.accountCurrencyHint", { currency: selectedAccountCurrency }) : t("planning.plannedPayments.form.profileCurrencyHint", { currency: reportingCurrency })}>
             <CurrencyCombobox
               id="planned-payment-currency"
               value={plannedCurrency}
@@ -603,23 +664,23 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
               invalid={!plannedCurrencyValid}
             />
           </Field>
-          <Field label={recurring ? "First due date" : "Due date"}><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></Field>
-          <Field label="Expected account" hint="Optional until the payment is made"><Select value={accountId} onValueChange={(value) => {
+          <Field label={recurring ? t("planning.plannedPayments.form.firstDueDate") : t("planning.plannedPayments.form.dueDate")}><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></Field>
+          <Field label={t("planning.plannedPayments.form.expectedAccount")} hint={t("planning.plannedPayments.form.expectedAccountHint")}><Select value={accountId} onValueChange={(value) => {
             const next = readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === value));
             const nextCurrency = value ? stringFrom(next.currency, reportingCurrency).toUpperCase() : reportingCurrency;
             setAccountId(value);
             if (currencyFollowsAccount) setPlannedCurrency(nextCurrency);
-          }}><option value="">Decide when paid</option>{accounts.map((item, index) => { const account = readRecord(item); const accountCurrency = stringFrom(account.currency, reportingCurrency).toUpperCase(); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")} · {accountCurrency} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, accountCurrency)}</option>; })}</Select></Field>
-          <Field label="Category"><Select value={categoryId} onValueChange={(value) => setCategoryId(value)}><option value="">Uncategorised</option>{categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, "Category")}</option>; })}</Select></Field>
-          <Field label="Notes" className={ui.formSpan}><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional context" /></Field>
+          }}><option value="">{t("planning.plannedPayments.form.decideWhenPaid")}</option>{accounts.map((item, index) => { const account = readRecord(item); const accountCurrency = stringFrom(account.currency, reportingCurrency).toUpperCase(); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{t("planning.shared.options.accountWithBalance", { name: stringFrom(account.name, t("planning.shared.fallback.account")), currency: accountCurrency, balance: formatMoney(account.balanceMinor ?? account.currentBalanceMinor, accountCurrency) })}</option>; })}</Select></Field>
+          <Field label={t("planning.plannedPayments.form.category")}><Select value={categoryId} onValueChange={(value) => setCategoryId(value)}><option value="">{t("planning.shared.labels.uncategorised")}</option>{categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, t("planning.shared.fallback.category"))}</option>; })}</Select></Field>
+          <Field label={t("planning.plannedPayments.form.notes")} className={ui.formSpan}><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={t("planning.plannedPayments.form.notesPlaceholder")} /></Field>
         </div>
-        <label className={`${ui.inlineNotice} ${ui.recurrenceToggle}`}><input type="checkbox" checked={recurring} onChange={(event) => setRecurring(event.target.checked)} /><span><strong>Repeat this payment</strong><br />Occurrences are generated deterministically and existing dates are never duplicated.</span></label>
+        <label className={`${ui.inlineNotice} ${ui.recurrenceToggle}`}><input type="checkbox" checked={recurring} onChange={(event) => setRecurring(event.target.checked)} /><span><strong>{t("planning.plannedPayments.form.repeatTitle")}</strong><br />{t("planning.plannedPayments.form.repeatDescription")}</span></label>
         {recurring ? (
           <div className={`${ui.formGrid} ${ui.formOffset}`}>
-            <Field label="Frequency"><Select value={frequency} onValueChange={(value) => setFrequency(value)}><option value="weekly">Week</option><option value="monthly">Month</option><option value="yearly">Year</option></Select></Field>
-            <Field label="Every"><Input type="number" min="1" max="99" step="1" value={interval} onChange={(event) => setInterval(event.target.value)} /></Field>
-            <Field label="End date" hint="Optional; leave blank for no end"><Input type="date" min={dueDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} /></Field>
-            <div className={ui.inlineNotice}><ArrowLeftRight size={16} />Month-end dates use deterministic calendar clamping in {timeZone}.</div>
+            <Field label={t("planning.plannedPayments.form.frequency")}><Select value={frequency} onValueChange={(value) => setFrequency(value)}><option value="weekly">{t("planning.plannedPayments.form.week")}</option><option value="monthly">{t("planning.plannedPayments.form.month")}</option><option value="yearly">{t("planning.plannedPayments.form.year")}</option></Select></Field>
+            <Field label={t("planning.plannedPayments.form.every")}><Input type="number" min="1" max="99" step="1" value={interval} onChange={(event) => setInterval(event.target.value)} /></Field>
+            <Field label={t("planning.plannedPayments.form.endDate")} hint={t("planning.plannedPayments.form.endDateHint")}><Input type="date" min={dueDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} /></Field>
+            <div className={ui.inlineNotice}><ArrowLeftRight size={16} />{t("planning.plannedPayments.form.monthEndNotice", { timeZone })}</div>
           </div>
         ) : null}
         <FormMessage error={submitError} />
@@ -630,6 +691,8 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
 }
 
 function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: { occurrence: Row; onClose: () => void; onPaid: () => Promise<void>; reportingCurrency: string; accounts: Row[] }) {
+  const t = useTranslations();
+  const translator = useTranslator();
   const planCurrency = nativeCurrency(occurrence, accounts, reportingCurrency);
   const expected = nativeExpectedMinor(occurrence);
   const alreadyPaid = nativePaidMinor(occurrence);
@@ -651,7 +714,7 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
   const fxInputKeyRef = useRef<string | null>(null);
   const selectedAccount = readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === accountId));
   const accountCurrency = stringFrom(selectedAccount.currency, reportingCurrency).toUpperCase();
-  const accountName = stringFrom(selectedAccount.name, "selected account");
+  const accountName = stringFrom(selectedAccount.name, t("planning.shared.fallback.selectedAccount"));
   const conversionRequired = Boolean(accountId) && planCurrency !== accountCurrency;
   const appliedAmountMinor = moneyInputToMinor(appliedAmount, planCurrency);
   const quoteMatches = Boolean(fxQuote?.fromCurrency === planCurrency && fxQuote?.toCurrency === accountCurrency);
@@ -717,15 +780,16 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
             cache: "no-store",
             signal: controller.signal,
           });
-          const body = readRecord(await response.json().catch(() => null));
-          if (!response.ok) throw new Error(stringFrom(body.error ?? body.message, `Reference rate unavailable (${response.status})`));
+          const responseBody = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(translateApiError(translator, parseApiError(responseBody)));
+          const body = readRecord(responseBody);
           const quote = readRecord(body.quote);
-          if (!Number.isSafeInteger(quote.rateScaled) || numberFrom(quote.rateScaled) <= 0) throw new Error("The reference-rate response was invalid.");
+          if (!Number.isSafeInteger(quote.rateScaled) || numberFrom(quote.rateScaled) <= 0) throw new Error(t("planning.plannedPayments.payment.invalidReference"));
           if (active) setFxQuote(quote as FxQuote);
         } catch (error) {
           if (!active || controller.signal.aborted) return;
           setFxQuote(null);
-          setFxError(error instanceof Error ? error.message : "No reference rate is available.");
+          setFxError(error instanceof Error ? error.message : t("planning.plannedPayments.payment.noReference"));
         } finally {
           if (active) setFxLoading(false);
         }
@@ -735,16 +799,16 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
       active = false;
       controller.abort();
     };
-  }, [accountCurrency, accountId, conversionRequired, paymentDate, planCurrency]);
+  }, [accountCurrency, accountId, conversionRequired, paymentDate, planCurrency, t, translator]);
 
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
-    if (appliedAmountMinor === null || appliedAmountMinor <= 0) throw new Error(`Enter an amount greater than zero in ${planCurrency}.`);
-    if (!accountId) throw new Error("Choose the account used for payment.");
+    if (appliedAmountMinor === null || appliedAmountMinor <= 0) throw new Error(t("planning.plannedPayments.payment.positiveAppliedError", { currency: planCurrency }));
+    if (!accountId) throw new Error(t("planning.plannedPayments.payment.chooseAccountError"));
     if (conversionRequired) {
-      if (rateMode === "reference" && !referenceRateScaled) throw new Error("Wait for the BNR reference rate or enter the exchange rate manually.");
-      if (!activeRateScaled || activeRateScaled <= 0) throw new Error("Enter a positive exchange rate.");
-      if (!accountAmountMinor || accountAmountMinor <= 0) throw new Error(`Enter or calculate a positive account amount in ${accountCurrency}.`);
-      if (!exactAmountReconciles) throw new Error("This exact account amount cannot be represented by the derived eight-decimal exchange rate. Edit the exchange rate instead.");
+      if (rateMode === "reference" && !referenceRateScaled) throw new Error(t("planning.plannedPayments.payment.waitForRateError"));
+      if (!activeRateScaled || activeRateScaled <= 0) throw new Error(t("planning.plannedPayments.payment.positiveRateError"));
+      if (!accountAmountMinor || accountAmountMinor <= 0) throw new Error(t("planning.plannedPayments.payment.positiveAccountAmountError", { currency: accountCurrency }));
+      if (!exactAmountReconciles) throw new Error(t("planning.plannedPayments.payment.exactRateError"));
     }
     const postedAccountAmountMinor = accountAmountMinor ?? appliedAmountMinor;
     const fxRateSource = conversionRequired ? (rateMode === "manual" || useExactAccountAmount ? "manual" : "bnr") : null;
@@ -768,7 +832,7 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
         referenceFxRateScaled: conversionRequired && fxRateSource === "manual" && referenceRateScaled ? referenceRateScaled : null,
         referenceFxRateDate: conversionRequired && fxRateSource === "manual" && referenceRateScaled ? fxQuote?.rateDate : null,
       }),
-    });
+    }, translator);
     onClose();
     await onPaid();
   });
@@ -776,38 +840,40 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
     <Modal
       open
       onClose={() => { setSubmitError(null); onClose(); }}
-      title="Record actual payment"
-      description={`${paymentName(occurrence)} · expected ${formatMoney(expected, planCurrency)} in the plan's native currency`}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={submitting} icon={<CheckCircle2 size={15} />} onClick={() => void submit()}>{submitting ? "Recording…" : partial ? "Record partial payment" : "Mark paid"}</Button></>}
+      title={t("planning.plannedPayments.payment.title")}
+      description={t("planning.plannedPayments.payment.description", { name: paymentName(occurrence, t), amount: formatMoney(expected, planCurrency) })}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("common.actions.cancel")}</Button><Button disabled={submitting} icon={<CheckCircle2 size={15} />} onClick={() => void submit()}>{submitting ? t("planning.plannedPayments.payment.recording") : partial ? t("planning.plannedPayments.payment.recordPartial") : t("planning.plannedPayments.payment.markPaid")}</Button></>}
     >
       <div className={`${ui.summaryList} ${ui.summaryBottom}`}>
-        <div className={ui.summaryRow}><span>Expected amount</span><strong className={ui.warning}>{formatMoney(expected, planCurrency)} <small>native plan</small></strong></div>
-        {alreadyPaid ? <div className={ui.summaryRow}><span>Already applied</span><strong className={ui.positive}>{formatMoney(alreadyPaid, planCurrency)} <small>native plan</small></strong></div> : null}
-        <div className={ui.summaryRow}><span>Remaining</span><strong>{formatMoney(remaining, planCurrency)} <small>{planCurrency}</small></strong></div>
+        <div className={ui.summaryRow}><span>{t("planning.plannedPayments.payment.expectedAmount")}</span><strong className={ui.warning}>{formatMoney(expected, planCurrency)} <small>{t("planning.plannedPayments.payment.nativePlan")}</small></strong></div>
+        {alreadyPaid ? <div className={ui.summaryRow}><span>{t("planning.plannedPayments.payment.alreadyApplied")}</span><strong className={ui.positive}>{formatMoney(alreadyPaid, planCurrency)} <small>{t("planning.plannedPayments.payment.nativePlan")}</small></strong></div> : null}
+        <div className={ui.summaryRow}><span>{t("planning.plannedPayments.payment.remaining")}</span><strong>{formatMoney(remaining, planCurrency)} <small>{planCurrency}</small></strong></div>
       </div>
       <form className={ui.formGrid} onSubmit={(event) => void submit(event)}>
-        <Field label={`Amount applied to plan (${planCurrency})`} hint="Edit if the amount satisfied on the plan differs from the estimate."><Input autoFocus inputMode="decimal" value={appliedAmount} onChange={(event) => setAppliedAmount(event.target.value)} /></Field>
-        <Field label="Payment date"><Input type="date" max={isoToday()} value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></Field>
-        <Field label={stringFrom(occurrence.direction, "expense") === "income" ? "Received into account" : "Paid from account"}><Select value={accountId} onValueChange={(value) => setAccountId(value)}><option value="">Choose account</option>{accounts.map((item, index) => { const account = readRecord(item); const denomination = stringFrom(account.currency, reportingCurrency).toUpperCase(); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")} · {denomination} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, denomination)}</option>; })}</Select></Field>
+        <Field label={t("planning.plannedPayments.payment.appliedAmount", { currency: planCurrency })} hint={t("planning.plannedPayments.payment.appliedAmountHint")}><Input autoFocus inputMode="decimal" value={appliedAmount} onChange={(event) => setAppliedAmount(event.target.value)} /></Field>
+        <Field label={t("planning.plannedPayments.payment.paymentDate")}><Input type="date" max={isoToday()} value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></Field>
+        <Field label={stringFrom(occurrence.direction, "expense") === "income" ? t("planning.plannedPayments.payment.receivedAccount") : t("planning.plannedPayments.payment.paidAccount")}><Select value={accountId} onValueChange={(value) => setAccountId(value)}><option value="">{t("planning.plannedPayments.payment.chooseAccount")}</option>{accounts.map((item, index) => { const account = readRecord(item); const denomination = stringFrom(account.currency, reportingCurrency).toUpperCase(); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{t("planning.shared.options.accountWithBalance", { name: stringFrom(account.name, t("planning.shared.fallback.account")), currency: denomination, balance: formatMoney(account.balanceMinor ?? account.currentBalanceMinor, denomination) })}</option>; })}</Select></Field>
         {conversionRequired ? (
           <div className={`${ui.fxPanel} ${ui.formSpan}`}>
             <div className={ui.fxPanelHeader}>
-              <span><strong>Payment conversion</strong><small>The plan remains in {planCurrency}; the linked actual transaction posts to {accountName} in {accountCurrency}.</small></span>
-              {fxLoading ? <Pill tone="info">Loading BNR rate…</Pill> : fxQuote ? <Pill tone={fxQuote.isFallback ? "warning" : "info"}>BNR reference</Pill> : <Pill tone="warning">Manual rate needed</Pill>}
+              <span><strong>{t("planning.plannedPayments.payment.conversionTitle")}</strong><small>{t("planning.plannedPayments.payment.conversionDescription", { planCurrency, account: accountName, accountCurrency })}</small></span>
+              {fxLoading ? <Pill tone="info">{t("planning.plannedPayments.payment.loadingRate")}</Pill> : fxQuote ? <Pill tone={fxQuote.isFallback ? "warning" : "info"}>{t("planning.plannedPayments.payment.referenceRate")}</Pill> : <Pill tone="warning">{t("planning.plannedPayments.payment.manualRateNeeded")}</Pill>}
             </div>
             {fxQuote ? (
               <div className={ui.fxReference}>
-                <strong>1 {planCurrency} = {formatRate(fxQuote.rateScaled, fxQuote.rateScale)} {accountCurrency}</strong>
-                <span>Effective {formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" })}{fxQuote.isFallback ? ` · previous BNR day (${fxQuote.fallbackDays} day${fxQuote.fallbackDays === 1 ? "" : "s"} earlier)` : ""}</span>
+                <strong>{t("planning.plannedPayments.payment.rateEquation", { fromCurrency: planCurrency, rate: formatRate(fxQuote.rateScaled, fxQuote.rateScale), toCurrency: accountCurrency })}</strong>
+                <span>{fxQuote.isFallback
+                  ? t("planning.plannedPayments.payment.effectiveFallbackRate", { date: formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" }), count: fxQuote.fallbackDays })
+                  : t("planning.plannedPayments.payment.effectiveRate", { date: formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" }) })}</span>
               </div>
-            ) : fxError ? <div className={ui.fxError} role="status">{fxError} Enter a manual exchange rate to continue.</div> : null}
-            {fxQuote?.isStale ? <div className={ui.fxError} role="status">The live refresh failed, so this uses the cached official quote. Compare it with the final account statement.</div> : null}
+            ) : fxError ? <div className={ui.fxError} role="status">{t("planning.plannedPayments.payment.manualAfterError", { error: fxError })}</div> : null}
+            {fxQuote?.isStale ? <div className={ui.fxError} role="status">{t("planning.plannedPayments.payment.staleRate")}</div> : null}
             <div className={ui.fxControls}>
-              <Field label={`Exchange rate (${accountCurrency} per 1 ${planCurrency})`} hint={useExactAccountAmount ? "Derived from both exact amounts." : rateMode === "manual" ? "Manual override; the BNR reference remains recorded when available." : "Official BNR reference for the payment date."}>
-                <Input inputMode="decimal" value={displayedRate} disabled={rateMode === "reference" || useExactAccountAmount} onChange={(event) => { setManualRate(event.target.value); setUseExactAccountAmount(false); }} placeholder={fxLoading ? "Loading…" : "e.g. 4.65"} />
+              <Field label={t("planning.plannedPayments.payment.exchangeRate", { accountCurrency, planCurrency })} hint={useExactAccountAmount ? t("planning.plannedPayments.payment.exactRateHint") : rateMode === "manual" ? t("planning.plannedPayments.payment.manualRateHint") : t("planning.plannedPayments.payment.referenceRateHint")}>
+                <Input inputMode="decimal" value={displayedRate} disabled={rateMode === "reference" || useExactAccountAmount} onChange={(event) => { setManualRate(event.target.value); setUseExactAccountAmount(false); }} placeholder={fxLoading ? t("planning.plannedPayments.payment.loading") : t("planning.plannedPayments.payment.ratePlaceholder")} />
               </Field>
-              <Field label={`Amount posted to ${accountName} (${accountCurrency})`} hint={useExactAccountAmount ? exactAmountReconciles ? "Exact statement amount; the rate is derived." : "This cannot reconcile at eight-decimal precision. Edit the rate instead." : "Calculated with integer minor-unit rounding."}>
-                <Input inputMode="decimal" value={displayedAccountAmount} disabled={!useExactAccountAmount} aria-invalid={useExactAccountAmount && !exactAmountReconciles} onChange={(event) => setExactAccountAmount(event.target.value)} placeholder={fxLoading ? "Calculating…" : minorToInput(0, accountCurrency)} />
+              <Field label={t("planning.plannedPayments.payment.amountPosted", { account: accountName, currency: accountCurrency })} hint={useExactAccountAmount ? exactAmountReconciles ? t("planning.plannedPayments.payment.exactAmountHint") : t("planning.plannedPayments.payment.unreconciledAmountHint") : t("planning.plannedPayments.payment.calculatedAmountHint")}>
+                <Input inputMode="decimal" value={displayedAccountAmount} disabled={!useExactAccountAmount} aria-invalid={useExactAccountAmount && !exactAmountReconciles} onChange={(event) => setExactAccountAmount(event.target.value)} placeholder={fxLoading ? t("planning.plannedPayments.payment.calculating") : minorToInput(0, accountCurrency)} />
               </Field>
             </div>
             <div className={ui.fxOptions}>
@@ -819,18 +885,18 @@ function PayForm({ occurrence, onClose, onPaid, reportingCurrency, accounts }: {
                   setRateMode("reference");
                   setUseExactAccountAmount(false);
                 }
-              }} /> Edit exchange rate manually</label>
+              }} /> {t("planning.plannedPayments.payment.editRate")}</label>
               <label className={`${ui.small} ${ui.inlineCheck}`}><input type="checkbox" checked={useExactAccountAmount} onChange={(event) => {
                 const checked = event.target.checked;
                 setUseExactAccountAmount(checked);
                 setRateMode("manual");
                 if (checked) setExactAccountAmount(calculatedAccountAmountMinor === null ? "" : minorToInput(calculatedAccountAmountMinor, accountCurrency));
                 else if (derivedExactRateScaled) setManualRate(rateScaledToInput(derivedExactRateScaled, rateScale));
-              }} /> Use exact account amount</label>
+              }} /> {t("planning.plannedPayments.payment.useExactAmount")}</label>
             </div>
           </div>
         ) : null}
-        <div className={`${ui.inlineNotice} ${ui.formSpan}`}><WalletCards size={16} />This creates and links a cleared actual transaction. {partial ? "Because the amount is below the remaining estimate, this occurrence stays scheduled." : "The occurrence becomes paid when actual payments meet the expected amount."}</div>
+        <div className={`${ui.inlineNotice} ${ui.formSpan}`}><WalletCards size={16} />{partial ? t("planning.plannedPayments.payment.partialNotice") : t("planning.plannedPayments.payment.paidNotice")}</div>
         <button type="submit" hidden />
       </form>
       <FormMessage error={submitError} />

@@ -17,6 +17,8 @@ import {
   normalizeCurrencyCode,
   type CurrencyCatalogItem,
 } from "@/lib/currencies";
+import { useTranslations } from "@/i18n/client";
+import type { Translator } from "@/i18n/runtime";
 
 export interface CurrencyComboboxProps {
   value: string;
@@ -32,11 +34,15 @@ export interface CurrencyComboboxProps {
   autoFocus?: boolean;
 }
 
-function optionLabel(item: CurrencyCatalogItem) {
+function optionLabel(item: CurrencyCatalogItem, t: Translator["translate"]) {
   const precision = item.minorUnitDigits === 0
-    ? "No decimal places"
-    : `${item.minorUnitDigits} decimal place${item.minorUnitDigits === 1 ? "" : "s"}`;
-  return `${item.code}, ${item.name}, ${precision}`;
+    ? t("common.controls.currency.noDecimals")
+    : t("common.controls.currency.decimalPlaces", { count: item.minorUnitDigits });
+  return t("common.controls.currency.optionLabel", {
+    code: item.code,
+    name: item.name,
+    precision,
+  });
 }
 
 export function CurrencyCombobox({
@@ -52,6 +58,7 @@ export function CurrencyCombobox({
   className,
   autoFocus = false,
 }: CurrencyComboboxProps) {
+  const t = useTranslations();
   const generatedId = useId();
   const controlId = id ?? `currency-${generatedId}`;
   const listId = `${controlId}-listbox`;
@@ -179,11 +186,11 @@ export function CurrencyCombobox({
           }
         }}
       >
-        {required ? <span className="sr-only">Required. </span> : null}
+        {required ? <span className="sr-only">{t("common.controls.currency.required")} </span> : null}
         <span className="currency-combobox-symbol" aria-hidden="true">{selected?.symbol ?? <Coins size={16} />}</span>
         <span className="currency-combobox-value">
-          <strong>{selected?.code ?? (normalizedValue || "Choose currency")}</strong>
-          <span>{selected?.name ?? "Search the ISO 4217 catalog"}</span>
+          <strong>{selected?.code ?? (normalizedValue || t("common.controls.currency.choose"))}</strong>
+          <span>{selected?.name ?? t("common.controls.currency.catalogHelp")}</span>
         </span>
         <ChevronDown className="currency-combobox-chevron" size={16} aria-hidden="true" />
       </button>
@@ -193,7 +200,7 @@ export function CurrencyCombobox({
         <div className="currency-combobox-popover">
           <label className="currency-combobox-search" htmlFor={searchId}>
             <Search size={15} aria-hidden="true" />
-            <span className="sr-only">Search currencies</span>
+            <span className="sr-only">{t("common.controls.currency.searchLabel")}</span>
             <input
               ref={searchRef}
               id={searchId}
@@ -201,7 +208,7 @@ export function CurrencyCombobox({
               type="search"
               value={query}
               autoComplete="off"
-              placeholder="Search by code, name or symbol"
+              placeholder={t("common.controls.currency.searchPlaceholder")}
               aria-autocomplete="list"
               aria-controls={listId}
               aria-expanded="true"
@@ -214,10 +221,10 @@ export function CurrencyCombobox({
             />
           </label>
           <div className="currency-combobox-caption">
-            <span>{query ? `${filtered.length} matches` : "Common currencies first"}</span>
-            <span>ISO 4217</span>
+            <span>{query ? t("common.controls.currency.matches", { count: filtered.length }) : t("common.controls.currency.commonFirst")}</span>
+            <span>{t("common.controls.currency.isoHeading")}</span>
           </div>
-          <div className="currency-combobox-list" id={listId} role="listbox" aria-label="Currencies">
+          <div className="currency-combobox-list" id={listId} role="listbox" aria-label={t("common.controls.currency.currenciesList")}>
             {filtered.length ? filtered.map((item, index) => (
               <button
                 ref={(node) => {
@@ -229,7 +236,7 @@ export function CurrencyCombobox({
                 type="button"
                 role="option"
                 tabIndex={-1}
-                aria-label={optionLabel(item)}
+                aria-label={optionLabel(item, t)}
                 aria-selected={item.code === normalizedValue}
                 data-active={index === resolvedActiveIndex || undefined}
                 key={item.code}
@@ -241,11 +248,11 @@ export function CurrencyCombobox({
                   <strong>{item.code}</strong>
                   <span>{item.name}</span>
                 </span>
-                {item.common ? <small>Common</small> : null}
+                {item.common ? <small>{t("common.controls.currency.commonGroup")}</small> : null}
                 {item.code === normalizedValue ? <Check size={16} aria-hidden="true" /> : null}
               </button>
             )) : (
-              <p className="currency-combobox-empty">No currencies match “{query}”.</p>
+              <p className="currency-combobox-empty">{t("common.controls.currency.noMatches", { query })}</p>
             )}
           </div>
         </div>

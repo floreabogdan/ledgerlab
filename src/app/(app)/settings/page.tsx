@@ -2,10 +2,15 @@
 
 import { Bell, KeyRound, Save, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CurrencyCombobox } from "@/components/ui/currency-combobox";
+import { useTranslator, useTranslations } from "@/i18n/client";
 import { defaultLanguage, languageManifests } from "@/i18n/generated";
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE, DEFAULT_TIME_ZONE } from "@/lib/currencies";
+import {
+  DEFAULT_CURRENCY,
+  DEFAULT_LOCALE,
+  DEFAULT_TIME_ZONE,
+} from "@/lib/currencies";
 
 import {
   Button,
@@ -15,6 +20,7 @@ import {
   Input,
   Page,
   readRecord,
+  RequestError,
   requestJson,
   Section,
   Select,
@@ -29,47 +35,36 @@ import ui from "../_components/pages.module.css";
 type Row = Record<string, unknown>;
 type ProfileTab = "profile" | "reminders" | "security";
 type SaveOptions = { refreshLanguage?: boolean };
-type SaveSettings = (body: Row, success: string, options?: SaveOptions) => Promise<void>;
-
-const tabs: Array<{ id: ProfileTab; label: string; icon: React.ReactNode }> = [
-  { id: "profile", label: "Profile & preferences", icon: <UserRound size={16} /> },
-  { id: "reminders", label: "Reminders", icon: <Bell size={16} /> },
-  { id: "security", label: "Security", icon: <KeyRound size={16} /> },
-];
+type SaveSettings = (
+  body: Row,
+  success: string,
+  options?: SaveOptions,
+) => Promise<void>;
 
 const COMMON_LOCALES = [
-  ["en-US", "English (United States)"],
-  ["en-GB", "English (United Kingdom)"],
-  ["de-DE", "Deutsch (Deutschland)"],
-  ["es-ES", "Español (España)"],
-  ["fr-FR", "Français (France)"],
-  ["it-IT", "Italiano (Italia)"],
-  ["nl-NL", "Nederlands (Nederland)"],
-  ["pl-PL", "Polski (Polska)"],
-  ["pt-BR", "Português (Brasil)"],
-  ["pt-PT", "Português (Portugal)"],
-  ["ro-RO", "Română (România)"],
-  ["cs-CZ", "Čeština (Česko)"],
-  ["hu-HU", "Magyar (Magyarország)"],
-  ["tr-TR", "Türkçe (Türkiye)"],
-  ["ja-JP", "日本語 (日本)"],
-  ["ko-KR", "한국어 (대한민국)"],
-  ["zh-CN", "中文 (中国)"],
+  "en-US",
+  "en-GB",
+  "de-DE",
+  "es-ES",
+  "fr-FR",
+  "it-IT",
+  "nl-NL",
+  "pl-PL",
+  "pt-BR",
+  "pt-PT",
+  "ro-RO",
+  "cs-CZ",
+  "hu-HU",
+  "tr-TR",
+  "ja-JP",
+  "ko-KR",
+  "zh-CN",
 ] as const;
 
-const TIME_ZONES = ["UTC", ...Intl.supportedValuesOf("timeZone").filter((zone) => zone !== "UTC")];
-const LOCALE_SUGGESTIONS = COMMON_LOCALES.map(([value, description]) => ({
-  value,
-  label: value,
-  description,
-}));
-const TIME_ZONE_SUGGESTIONS = TIME_ZONES.map((zone) => ({
-  value: zone,
-  label: zone,
-  description: zone === "UTC"
-    ? "Coordinated Universal Time"
-    : zone.replaceAll("_", " ").replace("/", " · "),
-}));
+const TIME_ZONES = [
+  "UTC",
+  ...Intl.supportedValuesOf("timeZone").filter((zone) => zone !== "UTC"),
+];
 
 function supportedUiLanguage(value: unknown) {
   const candidate = stringFrom(value, defaultLanguage);
@@ -79,6 +74,8 @@ function supportedUiLanguage(value: unknown) {
 }
 
 export default function ProfileSettingsPage() {
+  const translator = useTranslator();
+  const t = translator.translate;
   const router = useRouter();
   const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>(
     "/api/settings",
@@ -88,35 +85,70 @@ export default function ProfileSettingsPage() {
   const [tab, setTab] = useState<ProfileTab>("profile");
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const tabs: Array<{ id: ProfileTab; label: string; icon: ReactNode }> = [
+    {
+      id: "profile",
+      label: t("settings.tabs.profile"),
+      icon: <UserRound size={16} aria-hidden="true" />,
+    },
+    {
+      id: "reminders",
+      label: t("settings.tabs.reminders"),
+      icon: <Bell size={16} aria-hidden="true" />,
+    },
+    {
+      id: "security",
+      label: t("settings.tabs.security"),
+      icon: <KeyRound size={16} aria-hidden="true" />,
+    },
+  ];
 
-  async function performAction(body: Row, success: string, options?: SaveOptions) {
+  async function performAction(
+    body: Row,
+    success: string,
+    options?: SaveOptions,
+  ) {
     setActionError(null);
     setMessage(null);
     try {
-      await requestJson("/api/settings", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      if (body.action === "preferences") window.dispatchEvent(new Event("ledgerlab:settings-updated"));
+      await requestJson(
+        "/api/settings",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+        translator,
+      );
+      if (body.action === "preferences") {
+        window.dispatchEvent(new Event("ledgerlab:settings-updated"));
+      }
       setMessage(success);
       await reload();
       if (options?.refreshLanguage) router.refresh();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not save this setting");
+      setActionError(
+        caught instanceof RequestError
+          ? caught.message
+          : t("settings.messages.actionFailed"),
+      );
     }
   }
 
   return (
     <Page>
       <ViewHeader
-        eyebrow="Local account"
-        title="Profile settings"
-        description="Manage your identity, regional display defaults, in-app reminders and local password. Finance lists and data tools have dedicated workspaces."
+        eyebrow={t("settings.page.eyebrow")}
+        title={t("settings.title")}
+        description={t("settings.page.description")}
       />
       <FormMessage error={actionError} success={message} />
       <DataState loading={loading} error={error} onRetry={reload}>
         <div className={ui.settingsLayout}>
-          <nav className={ui.settingsNav} aria-label="Profile settings sections" role="tablist">
+          <nav
+            className={ui.settingsNav}
+            aria-label={t("settings.page.sectionsAria")}
+            role="tablist"
+          >
             {tabs.map((item) => (
               <button
                 type="button"
@@ -131,19 +163,37 @@ export default function ProfileSettingsPage() {
                   setActionError(null);
                 }}
                 onKeyDown={(event) => {
-                  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+                  if (
+                    ![
+                      "ArrowLeft",
+                      "ArrowRight",
+                      "ArrowUp",
+                      "ArrowDown",
+                      "Home",
+                      "End",
+                    ].includes(event.key)
+                  ) {
+                    return;
+                  }
                   event.preventDefault();
-                  const currentIndex = tabs.findIndex((candidate) => candidate.id === item.id);
-                  const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
-                  const nextIndex = event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? tabs.length - 1
-                      : (currentIndex + (forward ? 1 : -1) + tabs.length) % tabs.length;
+                  const currentIndex = tabs.findIndex(
+                    (candidate) => candidate.id === item.id,
+                  );
+                  const forward =
+                    event.key === "ArrowRight" || event.key === "ArrowDown";
+                  const nextIndex =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? tabs.length - 1
+                        : (currentIndex + (forward ? 1 : -1) + tabs.length) %
+                          tabs.length;
                   const next = tabs[nextIndex];
                   if (!next) return;
                   setTab(next.id);
-                  document.getElementById(`profile-settings-tab-${next.id}`)?.focus();
+                  document
+                    .getElementById(`profile-settings-tab-${next.id}`)
+                    ?.focus();
                 }}
                 key={item.id}
               >
@@ -159,9 +209,18 @@ export default function ProfileSettingsPage() {
             aria-labelledby={`profile-settings-tab-${tab}`}
             tabIndex={0}
           >
-            {tab === "profile" ? <ProfilePreferences initial={payload} onSave={performAction} /> : null}
-            {tab === "reminders" ? <ReminderSettings initial={payload} onSave={performAction} /> : null}
-            {tab === "security" ? <SecuritySettings user={readRecord(payload.user)} onSave={performAction} /> : null}
+            {tab === "profile" ? (
+              <ProfilePreferences initial={payload} onSave={performAction} />
+            ) : null}
+            {tab === "reminders" ? (
+              <ReminderSettings initial={payload} onSave={performAction} />
+            ) : null}
+            {tab === "security" ? (
+              <SecuritySettings
+                user={readRecord(payload.user)}
+                onSave={performAction}
+              />
+            ) : null}
           </div>
         </div>
       </DataState>
@@ -176,6 +235,7 @@ function ProfilePreferences({
   initial: Row;
   onSave: SaveSettings;
 }) {
+  const t = useTranslations();
   const preferences = readRecord(initial.preferences ?? initial);
   const user = readRecord(initial.user);
   const [name, setName] = useState("");
@@ -185,22 +245,85 @@ function ProfilePreferences({
   const [uiLanguage, setUiLanguage] = useState<string>(defaultLanguage);
   const [compactTables, setCompactTables] = useState(true);
   const [saving, setSaving] = useState(false);
+  const localeSuggestions = useMemo(
+    () =>
+      COMMON_LOCALES.map((value) => {
+        const parsed = new Intl.Locale(value);
+        const language =
+          new Intl.DisplayNames([value], { type: "language" }).of(
+            parsed.language,
+          ) ?? parsed.language;
+        const region = parsed.region
+          ? (new Intl.DisplayNames([value], { type: "region" }).of(
+              parsed.region,
+            ) ?? parsed.region)
+          : null;
+        return {
+          value,
+          label: value,
+          description: region
+            ? t("settings.preferences.localeDescription", {
+                language,
+                region,
+              })
+            : language,
+        };
+      }),
+    [t],
+  );
+  const timeZoneSuggestions = useMemo(
+    () =>
+      TIME_ZONES.map((zone) => ({
+        value: zone,
+        label: zone,
+        description:
+          zone === "UTC"
+            ? t("settings.preferences.utcDescription")
+            : zone.replaceAll("_", " ").replaceAll("/", " · "),
+      })),
+    [t],
+  );
 
   useEffect(() => {
     queueMicrotask(() => {
-      setName(stringFrom(user.name ?? user.displayName ?? preferences.displayName));
-      setCurrency(stringFrom(user.defaultCurrency ?? preferences.currency, DEFAULT_CURRENCY).toUpperCase());
-      setLocale(stringFrom(user.locale ?? preferences.locale, DEFAULT_LOCALE));
-      setTimeZone(stringFrom(user.timeZone ?? preferences.timeZone, DEFAULT_TIME_ZONE));
+      setName(
+        stringFrom(user.name ?? user.displayName ?? preferences.displayName),
+      );
+      setCurrency(
+        stringFrom(
+          user.defaultCurrency ?? preferences.currency,
+          DEFAULT_CURRENCY,
+        ).toUpperCase(),
+      );
+      setLocale(
+        stringFrom(user.locale ?? preferences.locale, DEFAULT_LOCALE),
+      );
+      setTimeZone(
+        stringFrom(user.timeZone ?? preferences.timeZone, DEFAULT_TIME_ZONE),
+      );
       setUiLanguage(supportedUiLanguage(user.uiLanguage));
       setCompactTables(preferences.compactTables !== false);
     });
-  }, [initial, preferences.compactTables, preferences.currency, preferences.displayName, preferences.locale, preferences.timeZone, user.defaultCurrency, user.displayName, user.locale, user.name, user.timeZone, user.uiLanguage]);
+  }, [
+    initial,
+    preferences.compactTables,
+    preferences.currency,
+    preferences.displayName,
+    preferences.locale,
+    preferences.timeZone,
+    user.defaultCurrency,
+    user.displayName,
+    user.locale,
+    user.name,
+    user.timeZone,
+    user.uiLanguage,
+  ]);
 
   async function save() {
     setSaving(true);
     try {
-      const languageChanged = uiLanguage !== supportedUiLanguage(user.uiLanguage);
+      const languageChanged =
+        uiLanguage !== supportedUiLanguage(user.uiLanguage);
       await onSave(
         {
           action: "preferences",
@@ -211,7 +334,7 @@ function ProfilePreferences({
           timeZone,
           compactTables,
         },
-        "Profile preferences saved.",
+        t("settings.preferences.saved"),
         { refreshLanguage: languageChanged },
       );
     } finally {
@@ -220,65 +343,91 @@ function ProfilePreferences({
   }
 
   return (
-    <Section title="Profile & preferences" description="Identity, interface language, reporting currency, regional formatting and table density">
+    <Section
+      title={t("settings.preferences.title")}
+      description={t("settings.preferences.description")}
+    >
       <div className={ui.settingsContent}>
         <div className={ui.settingsGroup}>
-          <h3>Profile</h3>
+          <h3>{t("settings.preferences.profileGroup")}</h3>
           <div className={ui.formGrid}>
-            <Field label="Display name">
-              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+            <Field label={t("settings.preferences.displayName")}>
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={t("settings.preferences.displayNamePlaceholder")}
+              />
             </Field>
-            <Field label="Email">
+            <Field label={t("settings.preferences.email")}>
               <Input value={stringFrom(user.email)} disabled />
             </Field>
           </div>
         </div>
         <div className={ui.settingsGroup}>
-          <h3>Reporting & region</h3>
+          <h3>{t("settings.preferences.regionGroup")}</h3>
           <div className={`${ui.formGrid} ${ui.settingsDefaultsGrid}`}>
             <Field
               htmlFor="profile-currency"
-              label="Reporting currency"
-              hint="Used for totals across accounts. Changing it recalculates reports; it never relabels native history. Cross-currency totals require BNR to publish both currencies."
+              label={t("settings.preferences.reportingCurrency")}
+              hint={t("settings.preferences.reportingCurrencyHelp")}
             >
-              <CurrencyCombobox id="profile-currency" value={currency} locale={locale} onChange={setCurrency} />
+              <CurrencyCombobox
+                id="profile-currency"
+                value={currency}
+                locale={locale}
+                onChange={setCurrency}
+              />
             </Field>
-            <Field htmlFor="profile-locale" label="Formatting locale" hint="Controls how dates, numbers, and currencies are formatted. It does not change the interface language.">
+            <Field
+              htmlFor="profile-locale"
+              label={t("settings.preferences.locale")}
+              hint={t("settings.preferences.localeHelp")}
+            >
               <SuggestionInput
                 id="profile-locale"
                 value={locale}
-                suggestions={LOCALE_SUGGESTIONS}
+                suggestions={localeSuggestions}
                 onValueChange={setLocale}
-                placeholder="e.g. en-US"
+                placeholder={t("settings.preferences.localePlaceholder")}
                 maxLength={35}
-                emptyMessage="No matching common locale. You can keep this valid BCP 47 locale code."
+                emptyMessage={t("settings.preferences.localeNoMatches")}
               />
             </Field>
-            <Field htmlFor="profile-time-zone" label="Time zone" hint="Determines today, monthly boundaries, and due or overdue status.">
+            <Field
+              htmlFor="profile-time-zone"
+              label={t("settings.preferences.timeZone")}
+              hint={t("settings.preferences.timeZoneHelp")}
+            >
               <SuggestionInput
                 id="profile-time-zone"
                 value={timeZone}
-                suggestions={TIME_ZONE_SUGGESTIONS}
+                suggestions={timeZoneSuggestions}
                 onValueChange={setTimeZone}
-                placeholder="e.g. Europe/Bucharest"
+                placeholder={t("settings.preferences.timeZonePlaceholder")}
                 maxLength={100}
-                emptyMessage="No matching IANA time zone. You can keep a custom runtime-supported value."
+                emptyMessage={t("settings.preferences.timeZoneNoMatches")}
               />
             </Field>
           </div>
         </div>
         <div className={ui.settingsGroup}>
-          <h3>Interface</h3>
+          <h3>{t("settings.preferences.interfaceGroup")}</h3>
           <div className={ui.formGrid}>
             <Field
               className={ui.formSpan}
               htmlFor="profile-ui-language"
-              label="Interface language"
-              hint="Changes the words, labels, and messages shown by LedgerLab. Formatting locale remains a separate setting for dates, numbers, and currencies."
+              label={t("settings.preferences.interfaceLanguage")}
+              hint={t("settings.preferences.interfaceLanguageHelp")}
             >
-              <Select id="profile-ui-language" value={uiLanguage} onValueChange={setUiLanguage}>
+              <Select
+                id="profile-ui-language"
+                value={uiLanguage}
+                onValueChange={setUiLanguage}
+              >
                 {languageManifests.map((manifest) => (
-                  <option value={manifest.tag} key={manifest.tag}>{manifest.nativeName}</option>
+                  <option value={manifest.tag} key={manifest.tag}>
+                    {manifest.nativeName}
+                  </option>
                 ))}
               </Select>
             </Field>
@@ -286,13 +435,19 @@ function ProfilePreferences({
           <Toggle
             checked={compactTables}
             onChange={setCompactTables}
-            label="Compact data tables"
-            description="Use tighter rows while retaining readable mobile layouts."
+            label={t("settings.preferences.compactTables")}
+            description={t("settings.preferences.compactTablesHelp")}
           />
         </div>
         <div className={ui.formActions}>
-          <Button disabled={saving} icon={<Save size={15} />} onClick={() => void save()}>
-            {saving ? "Saving…" : "Save profile settings"}
+          <Button
+            disabled={saving}
+            icon={<Save size={15} />}
+            onClick={() => void save()}
+          >
+            {saving
+              ? t("settings.preferences.saving")
+              : t("settings.preferences.save")}
           </Button>
         </div>
       </div>
@@ -307,6 +462,7 @@ function ReminderSettings({
   initial: Row;
   onSave: SaveSettings;
 }) {
+  const t = useTranslations();
   const reminders = readRecord(initial.reminders);
   const [dueSoon, setDueSoon] = useState(true);
   const [overdue, setOverdue] = useState(true);
@@ -321,14 +477,26 @@ function ReminderSettings({
       setBudgetWarnings(reminders.budgetWarnings !== false);
       setDaysBefore(String(reminders.daysBefore ?? 3));
     });
-  }, [initial, reminders.budgetWarnings, reminders.daysBefore, reminders.dueSoon, reminders.overdue]);
+  }, [
+    initial,
+    reminders.budgetWarnings,
+    reminders.daysBefore,
+    reminders.dueSoon,
+    reminders.overdue,
+  ]);
 
   async function save() {
     setSaving(true);
     try {
       await onSave(
-        { action: "reminders", dueSoon, overdue, budgetWarnings, daysBefore: Number(daysBefore) },
-        "Reminder preferences saved.",
+        {
+          action: "reminders",
+          dueSoon,
+          overdue,
+          budgetWarnings,
+          daysBefore: Number(daysBefore),
+        },
+        t("settings.reminders.saved"),
       );
     } finally {
       setSaving(false);
@@ -336,24 +504,52 @@ function ReminderSettings({
   }
 
   return (
-    <Section title="In-app reminders" description="Shown inside LedgerLab; no external messages are sent">
+    <Section
+      title={t("settings.reminders.title")}
+      description={t("settings.reminders.description")}
+    >
       <div className={ui.settingsContent}>
         <div className={ui.settingsGroup}>
-          <Field label="Due-soon window">
-            <Select value={daysBefore} onValueChange={(value) => setDaysBefore(value)}>
-              <option value="1">1 day before</option>
-              <option value="3">3 days before</option>
-              <option value="7">7 days before</option>
-              <option value="14">14 days before</option>
+          <Field label={t("settings.reminders.dueSoonWindow")}>
+            <Select
+              value={daysBefore}
+              onValueChange={(value) => setDaysBefore(value)}
+            >
+              {[1, 3, 7, 14].map((count) => (
+                <option value={String(count)} key={count}>
+                  {t("settings.reminders.daysBefore", { count })}
+                </option>
+              ))}
             </Select>
           </Field>
         </div>
-        <Toggle checked={dueSoon} onChange={setDueSoon} label="Bills due soon" description="Highlight planned occurrences approaching their due date." />
-        <Toggle checked={overdue} onChange={setOverdue} label="Overdue obligations" description="Keep unpaid past-due occurrences visible on the dashboard." />
-        <Toggle checked={budgetWarnings} onChange={setBudgetWarnings} label="Budget warnings" description="Flag actual spending near or above a category limit." />
+        <Toggle
+          checked={dueSoon}
+          onChange={setDueSoon}
+          label={t("settings.reminders.dueSoon")}
+          description={t("settings.reminders.dueSoonHelp")}
+        />
+        <Toggle
+          checked={overdue}
+          onChange={setOverdue}
+          label={t("settings.reminders.overdue")}
+          description={t("settings.reminders.overdueHelp")}
+        />
+        <Toggle
+          checked={budgetWarnings}
+          onChange={setBudgetWarnings}
+          label={t("settings.reminders.budgetWarnings")}
+          description={t("settings.reminders.budgetWarningsHelp")}
+        />
         <div className={`${ui.formActions} ${ui.formOffset}`}>
-          <Button disabled={saving} icon={<Save size={15} />} onClick={() => void save()}>
-            {saving ? "Saving…" : "Save reminders"}
+          <Button
+            disabled={saving}
+            icon={<Save size={15} />}
+            onClick={() => void save()}
+          >
+            {saving
+              ? t("settings.reminders.saving")
+              : t("settings.reminders.save")}
           </Button>
         </div>
       </div>
@@ -368,27 +564,30 @@ function SecuritySettings({
   user: Row;
   onSave: SaveSettings;
 }) {
+  const translator = useTranslator();
+  const t = translator.translate;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const identity = stringFrom(user.email, t("settings.security.localUser"));
 
   async function changePassword() {
     setLocalError(null);
     if (newPassword.length < 10) {
-      setLocalError("Use at least 10 characters for the new password.");
+      setLocalError(t("settings.security.validation.passwordMinimum"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setLocalError("New passwords do not match.");
+      setLocalError(t("settings.security.validation.passwordsMismatch"));
       return;
     }
     setSaving(true);
     try {
       await onSave(
         { action: "password-change", currentPassword, newPassword },
-        "Password changed. Other sessions were revoked.",
+        t("settings.security.saved"),
       );
       setCurrentPassword("");
       setNewPassword("");
@@ -399,32 +598,70 @@ function SecuritySettings({
   }
 
   return (
-    <Section title="Local account security" description="Password and persistent session controls">
+    <Section
+      title={t("settings.security.title")}
+      description={t("settings.security.description")}
+    >
       <div className={ui.settingsContent}>
         <div className={ui.settingsGroup}>
           <div className={ui.inlineNotice}>
-            <UserRound size={17} />
-            <span>Signed in as <strong>{stringFrom(user.email, "local user")}</strong>. Session cookies are HttpOnly and stored session tokens are hashed.</span>
+            <UserRound size={17} aria-hidden="true" />
+            <span>
+              {translator.rich<ReactNode, "settings.security.signedInAs">(
+                "settings.security.signedInAs",
+                { identity },
+                {
+                  identity: (parts) => <strong>{parts}</strong>,
+                },
+              )}
+            </span>
           </div>
         </div>
         <div className={ui.settingsGroup}>
-          <h3>Change password</h3>
+          <h3>{t("settings.security.changeHeading")}</h3>
           <div className={ui.formGrid}>
-            <Field label="Current password" className={ui.formSpan}>
-              <Input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+            <Field
+              label={t("settings.security.currentPassword")}
+              className={ui.formSpan}
+            >
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
             </Field>
-            <Field label="New password" hint="At least 10 characters">
-              <Input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+            <Field
+              label={t("settings.security.newPassword")}
+              hint={t("settings.security.newPasswordHelp")}
+            >
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />
             </Field>
-            <Field label="Confirm new password">
-              <Input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+            <Field label={t("settings.security.confirmPassword")}>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
             </Field>
           </div>
           <FormMessage error={localError} />
         </div>
         <div className={ui.formActions}>
-          <Button disabled={saving || !currentPassword || !newPassword} icon={<KeyRound size={15} />} onClick={() => void changePassword()}>
-            {saving ? "Changing…" : "Change password"}
+          <Button
+            disabled={saving || !currentPassword || !newPassword}
+            icon={<KeyRound size={15} />}
+            onClick={() => void changePassword()}
+          >
+            {saving
+              ? t("settings.security.saving")
+              : t("settings.security.save")}
           </Button>
         </div>
       </div>

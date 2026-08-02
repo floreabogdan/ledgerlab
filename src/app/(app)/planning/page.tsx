@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDateRange } from "@/components/date-range-context";
+import { useTranslations, useTranslator } from "@/i18n/client";
 import { monthBounds } from "@/lib/domain/dates";
 import { DEFAULT_CURRENCY } from "@/lib/currencies";
 import {
@@ -45,6 +46,7 @@ import {
 import ui from "../_components/pages.module.css";
 
 type Row = Record<string, unknown>;
+type Translate = ReturnType<typeof useTranslations>;
 type EditableOpening = { accountId: string; amount: string; currency: string };
 const LIQUID_ACCOUNT_TYPES = new Set(["current", "current_account", "savings", "cash"]);
 type PlanLine = {
@@ -84,11 +86,11 @@ function lastDayOfMonth(value: string) {
   return `${value}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
 }
 
-function parseLine(item: unknown, index: number): PlanLine {
+function parseLine(item: unknown, index: number, t: Translate): PlanLine {
   const row = readRecord(item);
   return {
     id: stringFrom(row.id, `line-${index}`),
-    name: stringFrom(row.name ?? row.description ?? row.title, "Forecast item"),
+    name: stringFrom(row.name ?? row.description ?? row.title, t("planning.shared.fallback.forecastItem")),
     direction: stringFrom(row.direction ?? row.kind) === "income" ? "income" : "expense",
     amountMinor: Math.abs(numberFrom(row.amountMinor ?? row.expectedAmountMinor)),
     paidAmountMinor: Math.abs(numberFrom(row.paidAmountMinor)),
@@ -133,12 +135,58 @@ function projectionSpending(line: PlanLine) {
   return line.scenario && line.direction === "expense" ? line.amountMinor : line.spendingAmountMinor;
 }
 
-function lineContext(line: PlanLine, reportingCurrency: string) {
-  if (line.scenario) return "Hypothetical · scenario only";
-  if (line.outstandingAmountMinor === 0) return `${line.source} · settled`;
-  if (!line.includedInForecast) return `${line.source} · not applied to this historical close`;
-  if (line.paidAmountMinor > 0) return `${line.source} · partial · ${formatMoney(line.outstandingAmountMinor, reportingCurrency)} outstanding`;
-  return `${line.source}${line.status ? ` · ${line.status}` : ""}`;
+function forecastSourceLabel(line: PlanLine, t: Translate) {
+  if (line.scenario || line.sourceType === "scenario") return t("planning.forecast.source.scenario");
+  if (line.sourceType === "credit_card_statement") return t("planning.forecast.source.cardStatement");
+  if (line.sourceType === "loan_schedule") return t("planning.forecast.source.loanSchedule");
+  if (line.sourceType === "planned_payment") {
+    return line.source === "recurring planned payment"
+      ? t("planning.forecast.source.recurringPayment")
+      : t("planning.forecast.source.plannedPayment");
+  }
+  return t("planning.forecast.source.other");
+}
+
+function forecastStatusLabel(status: string | undefined, t: Translate) {
+  switch (status) {
+    case "planned": return t("planning.forecast.status.planned");
+    case "scheduled": return t("planning.forecast.status.scheduled");
+    case "overdue": return t("planning.forecast.status.overdue");
+    case "paid": return t("planning.forecast.status.paid");
+    case "cancelled": return t("planning.forecast.status.cancelled");
+    case "skipped": return t("planning.forecast.status.skipped");
+    default: return t("planning.forecast.status.other");
+  }
+}
+
+function accountTypeLabel(type: string, t: Translate) {
+  switch (type) {
+    case "current":
+    case "current_account": return t("planning.forecast.accountType.current");
+    case "savings": return t("planning.forecast.accountType.savings");
+    case "cash": return t("planning.forecast.accountType.cash");
+    case "credit_card": return t("planning.forecast.accountType.creditCard");
+    case "loan": return t("planning.forecast.accountType.loan");
+    case "investment": return t("planning.forecast.accountType.investment");
+    case "custom": return t("planning.forecast.accountType.custom");
+    default: return t("planning.forecast.accountType.other");
+  }
+}
+
+function lineContext(line: PlanLine, reportingCurrency: string, t: Translate) {
+  if (line.scenario) return t("planning.forecast.line.hypothetical");
+  const source = forecastSourceLabel(line, t);
+  if (line.outstandingAmountMinor === 0) return t("planning.forecast.line.settled", { source });
+  if (!line.includedInForecast) return t("planning.forecast.line.historical", { source });
+  if (line.paidAmountMinor > 0) {
+    return t("planning.forecast.line.partial", {
+      source,
+      amount: formatMoney(line.outstandingAmountMinor, reportingCurrency),
+    });
+  }
+  return line.status
+    ? t("planning.forecast.line.status", { source, status: forecastStatusLabel(line.status, t) })
+    : t("planning.forecast.line.sourceOnly", { source });
 }
 
 function accountCurrency(account: Row, reportingCurrency: string) {
@@ -146,6 +194,8 @@ function accountCurrency(account: Row, reportingCurrency: string) {
 }
 
 export default function PlanningPage() {
+  const t = useTranslations();
+  const translator = useTranslator();
   const router = useRouter();
   const { range, setRange } = useDateRange();
   const [month, setMonth] = useState(() => range.to.slice(0, 7) || monthKey(1));
@@ -171,8 +221,9 @@ export default function PlanningPage() {
   const canonicalLines = useMemo(() => {
     if (payloadMonth !== month) return [];
     const savedLines = readList<Row>(plan, "lines", "items", "entries");
-    return (savedLines.length ? savedLines : readList<Row>(payload, "items", "lines", "entries")).map(parseLine);
-  }, [month, payload, payloadMonth, plan]);
+    return (savedLines.length ? savedLines : readList<Row>(payload, "items", "lines", "entries"))
+      .map((item, index) => parseLine(item, index, t));
+  }, [month, payload, payloadMonth, plan, t]);
   const [scenarioLines, setScenarioLines] = useState<PlanLine[]>([]);
   const scenarioHydratedMonth = useRef<string | null>(null);
   const [scenarioActive, setScenarioActive] = useState(false);
@@ -205,12 +256,12 @@ export default function PlanningPage() {
   useEffect(() => {
     if (loading || payloadMonth !== month || scenarioHydratedMonth.current === month) return;
     const serverLines = readList<Row>(plan, "scenarioLines", "scenarios")
-      .map((item, index) => ({ ...parseLine(item, index), scenario: true }));
+      .map((item, index) => ({ ...parseLine(item, index, t), scenario: true }));
     queueMicrotask(() => {
       setScenarioLines(serverLines);
       scenarioHydratedMonth.current = month;
     });
-  }, [loading, month, payloadMonth, plan]);
+  }, [loading, month, payloadMonth, plan, t]);
 
   const includedLines = useMemo(
     () => scenarioActive ? [...canonicalLines, ...scenarioLines] : canonicalLines,
@@ -291,7 +342,7 @@ export default function PlanningPage() {
 
   const cashTimeline = useMemo(() => {
     let balance = openingTotal;
-    const points = [{ date: `${month}-01`, balance, label: "Open" }];
+    const points = [{ date: `${month}-01`, balance, label: t("planning.forecast.cashPath.open") }];
     const changesByDate = new Map<string, number>();
     for (const event of actualCashEvents) {
       changesByDate.set(event.date, (changesByDate.get(event.date) ?? 0) + event.amountMinor);
@@ -306,9 +357,9 @@ export default function PlanningPage() {
       balance += amountMinor;
       points.push({ date, balance, label: formatDate(date, { day: "2-digit", month: "short", year: undefined }) });
     });
-    points.push({ date: lastDayOfMonth(month), balance, label: "Close" });
+    points.push({ date: lastDayOfMonth(month), balance, label: t("planning.forecast.cashPath.close") });
     return points;
-  }, [accountTypeById, actualCashEvents, month, openingTotal, projectionLines]);
+  }, [accountTypeById, actualCashEvents, month, openingTotal, projectionLines, t]);
   const lowest = cashTimeline.reduce((minimum, point) => point.balance < minimum.balance ? point : minimum, cashTimeline[0]);
 
   const actualIncome = numberFrom(actual.incomeMinor ?? plan.actualIncomeMinor);
@@ -323,28 +374,33 @@ export default function PlanningPage() {
         const account = readRecord(accounts.find((entry) => stringFrom(readRecord(entry).id) === item.accountId));
         const nativeCurrency = accountCurrency(account, item.currency);
         const amountMinor = moneyInputToMinor(item.amount, nativeCurrency);
-        if (amountMinor === null) throw new Error(`Enter a valid ${nativeCurrency} opening balance for ${stringFrom(account.name, "this account")}.`);
+        if (amountMinor === null) {
+          throw new Error(t("planning.forecast.validation.openingBalance", {
+            currency: nativeCurrency,
+            account: stringFrom(account.name, t("planning.shared.fallback.thisAccount")),
+          }));
+        }
         return { accountId: item.accountId, amountMinor, openingBalanceMinor: amountMinor, currency: nativeCurrency };
       });
-      await requestJson("/api/plans", { method: "POST", body: JSON.stringify({ action: "save-assumptions", month, openingBalances }) });
-      setSaveMessage("Forecast opening assumptions saved.");
+      await requestJson("/api/plans", { method: "POST", body: JSON.stringify({ action: "save-assumptions", month, name: t("planning.forecast.plan.defaultName"), openingBalances }) }, translator);
+      setSaveMessage(t("planning.forecast.feedback.assumptionsSaved"));
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not save these forecast assumptions");
+      setActionError(caught instanceof Error ? caught.message : t("planning.forecast.feedback.saveAssumptionsFailed"));
     } finally { setSaving(false); }
   }
 
   async function copyAssumptions() {
     setSaving(true); setActionError(null); setSaveMessage(null);
     try {
-      const copied = await requestJson<Record<string, unknown>>("/api/plans", { method: "POST", body: JSON.stringify({ action: "copy-assumptions", sourceMonth: previousMonth(month), targetMonth: month, month }) });
+      const copied = await requestJson<Record<string, unknown>>("/api/plans", { method: "POST", body: JSON.stringify({ action: "copy-assumptions", sourceMonth: previousMonth(month), targetMonth: month, month, name: t("planning.forecast.plan.defaultName") }) }, translator);
       const copiedPlan = readRecord(readRecord(copied).plan ?? copied);
-      setScenarioLines(readList<Row>(copiedPlan, "scenarioLines", "scenarios").map((item, index) => ({ ...parseLine(item, index), scenario: true })));
+      setScenarioLines(readList<Row>(copiedPlan, "scenarioLines", "scenarios").map((item, index) => ({ ...parseLine(item, index, t), scenario: true })));
       scenarioHydratedMonth.current = month;
-      setSaveMessage("Previous opening assumptions and scenario adjustments copied. Expected payments still come from Planned Payments.");
+      setSaveMessage(t("planning.forecast.feedback.assumptionsCopied"));
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not copy the previous forecast assumptions");
+      setActionError(caught instanceof Error ? caught.message : t("planning.forecast.feedback.copyAssumptionsFailed"));
     } finally { setSaving(false); }
   }
 
@@ -353,24 +409,24 @@ export default function PlanningPage() {
     try {
       await requestJson("/api/plans", {
         method: "POST",
-        body: JSON.stringify({ action: "save-scenario", month, scenarioName: "Working scenario", items: scenarioLines }),
-      });
-      setSaveMessage("Scenario saved separately. Actual transactions were not changed.");
+        body: JSON.stringify({ action: "save-scenario", month, scenarioName: t("planning.forecast.scenario.name"), items: scenarioLines }),
+      }, translator);
+      setSaveMessage(t("planning.forecast.feedback.scenarioSaved"));
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not save this scenario");
+      setActionError(caught instanceof Error ? caught.message : t("planning.forecast.feedback.saveScenarioFailed"));
     } finally { setSaving(false); }
   }
 
   return (
     <Page>
       <ViewHeader
-        eyebrow="Forecast workspace"
-        title="Monthly forecast"
-        description="Forecast cash flow from Planned Payments, opening assumptions, and optional what-if adjustments. Nothing here changes actual transactions."
+        eyebrow={t("planning.forecast.header.eyebrow")}
+        title={t("planning.forecast.header.title")}
+        description={t("planning.forecast.header.description")}
         actions={
           <>
-            <Button variant="secondary" icon={<Copy size={15} />} disabled={saving} onClick={() => void copyAssumptions()}>Copy prior assumptions</Button>
-            <Button icon={<Save size={15} />} disabled={saving} onClick={() => void saveAssumptions()}>{saving ? "Saving…" : "Save assumptions"}</Button>
+            <Button variant="secondary" icon={<Copy size={15} />} disabled={saving} onClick={() => void copyAssumptions()}>{t("planning.forecast.actions.copyPrior")}</Button>
+            <Button icon={<Save size={15} />} disabled={saving} onClick={() => void saveAssumptions()}>{saving ? t("planning.forecast.actions.saving") : t("planning.forecast.actions.saveAssumptions")}</Button>
           </>
         }
       />
@@ -378,11 +434,11 @@ export default function PlanningPage() {
       <div className={ui.toolbar}>
         <div className={ui.toolbarGroup}>
           <MonthStepper value={month} onChange={selectMonth} />
-          {!rangeMatchesMonth ? <Pill tone="info">Monthly view uses the range end month</Pill> : null}
+          {!rangeMatchesMonth ? <Pill tone="info">{t("planning.forecast.range.endMonth")}</Pill> : null}
         </div>
         <div className={ui.toolbarGroup}>
-          <Button variant={scenarioActive ? "secondary" : "ghost"} icon={<Beaker size={15} />} onClick={() => setScenarioActive((value) => !value)}>{scenarioActive ? "Scenario on" : "Try a scenario"}</Button>
-          <Button icon={<CalendarPlus size={15} />} onClick={() => router.push("/planned?new=1")}>Add expected payment</Button>
+          <Button variant={scenarioActive ? "secondary" : "ghost"} icon={<Beaker size={15} />} onClick={() => setScenarioActive((value) => !value)}>{scenarioActive ? t("planning.forecast.actions.scenarioOn") : t("planning.forecast.actions.tryScenario")}</Button>
+          <Button icon={<CalendarPlus size={15} />} onClick={() => router.push("/planned?new=1")}>{t("planning.forecast.actions.addExpectedPayment")}</Button>
         </div>
       </div>
       <FormMessage error={actionError} success={saveMessage} />
@@ -390,32 +446,32 @@ export default function PlanningPage() {
       <DataState loading={loading} error={error} onRetry={reload}>
         {scenarioActive ? (
           <div className={ui.scenarioBanner}>
-            <span><Beaker className={ui.inlineIcon} size={15} /><strong>Working scenario</strong> — hypothetical adjustments affect this projection only.</span>
-            <div className={ui.toolbarGroup}><Button variant="ghost" onClick={() => setScenarioLines([])}>Clear</Button><Button variant="secondary" onClick={() => setScenarioItemOpen(true)}>Add adjustment</Button><Button variant="secondary" onClick={() => void saveScenario()}>Save scenario</Button></div>
+            <span><Beaker className={ui.inlineIcon} size={15} />{t("planning.forecast.scenario.banner", { name: t("planning.forecast.scenario.name") })}</span>
+            <div className={ui.toolbarGroup}><Button variant="ghost" onClick={() => setScenarioLines([])}>{t("planning.forecast.actions.clear")}</Button><Button variant="secondary" onClick={() => setScenarioItemOpen(true)}>{t("planning.forecast.actions.addAdjustment")}</Button><Button variant="secondary" onClick={() => void saveScenario()}>{t("planning.forecast.actions.saveScenario")}</Button></div>
           </div>
         ) : null}
 
         <div className={ui.metricGrid}>
-          <Metric label="Expected cash opening" value={formatMoney(openingTotal, currency)} detail={openingsDirty ? `Saved ${currency} value · save native edits to refresh` : "Current, savings and cash only"} info="Liquid opening balances converted from each account's native currency at the month-start reporting rate. Investments and liability balances remain in their account forecasts but are not cash." />
-          <Metric label="Expected income" value={formatMoney(incomeTotal, currency)} tone="positive" info="Income from Planned Payments, plus enabled hypothetical adjustments, expressed in profile reporting currency." />
-          <Metric label="Expected spending" value={formatMoney(expenseTotal, currency)} tone="warning" detail={`${formatMoney(fixedTotal, currency)} fixed · ${formatMoney(variableTotal, currency)} variable`} info="Economic spending in profile reporting currency. Loan principal and card repayments are transfers, so they are excluded; loan interest and fees are included." />
-          <Metric label="Cash due" value={formatMoney(outstandingExpenseTotal, currency)} tone="warning" detail={`${formatMoney(outstandingSpendingTotal, currency)} also counts as spending`} info="Expected cash outflow in profile reporting currency. This includes card repayments and full loan installments, while spending includes only purchases, interest, and fees." />
-          <Metric label="Projected cash closing" value={formatMoney(closingTotal, currency)} tone={closingTotal >= 0 ? "accent" : "negative"} info="Liquid opening cash plus cleared actual cash movement in the month, then remaining income and obligations, all converted to profile reporting currency. Settled payments are not deducted twice." />
+          <Metric label={t("planning.forecast.metrics.opening.label")} value={formatMoney(openingTotal, currency)} detail={openingsDirty ? t("planning.forecast.metrics.opening.dirtyDetail", { currency }) : t("planning.forecast.metrics.opening.detail")} info={t("planning.forecast.metrics.opening.info")} />
+          <Metric label={t("planning.forecast.metrics.income.label")} value={formatMoney(incomeTotal, currency)} tone="positive" info={t("planning.forecast.metrics.income.info")} />
+          <Metric label={t("planning.forecast.metrics.spending.label")} value={formatMoney(expenseTotal, currency)} tone="warning" detail={t("planning.forecast.metrics.spending.detail", { fixed: formatMoney(fixedTotal, currency), variable: formatMoney(variableTotal, currency) })} info={t("planning.forecast.metrics.spending.info")} />
+          <Metric label={t("planning.forecast.metrics.cashDue.label")} value={formatMoney(outstandingExpenseTotal, currency)} tone="warning" detail={t("planning.forecast.metrics.cashDue.detail", { amount: formatMoney(outstandingSpendingTotal, currency) })} info={t("planning.forecast.metrics.cashDue.info")} />
+          <Metric label={t("planning.forecast.metrics.closing.label")} value={formatMoney(closingTotal, currency)} tone={closingTotal >= 0 ? "accent" : "negative"} info={t("planning.forecast.metrics.closing.info")} />
         </div>
 
-        <Section title="Projected cash path" description="Cleared actual movement plus remaining estimates across their dates · actual balances are unchanged" action={<Pill tone="info">Projection</Pill>}>
+        <Section title={t("planning.forecast.cashPath.title")} description={t("planning.forecast.cashPath.description")} action={<Pill tone="info">{t("planning.forecast.cashPath.projection")}</Pill>}>
           <div className={ui.planHero}>
             <div className={ui.planBalance}>
-              <span>Lowest projected cash point</span>
+              <span>{t("planning.forecast.cashPath.lowest")}</span>
               <strong className={lowest.balance < 0 ? ui.negative : ""}>{formatMoney(lowest.balance, currency)}</strong>
-              <small>{formatDate(lowest.date)} · after actual movement, remaining payments, and adjustments</small>
+              <small>{t("planning.forecast.cashPath.lowestDetail", { date: formatDate(lowest.date) })}</small>
             </div>
-            <div className={ui.cashFlowLine} aria-label="Projected cash timeline">
+            <div className={ui.cashFlowLine} aria-label={t("planning.forecast.cashPath.timelineLabel")}>
               <div className={ui.cashFlowAxis} />
               {cashTimeline.map((point, index) => {
                 const position = cashTimeline.length === 1 ? 0 : (index / (cashTimeline.length - 1)) * 100;
                 const edge = index === 0 ? "start" : index === cashTimeline.length - 1 ? "end" : undefined;
-                const label = `${point.label} · ${formatMoney(point.balance, currency)}`;
+                const label = t("planning.forecast.cashPath.pointLabel", { label: point.label, balance: formatMoney(point.balance, currency) });
                 return (
                   <span
                     key={`${point.date}-${index}`}
@@ -434,35 +490,35 @@ export default function PlanningPage() {
           </div>
         </Section>
 
-        <Section title="Expected payments" description="Canonical obligations and income from Planned Payments; scenario adjustments are clearly marked">
+        <Section title={t("planning.forecast.payments.title")} description={t("planning.forecast.payments.description")}>
               {includedLines.length ? (
-                <ResponsiveTable label="Monthly expected payments and scenario adjustments">
-                  <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Priority</th><th>Account</th><th>Cash due ({currency})</th><th>Spending ({currency})</th><th><span className="sr-only">Actions</span></th></tr></thead>
+                <ResponsiveTable label={t("planning.forecast.payments.tableLabel")}>
+                  <thead><tr><th>{t("planning.forecast.payments.date")}</th><th>{t("planning.forecast.payments.item")}</th><th>{t("planning.forecast.payments.type")}</th><th>{t("planning.forecast.payments.priority")}</th><th>{t("planning.forecast.payments.account")}</th><th>{t("planning.forecast.payments.cashDue", { currency })}</th><th>{t("planning.forecast.payments.spending", { currency })}</th><th><span className="sr-only">{t("planning.shared.labels.actions")}</span></th></tr></thead>
                   <tbody>
                     {[...includedLines].sort((a, b) => a.date.localeCompare(b.date)).map((line) => {
                       const account = accounts.find((item) => String(readRecord(item).id) === line.accountId);
                       return (
                         <tr key={line.id}>
                           <td className={ui.nowrap}>{formatDate(line.date, { day: "2-digit", month: "short", year: undefined })}</td>
-                          <td><span className={ui.tablePrimary}>{line.name}</span><span className={ui.tableSecondary}>{lineContext(line, currency)}{line.isEstimate ? " · estimate" : ""}</span></td>
-                          <td><Pill tone={line.direction === "income" ? "positive" : line.spendingType === "fixed" ? "info" : "warning"}>{line.direction === "income" ? "income" : line.spendingType}</Pill></td>
-                          <td>{line.direction === "expense" ? (line.essential ? "Essential" : "Discretionary") : "—"}</td>
-                          <td>{account ? stringFrom(readRecord(account).name, "Account") : "Unassigned"}</td>
+                          <td><span className={ui.tablePrimary}>{line.name}</span><span className={ui.tableSecondary}>{line.isEstimate ? t("planning.forecast.line.estimate", { context: lineContext(line, currency, t) }) : lineContext(line, currency, t)}</span></td>
+                          <td><Pill tone={line.direction === "income" ? "positive" : line.spendingType === "fixed" ? "info" : "warning"}>{line.direction === "income" ? t("planning.forecast.labels.income") : line.spendingType === "fixed" ? t("planning.forecast.labels.fixed") : t("planning.forecast.labels.variable")}</Pill></td>
+                          <td>{line.direction === "expense" ? (line.essential ? t("planning.forecast.labels.essential") : t("planning.forecast.labels.discretionary")) : t("planning.shared.labels.notAvailable")}</td>
+                          <td>{account ? stringFrom(readRecord(account).name, t("planning.shared.fallback.account")) : t("planning.shared.labels.unassigned")}</td>
                           <td className={`${ui.amount} ${line.direction === "income" ? ui.positive : ui.negative}`}>{line.direction === "income" ? "+" : "−"}{formatMoney(line.scenario || line.includedInForecast ? projectionCash(line, accountTypeById) : 0, currency)}</td>
-                          <td className={ui.amount}>{line.direction === "expense" ? formatMoney(line.scenario || line.includedInForecast ? projectionSpending(line) : 0, currency) : "—"}</td>
-                          <td>{line.scenario ? <IconButton label="Remove scenario adjustment" onClick={() => setScenarioLines((current) => current.filter((item) => item.id !== line.id))}><Trash2 size={15} /></IconButton> : null}</td>
+                          <td className={ui.amount}>{line.direction === "expense" ? formatMoney(line.scenario || line.includedInForecast ? projectionSpending(line) : 0, currency) : t("planning.shared.labels.notAvailable")}</td>
+                          <td>{line.scenario ? <IconButton label={t("planning.forecast.actions.removeAdjustment")} onClick={() => setScenarioLines((current) => current.filter((item) => item.id !== line.id))}><Trash2 size={15} /></IconButton> : null}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </ResponsiveTable>
-              ) : <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><CalendarPlus size={16} />No expected payments for this month. Add one in Planned Payments; hypothetical adjustments are available in scenario mode. <Button variant="secondary" onClick={() => router.push("/planned?new=1")}>Add expected payment</Button></div>}
+              ) : <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><CalendarPlus size={16} />{t("planning.forecast.payments.empty")} <Button variant="secondary" onClick={() => router.push("/planned?new=1")}>{t("planning.forecast.actions.addExpectedPayment")}</Button></div>}
         </Section>
 
         <div className={ui.equalColumns}>
-          <Section title="Expected opening balances" description={openingsDirty ? "Edit each account in its native currency · save to refresh reporting totals" : "Each assumption stays in its account's native currency"}>
-              <ResponsiveTable label="Expected opening balances">
-                <thead><tr><th>Account</th><th>Actual now</th><th>Expected opening (native)</th><th>Difference</th></tr></thead>
+          <Section title={t("planning.forecast.openings.title")} description={openingsDirty ? t("planning.forecast.openings.dirtyDescription") : t("planning.forecast.openings.description")}>
+              <ResponsiveTable label={t("planning.forecast.openings.tableLabel")}>
+                <thead><tr><th>{t("planning.forecast.openings.account")}</th><th>{t("planning.forecast.openings.actualNow")}</th><th>{t("planning.forecast.openings.expectedOpening")}</th><th>{t("planning.forecast.openings.difference")}</th></tr></thead>
                 <tbody>
                   {accounts.map((item, index) => {
                     const account = readRecord(item);
@@ -475,12 +531,12 @@ export default function PlanningPage() {
                     return (
                       <tr key={stringFrom(account.id, String(index))}>
                         <td>
-                          <span className={ui.tablePrimary}>{stringFrom(account.name, "Account")}</span>
-                          <span className={ui.tableSecondary}>{stringFrom(account.type).replaceAll("_", " ")} · {nativeCurrency}</span>
+                          <span className={ui.tablePrimary}>{stringFrom(account.name, t("planning.shared.fallback.account"))}</span>
+                          <span className={ui.tableSecondary}>{t("planning.forecast.openings.accountDetail", { type: accountTypeLabel(stringFrom(account.type), t), currency: nativeCurrency })}</span>
                         </td>
                         <td className={ui.amount}>{formatMoney(actualBalance, nativeCurrency)}</td>
-                        <td><Input className={ui.planTableInput} aria-label={`Expected opening for ${stringFrom(account.name)} in ${nativeCurrency}`} aria-invalid={expected === null} inputMode="decimal" value={entry?.amount ?? ""} onChange={(event) => setOpenings((current) => current.map((opening) => opening.accountId === id ? { ...opening, amount: event.target.value } : opening))} /></td>
-                        <td className={`${ui.amount} ${difference === null ? "" : amountDifferenceTone(difference)}`}>{difference === null ? "—" : formatMoney(difference, nativeCurrency)}</td>
+                        <td><Input className={ui.planTableInput} aria-label={t("planning.forecast.openings.inputLabel", { account: stringFrom(account.name, t("planning.shared.fallback.account")), currency: nativeCurrency })} aria-invalid={expected === null} inputMode="decimal" value={entry?.amount ?? ""} onChange={(event) => setOpenings((current) => current.map((opening) => opening.accountId === id ? { ...opening, amount: event.target.value } : opening))} /></td>
+                        <td className={`${ui.amount} ${difference === null ? "" : amountDifferenceTone(difference)}`}>{difference === null ? t("planning.shared.labels.notAvailable") : formatMoney(difference, nativeCurrency)}</td>
                       </tr>
                     );
                   })}
@@ -488,20 +544,20 @@ export default function PlanningPage() {
               </ResponsiveTable>
           </Section>
 
-          <Section title="Discretionary money" description="After essential expected commitments">
+          <Section title={t("planning.forecast.discretionary.title")} description={t("planning.forecast.discretionary.description")}>
               <div className={ui.summaryList}>
-                <div className={ui.summaryRow}><span>Opening cash</span><strong>{formatMoney(openingTotal, currency)}</strong></div>
-                <div className={ui.summaryRow}><span>Cleared actual movement</span><strong className={amountDifferenceTone(actualCashActivityTotal)}>{formatMoney(actualCashActivityTotal, currency)}</strong></div>
-                <div className={ui.summaryRow}><span>Outstanding income</span><strong className={ui.positive}>+{formatMoney(outstandingIncomeTotal, currency)}</strong></div>
-                <div className={ui.summaryRow}><span>Outstanding essentials</span><strong className={ui.negative}>−{formatMoney(essentialOutstanding, currency)}</strong></div>
-                <div className={ui.summaryRow}><span>Outstanding discretionary</span><strong className={ui.warning}>−{formatMoney(discretionarySpent, currency)}</strong></div>
-                <div className={ui.summaryRow}><span>Remaining</span><strong className={discretionaryAvailable >= 0 ? ui.positive : ui.negative}>{formatMoney(discretionaryAvailable, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.openingCash")}</span><strong>{formatMoney(openingTotal, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.actualMovement")}</span><strong className={amountDifferenceTone(actualCashActivityTotal)}>{formatMoney(actualCashActivityTotal, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.outstandingIncome")}</span><strong className={ui.positive}>+{formatMoney(outstandingIncomeTotal, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.outstandingEssentials")}</span><strong className={ui.negative}>−{formatMoney(essentialOutstanding, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.outstandingDiscretionary")}</span><strong className={ui.warning}>−{formatMoney(discretionarySpent, currency)}</strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.discretionary.remaining")}</span><strong className={discretionaryAvailable >= 0 ? ui.positive : ui.negative}>{formatMoney(discretionaryAvailable, currency)}</strong></div>
               </div>
           </Section>
         </div>
 
         <div className={ui.equalColumns}>
-          <Section title="Forecast by account" description={scenarioActive ? "Canonical closings in native currencies · scenario effects remain in the overall reporting forecast" : "Projected closing balances in each account's native currency"}>
+          <Section title={t("planning.forecast.accounts.title")} description={scenarioActive ? t("planning.forecast.accounts.scenarioDescription") : t("planning.forecast.accounts.description")}>
               <div className={ui.summaryList}>
                 {accounts.map((item, index) => {
                   const account = readRecord(item);
@@ -510,25 +566,25 @@ export default function PlanningPage() {
                   const reportingClosing = numberFrom(account.reportingForecastClosingMinor);
                   return (
                     <div className={ui.summaryRow} key={stringFrom(account.id, String(index))}>
-                      <span>{stringFrom(account.name, "Account")}<small>{nativeCurrency} ledger</small></span>
+                      <span>{stringFrom(account.name, t("planning.shared.fallback.account"))}<small>{t("planning.forecast.accounts.ledger", { currency: nativeCurrency })}</small></span>
                       <strong className={nativeClosing < 0 ? ui.negative : ""}>
                         {formatMoney(nativeClosing, nativeCurrency)}
-                        {nativeCurrency !== currency ? <small>≈ {formatMoney(reportingClosing, currency)} reporting</small> : null}
+                        {nativeCurrency !== currency ? <small>{t("planning.forecast.accounts.reportingEquivalent", { amount: formatMoney(reportingClosing, currency) })}</small> : null}
                       </strong>
                     </div>
                   );
                 })}
-                {!accounts.length ? <div className={ui.summaryRow}><span>Add accounts to allocate forecast cash.</span></div> : null}
+                {!accounts.length ? <div className={ui.summaryRow}><span>{t("planning.forecast.accounts.empty")}</span></div> : null}
               </div>
           </Section>
 
-          <Section title="Planned versus actual" description="Planned values come from expected payments; historical actuals never include unpaid obligations">
+          <Section title={t("planning.forecast.comparison.title")} description={t("planning.forecast.comparison.description")}>
               <div className={ui.summaryList}>
-                <div className={ui.summaryRow}><span>Income</span><strong>{formatMoney(incomeTotal, currency)} planned<br /><small>{formatMoney(actualIncome, currency)} actual</small></strong></div>
-                <div className={ui.summaryRow}><span>Spending</span><strong>{formatMoney(expenseTotal, currency)} planned<br /><small>{formatMoney(actualExpense, currency)} actual</small></strong></div>
-                <div className={ui.summaryRow}><span>Cash obligations</span><strong>{formatMoney(outstandingExpenseTotal, currency)} outstanding<br /><small>principal and card transfers included</small></strong></div>
-                <div className={ui.summaryRow}><span>Month progress</span><Progress value={todayDay} max={daysInMonth} label={`${todayDay} / ${daysInMonth} days`} /></div>
-                <div className={ui.summaryRow}><span>Spending variance</span><strong className={actualExpense > expenseTotal ? ui.negative : ui.positive}>{formatMoney(expenseTotal - actualExpense, currency)}<br /><small>{actualExpense > expenseTotal ? "over expected" : "remaining expected"}</small></strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.comparison.income")}</span><strong>{t("planning.forecast.comparison.plannedActual", { planned: formatMoney(incomeTotal, currency), actual: formatMoney(actualIncome, currency) }).split("\n")[0]}<br /><small>{t("planning.forecast.comparison.plannedActual", { planned: formatMoney(incomeTotal, currency), actual: formatMoney(actualIncome, currency) }).split("\n")[1]}</small></strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.comparison.spending")}</span><strong>{t("planning.forecast.comparison.plannedActual", { planned: formatMoney(expenseTotal, currency), actual: formatMoney(actualExpense, currency) }).split("\n")[0]}<br /><small>{t("planning.forecast.comparison.plannedActual", { planned: formatMoney(expenseTotal, currency), actual: formatMoney(actualExpense, currency) }).split("\n")[1]}</small></strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.comparison.cashObligations")}</span><strong>{t("planning.forecast.comparison.outstanding", { amount: formatMoney(outstandingExpenseTotal, currency) })}<br /><small>{t("planning.forecast.comparison.transfersIncluded")}</small></strong></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.comparison.monthProgress")}</span><Progress value={todayDay} max={daysInMonth} label={t("planning.forecast.comparison.progressLabel", { current: todayDay, total: daysInMonth })} /></div>
+                <div className={ui.summaryRow}><span>{t("planning.forecast.comparison.variance")}</span><strong className={actualExpense > expenseTotal ? ui.negative : ui.positive}>{formatMoney(expenseTotal - actualExpense, currency)}<br /><small>{actualExpense > expenseTotal ? t("planning.forecast.comparison.overExpected") : t("planning.forecast.comparison.remainingExpected")}</small></strong></div>
               </div>
           </Section>
         </div>
@@ -542,6 +598,7 @@ export default function PlanningPage() {
 function amountDifferenceTone(value: number) { return value > 0 ? ui.positive : value < 0 ? ui.negative : ""; }
 
 function ScenarioAdjustmentForm({ open, onClose, month, currency, accounts, categories, onAdd }: { open: boolean; onClose: () => void; month: string; currency: string; accounts: Row[]; categories: Row[]; onAdd: (line: PlanLine) => void }) {
+  const t = useTranslations();
   const [name, setName] = useState("");
   const [direction, setDirection] = useState<"income" | "expense">("expense");
   const [amount, setAmount] = useState("");
@@ -553,8 +610,8 @@ function ScenarioAdjustmentForm({ open, onClose, month, currency, accounts, cate
   const [formError, setFormError] = useState<string | null>(null);
   const add = () => {
     const amountMinor = moneyInputToMinor(amount, currency);
-    if (!name.trim()) { setFormError("Enter an item name."); return; }
-    if (amountMinor === null || amountMinor <= 0) { setFormError("Enter an amount greater than zero."); return; }
+    if (!name.trim()) { setFormError(t("planning.forecast.scenarioForm.nameError")); return; }
+    if (amountMinor === null || amountMinor <= 0) { setFormError(t("planning.forecast.scenarioForm.amountError")); return; }
     onAdd({
       id: `scenario-${Date.now()}`, name: name.trim(), direction, amountMinor,
       paidAmountMinor: 0, outstandingAmountMinor: amountMinor, date, forecastDate: date, accountId,
@@ -567,14 +624,14 @@ function ScenarioAdjustmentForm({ open, onClose, month, currency, accounts, cate
     setName(""); setAmount(""); setFormError(null); onClose();
   };
   return (
-    <Modal open={open} onClose={onClose} title="Add scenario adjustment" description="This hypothetical change affects the forecast only; it never creates a Planned Payment or actual transaction." footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={add}>Add adjustment</Button></>}>
+    <Modal open={open} onClose={onClose} title={t("planning.forecast.scenarioForm.title")} description={t("planning.forecast.scenarioForm.description")} footer={<><Button variant="ghost" onClick={onClose}>{t("planning.forecast.scenarioForm.cancel")}</Button><Button onClick={add}>{t("planning.forecast.scenarioForm.add")}</Button></>}>
       <div className={ui.formGrid}>
-        <Field label="Item name" className={ui.formSpan}><Input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={direction === "income" ? "Expected salary" : "Expected expense"} /></Field>
-        <Field label="Direction"><Select value={direction} onValueChange={(value) => setDirection(value as "income" | "expense")}><option value="expense">Expense</option><option value="income">Income</option></Select></Field>
-        <Field label={`Amount (${currency} reporting)`}><Input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field>
-        <Field label="Expected date"><Input type="date" min={`${month}-01`} max={lastDayOfMonth(month)} value={date} onChange={(event) => setDate(event.target.value)} /></Field>
-        <Field label="Account" hint="Optional allocation; the scenario amount remains in reporting currency."><Select value={accountId} onValueChange={(value) => setAccountId(value)}><option value="">Unassigned</option>{accounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")}</option>; })}</Select></Field>
-        {direction === "expense" ? <><Field label="Spending type"><Select value={spendingType} onValueChange={(value) => setSpendingType(value as "fixed" | "variable")}><option value="fixed">Fixed</option><option value="variable">Variable</option></Select></Field><Field label="Category"><Select value={categoryId} onValueChange={(value) => setCategoryId(value)}><option value="">Uncategorised</option>{categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, "Category")}</option>; })}</Select></Field><label className={`${ui.inlineNotice} ${ui.formSpan}`}><input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />Treat this as essential spending when calculating discretionary money.</label></> : null}
+        <Field label={t("planning.forecast.scenarioForm.itemName")} className={ui.formSpan}><Input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={direction === "income" ? t("planning.forecast.scenarioForm.incomePlaceholder") : t("planning.forecast.scenarioForm.expensePlaceholder")} /></Field>
+        <Field label={t("planning.forecast.scenarioForm.direction")}><Select value={direction} onValueChange={(value) => setDirection(value as "income" | "expense")}><option value="expense">{t("planning.forecast.scenarioForm.expense")}</option><option value="income">{t("planning.forecast.scenarioForm.income")}</option></Select></Field>
+        <Field label={t("planning.forecast.scenarioForm.amount", { currency })}><Input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field>
+        <Field label={t("planning.forecast.scenarioForm.expectedDate")}><Input type="date" min={`${month}-01`} max={lastDayOfMonth(month)} value={date} onChange={(event) => setDate(event.target.value)} /></Field>
+        <Field label={t("planning.forecast.scenarioForm.account")} hint={t("planning.forecast.scenarioForm.accountHint")}><Select value={accountId} onValueChange={(value) => setAccountId(value)}><option value="">{t("planning.shared.labels.unassigned")}</option>{accounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, t("planning.shared.fallback.account"))}</option>; })}</Select></Field>
+        {direction === "expense" ? <><Field label={t("planning.forecast.scenarioForm.spendingType")}><Select value={spendingType} onValueChange={(value) => setSpendingType(value as "fixed" | "variable")}><option value="fixed">{t("planning.forecast.scenarioForm.fixed")}</option><option value="variable">{t("planning.forecast.scenarioForm.variable")}</option></Select></Field><Field label={t("planning.forecast.scenarioForm.category")}><Select value={categoryId} onValueChange={(value) => setCategoryId(value)}><option value="">{t("planning.shared.labels.uncategorised")}</option>{categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, t("planning.shared.fallback.category"))}</option>; })}</Select></Field><label className={`${ui.inlineNotice} ${ui.formSpan}`}><input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />{t("planning.forecast.scenarioForm.essential")}</label></> : null}
       </div>
       <FormMessage error={formError} />
     </Modal>

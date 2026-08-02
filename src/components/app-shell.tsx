@@ -33,45 +33,95 @@ import {
   useDateRange,
   type DateRangeQuickPickId,
 } from "./date-range-context";
+import { useTranslations } from "@/i18n/client";
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, DEFAULT_TIME_ZONE } from "@/lib/currencies";
 
-interface NavigationItem {
-  label: string;
+type NavigationId =
+  | "dashboard"
+  | "transactions"
+  | "plannedPayments"
+  | "monthlyForecast"
+  | "budgets"
+  | "statistics"
+  | "accounts"
+  | "categories"
+  | "tags"
+  | "merchants"
+  | "importTransactions"
+  | "profileSettings"
+  | "dataBackups";
+
+interface NavigationDefinition {
+  id: NavigationId;
   href: string;
   icon: LucideIcon;
 }
 
-const primaryNavigation: NavigationItem[] = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Transactions", href: "/transactions", icon: ReceiptText },
-  { label: "Planned payments", href: "/planned", icon: CalendarClock },
-  { label: "Monthly forecast", href: "/planning", icon: CalendarRange },
-  { label: "Budgets", href: "/budgets", icon: WalletCards },
-  { label: "Statistics", href: "/statistics", icon: BarChart3 },
+interface NavigationItem extends NavigationDefinition {
+  label: string;
+  shortLabel: string;
+}
+
+const PRIMARY_NAVIGATION: NavigationDefinition[] = [
+  { id: "dashboard", href: "/", icon: LayoutDashboard },
+  { id: "transactions", href: "/transactions", icon: ReceiptText },
+  { id: "plannedPayments", href: "/planned", icon: CalendarClock },
+  { id: "monthlyForecast", href: "/planning", icon: CalendarRange },
+  { id: "budgets", href: "/budgets", icon: WalletCards },
+  { id: "statistics", href: "/statistics", icon: BarChart3 },
 ];
 
-const manageNavigation: NavigationItem[] = [
-  { label: "Accounts", href: "/accounts", icon: Landmark },
-  { label: "Categories", href: "/categories", icon: FolderTree },
-  { label: "Tags", href: "/tags", icon: Tags },
-  { label: "Merchants", href: "/merchants", icon: Store },
-  { label: "Import transactions", href: "/import", icon: FileUp },
+const MANAGE_NAVIGATION: NavigationDefinition[] = [
+  { id: "accounts", href: "/accounts", icon: Landmark },
+  { id: "categories", href: "/categories", icon: FolderTree },
+  { id: "tags", href: "/tags", icon: Tags },
+  { id: "merchants", href: "/merchants", icon: Store },
+  { id: "importTransactions", href: "/import", icon: FileUp },
 ];
 
-const utilityNavigation: NavigationItem[] = [
-  { label: "Profile settings", href: "/settings", icon: Settings2 },
-  { label: "Data & backups", href: "/import-export", icon: DatabaseBackup },
+const UTILITY_NAVIGATION: NavigationDefinition[] = [
+  { id: "profileSettings", href: "/settings", icon: Settings2 },
+  { id: "dataBackups", href: "/import-export", icon: DatabaseBackup },
 ];
 
-const mobileNavigation = [
-  primaryNavigation[0],
-  primaryNavigation[1],
-  primaryNavigation[2],
-  primaryNavigation[3],
-  primaryNavigation[5],
-];
+const NAVIGATION_MESSAGE_KEYS = {
+  dashboard: ["common.navigation.pages.dashboard.label", "common.navigation.pages.dashboard.shortLabel"],
+  transactions: ["common.navigation.pages.transactions.label", "common.navigation.pages.transactions.shortLabel"],
+  plannedPayments: ["common.navigation.pages.plannedPayments.label", "common.navigation.pages.plannedPayments.shortLabel"],
+  monthlyForecast: ["common.navigation.pages.monthlyForecast.label", "common.navigation.pages.monthlyForecast.shortLabel"],
+  budgets: ["common.navigation.pages.budgets.label", "common.navigation.pages.budgets.shortLabel"],
+  statistics: ["common.navigation.pages.statistics.label", "common.navigation.pages.statistics.shortLabel"],
+  accounts: ["common.navigation.pages.accounts.label", "common.navigation.pages.accounts.shortLabel"],
+  categories: ["common.navigation.pages.categories.label", "common.navigation.pages.categories.shortLabel"],
+  tags: ["common.navigation.pages.tags.label", "common.navigation.pages.tags.shortLabel"],
+  merchants: ["common.navigation.pages.merchants.label", "common.navigation.pages.merchants.shortLabel"],
+  importTransactions: ["common.navigation.pages.importTransactions.label", "common.navigation.pages.importTransactions.shortLabel"],
+  profileSettings: ["common.navigation.pages.profileSettings.label", "common.navigation.pages.profileSettings.shortLabel"],
+  dataBackups: ["common.navigation.pages.dataBackups.label", "common.navigation.pages.dataBackups.shortLabel"],
+} as const;
 
-const allNavigation = [...primaryNavigation, ...manageNavigation, ...utilityNavigation];
+const MOBILE_NAVIGATION_IDS = new Set<NavigationId>([
+  "dashboard",
+  "transactions",
+  "plannedPayments",
+  "monthlyForecast",
+  "statistics",
+]);
+
+function localizeNavigation(
+  definitions: NavigationDefinition[],
+  t: ReturnType<typeof useTranslations>,
+): NavigationItem[] {
+  return definitions.map((definition) => {
+    const [labelKey, shortLabelKey] = NAVIGATION_MESSAGE_KEYS[definition.id];
+    return {
+      ...definition,
+      label: t(labelKey),
+      shortLabel: t(shortLabelKey),
+    };
+  });
+}
+
 const authPaths = ["/login", "/register"];
 
 interface ShellUser {
@@ -85,8 +135,8 @@ interface ShellUser {
 type OpenPopover = "desktop-range" | "desktop-account" | "mobile-range" | "mobile-account" | null;
 
 const fallbackUser: ShellUser = {
-  displayName: "Personal workspace",
-  email: "Local account",
+  displayName: "",
+  email: "",
   defaultCurrency: DEFAULT_CURRENCY,
   locale: DEFAULT_LOCALE,
   timeZone: DEFAULT_TIME_ZONE,
@@ -97,12 +147,34 @@ function isActive(pathname: string, href: string) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const t = useTranslations();
   const pathname = usePathname();
   const [commandOpen, setCommandOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [user, setUser] = useState<ShellUser>(fallbackUser);
   const [openPopover, setOpenPopover] = useState<OpenPopover>(null);
   const authPage = authPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const { primaryNavigation, manageNavigation, utilityNavigation } = useMemo(
+    () => ({
+      primaryNavigation: localizeNavigation(PRIMARY_NAVIGATION, t),
+      manageNavigation: localizeNavigation(MANAGE_NAVIGATION, t),
+      utilityNavigation: localizeNavigation(UTILITY_NAVIGATION, t),
+    }),
+    [t],
+  );
+  const allNavigation = useMemo(
+    () => [...primaryNavigation, ...manageNavigation, ...utilityNavigation],
+    [manageNavigation, primaryNavigation, utilityNavigation],
+  );
+  const mobileNavigation = useMemo(
+    () => primaryNavigation.filter((item) => MOBILE_NAVIGATION_IDS.has(item.id)),
+    [primaryNavigation],
+  );
+  const displayUser = {
+    ...user,
+    displayName: user.displayName || t("common.app.personalWorkspace"),
+    email: user.email || t("common.app.localAccount"),
+  };
 
   function openCommandPalette() {
     setOpenPopover(null);
@@ -154,7 +226,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             : "compact";
         })
         .catch((error: unknown) => {
-          if (!(error instanceof DOMException && error.name === "AbortError")) console.error("Could not load account context", error);
+          if (!(error instanceof DOMException && error.name === "AbortError")) console.error("account_context_load_failed", error);
         });
     };
     loadAccountContext();
@@ -174,19 +246,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <DateRangeProvider locale={user.locale} timeZone={user.timeZone}>
       <div className="app-shell">
-      <a className="skip-link" href="#main-content">Skip to main content</a>
-      <aside className="app-sidebar" aria-label="Primary navigation">
-        <Link href="/" className="sidebar-brand" aria-label="LedgerLab dashboard">
+      <a className="skip-link" href="#main-content">{t("common.shell.skipToContent")}</a>
+      <aside className="app-sidebar" aria-label={t("common.navigation.primaryAria")}>
+        <Link href="/" className="sidebar-brand" aria-label={t("common.navigation.dashboardAria")}>
           <span className="brand-mark" aria-hidden="true">L</span>
           <span className="brand-copy">
-            <span className="brand-name">LedgerLab</span>
-            <span className="brand-context">Personal finance</span>
+            <span className="brand-name">{t("common.app.name")}</span>
+            <span className="brand-context">{t("common.app.brandContext")}</span>
           </span>
         </Link>
 
         <nav className="sidebar-nav">
-          <NavigationSection label="Workspace" items={primaryNavigation} pathname={pathname} />
-          <NavigationSection label="Manage" items={manageNavigation} pathname={pathname} />
+          <NavigationSection id="workspace" label={t("common.navigation.sections.workspace")} items={primaryNavigation} pathname={pathname} />
+          <NavigationSection id="manage" label={t("common.navigation.sections.manage")} items={manageNavigation} pathname={pathname} />
         </nav>
 
       </aside>
@@ -195,22 +267,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mobile-topbar-primary">
           <Link className="mobile-brand" href="/">
             <span className="brand-mark" aria-hidden="true">L</span>
-            LedgerLab
+            {t("common.app.name")}
           </Link>
           <div className="cluster">
-            <IconButton label="Search and navigate" onClick={openCommandPalette}>
+            <IconButton label={t("common.shell.searchAndNavigate")} onClick={openCommandPalette}>
               <Search size={17} aria-hidden="true" />
             </IconButton>
             <AccountMenu
               compact
-              user={user}
+              user={displayUser}
               open={openPopover === "mobile-account"}
               onOpenChange={(open) => setOpenPopover(open ? "mobile-account" : null)}
             />
           </div>
         </div>
         <div className="mobile-topbar-context">
-          <strong>{currentPage?.label ?? "LedgerLab"}</strong>
+          <strong>{currentPage?.label ?? t("common.app.name")}</strong>
           <span aria-hidden="true"> · </span>
           <DateRangePicker
             compact
@@ -223,7 +295,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="app-main" id="main-content" tabIndex={-1}>
         <header className="app-topbar">
           <div className="topbar-context">
-            <strong>{currentPage?.label ?? "LedgerLab"}</strong>
+            <strong>{currentPage?.label ?? t("common.app.name")}</strong>
             <span aria-hidden="true"> · </span>
             <DateRangePicker
               open={openPopover === "desktop-range"}
@@ -233,11 +305,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="topbar-actions">
             <button className="command-button" type="button" onClick={openCommandPalette}>
               <Search size={15} aria-hidden="true" />
-              <span>Search or navigate</span>
+              <span>{t("common.shell.searchOrNavigate")}</span>
               <kbd><Command size={9} aria-hidden="true" />K</kbd>
             </button>
             <AccountMenu
-              user={user}
+              user={displayUser}
               open={openPopover === "desktop-account"}
               onOpenChange={(open) => setOpenPopover(open ? "desktop-account" : null)}
             />
@@ -246,14 +318,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="app-content">{children}</div>
       </main>
 
-      <nav className="mobile-nav" aria-label="Mobile navigation">
+      <nav className="mobile-nav" aria-label={t("common.navigation.mobileAria")}>
         {mobileNavigation.map((item) => {
           const Icon = item.icon;
           const active = isActive(pathname, item.href);
           return (
             <Link key={item.href} className="mobile-nav-link" href={item.href} aria-current={active ? "page" : undefined}>
               <Icon size={18} strokeWidth={active ? 2.2 : 1.8} aria-hidden="true" />
-              <span>{item.label === "Planned payments" ? "Planned" : item.label === "Monthly forecast" ? "Forecast" : item.label}</span>
+              <span>{item.shortLabel}</span>
             </Link>
           );
         })}
@@ -267,6 +339,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }}
         query={query}
         onQueryChange={setQuery}
+        items={allNavigation}
       />
       </div>
     </DateRangeProvider>
@@ -321,6 +394,17 @@ function focusByKey(
   items[nextIndex]?.focus();
 }
 
+const DATE_RANGE_QUICK_PICK_KEYS = {
+  this_month: "common.dateRange.quick.currentMonth",
+  month_to_date: "common.dateRange.quick.monthToDate",
+  last_month: "common.dateRange.quick.previousMonth",
+  next_month: "common.dateRange.quick.nextMonth",
+  last_3_months: "common.dateRange.quick.previousThreeMonths",
+  last_6_months: "common.dateRange.quick.previousSixMonths",
+  this_year: "common.dateRange.quick.yearToDate",
+  last_12_months: "common.dateRange.quick.previousTwelveMonths",
+} as const;
+
 function DateRangePicker({
   open,
   onOpenChange,
@@ -330,6 +414,7 @@ function DateRangePicker({
   onOpenChange: (open: boolean) => void;
   compact?: boolean;
 }) {
+  const t = useTranslations();
   const pickerId = useId();
   const errorId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -386,7 +471,7 @@ function DateRangePicker({
         ref={triggerRef}
         className="date-range-trigger"
         type="button"
-        aria-label={`Date range: ${label}`}
+        aria-label={t("common.dateRange.triggerAria", { label })}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={pickerId}
@@ -407,14 +492,14 @@ function DateRangePicker({
           className="date-range-popover"
           id={pickerId}
           role="dialog"
-          aria-label="Choose date range"
+          aria-label={t("common.dateRange.dialogTitle")}
           onKeyDown={(event) => focusByKey(event, "[data-range-option]")}
         >
           <div className="date-range-popover-header">
-            <strong>Choose date range</strong>
-            <span>Dates use {timeZone}.</span>
+            <strong>{t("common.dateRange.dialogTitle")}</strong>
+            <span>{t("common.dateRange.dialogDescription", { timeZone })}</span>
           </div>
-          <div className="date-range-quick-picks" role="group" aria-label="Quick date ranges">
+          <div className="date-range-quick-picks" role="group" aria-label={t("common.dateRange.quickGroup")}>
             {DATE_RANGE_QUICK_PICKS.map((quickPick) => {
               const selected = activeRange === quickPick.id;
               return (
@@ -425,17 +510,17 @@ function DateRangePicker({
                   aria-pressed={selected}
                   onClick={() => chooseQuickPick(quickPick.id)}
                 >
-                  <span>{quickPick.label}</span>
+                  <span>{t(DATE_RANGE_QUICK_PICK_KEYS[quickPick.id])}</span>
                   {selected ? <Check size={14} aria-hidden="true" /> : null}
                 </button>
               );
             })}
           </div>
           <div className="date-range-custom">
-            <strong>Custom range</strong>
+            <strong>{t("common.dateRange.customHeading")}</strong>
             <div className="date-range-fields">
               <label>
-                <span>Start date</span>
+                <span>{t("common.dateRange.startDate")}</span>
                 <input
                   type="date"
                   value={from}
@@ -445,7 +530,7 @@ function DateRangePicker({
                 />
               </label>
               <label>
-                <span>End date</span>
+                <span>{t("common.dateRange.endDate")}</span>
                 <input
                   type="date"
                   value={to}
@@ -457,8 +542,8 @@ function DateRangePicker({
             </div>
             {error ? <p className="date-range-error" id={errorId} role="alert">{error}</p> : null}
             <div className="date-range-actions">
-              <button className="button button-ghost" type="button" onClick={cancelCustomRange}>Cancel</button>
-              <button className="button button-primary" type="button" onClick={applyCustomRange}>Apply range</button>
+              <button className="button button-ghost" type="button" onClick={cancelCustomRange}>{t("common.actions.cancel")}</button>
+              <button className="button button-primary" type="button" onClick={applyCustomRange}>{t("common.actions.applyRange")}</button>
             </div>
           </div>
         </div>
@@ -484,6 +569,7 @@ function AccountMenu({
   onOpenChange: (open: boolean) => void;
   compact?: boolean;
 }) {
+  const t = useTranslations();
   const menuId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -504,7 +590,7 @@ function AccountMenu({
         ref={triggerRef}
         className="account-menu-trigger"
         type="button"
-        aria-label={`Open account menu for ${user.displayName}`}
+        aria-label={t("common.shell.accountMenuFor", { name: user.displayName })}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
@@ -520,7 +606,7 @@ function AccountMenu({
         {!compact ? (
           <span className="account-menu-trigger-copy">
             <strong>{user.displayName}</strong>
-            <span>{user.defaultCurrency} reporting</span>
+            <span>{t("common.app.reportingCurrency", { currency: user.defaultCurrency })}</span>
           </span>
         ) : null}
         {!compact ? <ChevronDown className="account-menu-chevron" size={14} aria-hidden="true" /> : null}
@@ -530,7 +616,7 @@ function AccountMenu({
           className="account-menu-popover"
           id={menuId}
           role="menu"
-          aria-label="User account"
+          aria-label={t("common.shell.userAccount")}
           onKeyDown={(event) => focusByKey(event, "[role='menuitem']")}
         >
           <div className="account-menu-identity">
@@ -541,22 +627,22 @@ function AccountMenu({
             </span>
           </div>
           <div className="account-menu-context">
-            <span>Personal workspace</span>
-            <strong>{user.defaultCurrency} · {user.timeZone}</strong>
+            <span>{t("common.app.personalWorkspace")}</span>
+            <strong>{t("common.app.workspaceDetails", { currency: user.defaultCurrency, timeZone: user.timeZone })}</strong>
           </div>
           <div className="account-menu-separator" role="separator" />
           <Link className="account-menu-item" href="/settings" role="menuitem" onClick={() => onOpenChange(false)}>
             <Settings2 size={16} aria-hidden="true" />
-            Profile settings
+            {t("common.navigation.pages.profileSettings.label")}
           </Link>
           <Link className="account-menu-item" href="/import-export" role="menuitem" onClick={() => onOpenChange(false)}>
             <DatabaseBackup size={16} aria-hidden="true" />
-            Data &amp; backups
+            {t("common.navigation.pages.dataBackups.label")}
           </Link>
           <div className="account-menu-separator" role="separator" />
           <button className="account-menu-item account-menu-signout" type="button" role="menuitem" onClick={() => void logout()}>
             <LogOut size={16} aria-hidden="true" />
-            Sign out
+            {t("common.actions.signOut")}
           </button>
         </div>
       ) : null}
@@ -564,10 +650,10 @@ function AccountMenu({
   );
 }
 
-function NavigationSection({ label, items, pathname }: { label: string; items: NavigationItem[]; pathname: string }) {
+function NavigationSection({ id, label, items, pathname }: { id: string; label: string; items: NavigationItem[]; pathname: string }) {
   return (
-    <section className="nav-section" aria-labelledby={`nav-${label.toLowerCase()}`}>
-      <span className="nav-label" id={`nav-${label.toLowerCase()}`}>{label}</span>
+    <section className="nav-section" aria-labelledby={`nav-${id}`}>
+      <span className="nav-label" id={`nav-${id}`}>{label}</span>
       <ul className="nav-list">
         {items.map((item) => {
           const active = isActive(pathname, item.href);
@@ -591,12 +677,15 @@ function CommandPalette({
   onOpenChange,
   query,
   onQueryChange,
+  items,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   query: string;
   onQueryChange: (query: string) => void;
+  items: NavigationItem[];
 }) {
+  const t = useTranslations();
   const router = useRouter();
   const listboxId = useId();
   const listboxRef = useRef<HTMLDivElement>(null);
@@ -604,9 +693,9 @@ function CommandPalette({
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
-      ? allNavigation.filter((item) => item.label.toLowerCase().includes(normalized))
-      : allNavigation;
-  }, [query]);
+      ? items.filter((item) => item.label.toLocaleLowerCase().includes(normalized))
+      : items;
+  }, [items, query]);
   const safeActiveIndex = filtered.length ? Math.min(activeIndex, filtered.length - 1) : 0;
   const activeItem = filtered[safeActiveIndex];
 
@@ -645,21 +734,21 @@ function CommandPalette({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Go to"
-      description="Search LedgerLab workspaces and actions."
+      title={t("common.shell.commandTitle")}
+      description={t("common.shell.commandDescription")}
       size="sm"
     >
       <div className="command-palette">
         <Input
           autoFocus
           leading={<Search size={15} />}
-          aria-label="Search pages"
+          aria-label={t("common.shell.commandInputLabel")}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={open}
           aria-controls={listboxId}
           aria-activedescendant={activeItem ? `${listboxId}-option-${safeActiveIndex}` : undefined}
-          placeholder="Transactions, forecast, accounts…"
+          placeholder={t("common.shell.commandInputPlaceholder")}
           value={query}
           onChange={(event) => {
             setActiveIndex(0);
@@ -667,7 +756,7 @@ function CommandPalette({
           }}
           onKeyDown={handleSearchKeyDown}
         />
-        <div ref={listboxRef} className="command-results" id={listboxId} role="listbox" aria-label="Pages">
+        <div ref={listboxRef} className="command-results" id={listboxId} role="listbox" aria-label={t("common.shell.commandResultsLabel")}>
           {filtered.map((item, index) => {
             const Icon = item.icon;
             return (
@@ -688,7 +777,7 @@ function CommandPalette({
             );
           })}
         </div>
-        {!filtered.length ? <p className="command-empty">No matching page.</p> : null}
+        {!filtered.length ? <p className="command-empty">{t("common.shell.commandNoMatches")}</p> : null}
       </div>
     </Dialog>
   );

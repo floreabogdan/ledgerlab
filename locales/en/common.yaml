@@ -1,5 +1,13 @@
 app:
   name: LedgerLab
+  brandContext: Personal finance
+  personalWorkspace: Personal workspace
+  localAccount: Local account
+  reportingCurrency: "{currency} reporting"
+  workspaceDetails: "{currency} · {timeZone}"
+metadata:
+  titleTemplate: "{title} · LedgerLab"
+  description: A focused personal finance workspace for planning, liabilities, and multi-currency transaction tracking.
 actions:
   back: Back
   cancel: Cancel
@@ -7,10 +15,153 @@ actions:
   continue: Continue
   delete: Delete
   save: Save
+  applyRange: Apply range
+  tryAgain: Try again
+  signOut: Sign out
 status:
-  loading: Loading…
+  loading: Loading
   noData: No data yet.
+  saving: Saving…
+  loadingDetails: Bringing your numbers together…
+  emptyTitle: Nothing here yet
+  emptyDescription: Add your first item to get started.
+  failureTitle: We couldn’t load this
+  failureDescription: Try again in a moment.
 welcome:
   named: "Welcome, {name}."
 items:
   count: "{count, plural, one {# item} other {# items}}"
+navigation:
+  primaryAria: Primary navigation
+  mobileAria: Mobile navigation
+  dashboardAria: LedgerLab dashboard
+  sections:
+    workspace: Workspace
+    manage: Manage
+  pages:
+    dashboard:
+      label: Dashboard
+      shortLabel: Dashboard
+    accounts:
+      label: Accounts
+      shortLabel: Accounts
+    transactions:
+      label: Transactions
+      shortLabel: Transactions
+    plannedPayments:
+      label: Planned payments
+      shortLabel: Planned
+    monthlyForecast:
+      label: Monthly forecast
+      shortLabel: Forecast
+    budgets:
+      label: Budgets
+      shortLabel: Budgets
+    statistics:
+      label: Statistics
+      shortLabel: Statistics
+    categories:
+      label: Categories
+      shortLabel: Categories
+    tags:
+      label: Tags
+      shortLabel: Tags
+    merchants:
+      label: Merchants
+      shortLabel: Merchants
+    importTransactions:
+      label: Import transactions
+      shortLabel: Import
+    profileSettings:
+      label: Profile settings
+      shortLabel: Settings
+    dataBackups:
+      label: Data & backups
+      shortLabel: Backups
+shell:
+  skipToContent: Skip to main content
+  searchAndNavigate: Search and navigate
+  searchOrNavigate: Search or navigate
+  accountMenuFor: "Open account menu for {name}"
+  userAccount: User account
+  commandTitle: Go to
+  commandDescription: Search LedgerLab workspaces and actions.
+  commandInputLabel: Search pages
+  commandInputPlaceholder: Transactions, forecast, accounts…
+  commandResultsLabel: Pages
+  commandNoMatches: No matching page.
+dateRange:
+  triggerAria: "Date range: {label}"
+  dialogTitle: Choose date range
+  dialogDescription: "Dates use {timeZone}."
+  quickGroup: Quick date ranges
+  customHeading: Custom range
+  startDate: Start date
+  endDate: End date
+  invalid: Invalid date range
+  validation:
+    missing: Choose a start and end date.
+    invalidCalendar: Use valid calendar dates.
+    reversed: The start date must be on or before the end date.
+    tooLong: Choose a date range of ten years or less.
+  quick:
+    currentMonth: This month
+    monthToDate: Month to date
+    previousMonth: Last month
+    nextMonth: Next month
+    previousThreeMonths: Last 3 months
+    previousSixMonths: Last 6 months
+    yearToDate: Year to date
+    previousTwelveMonths: Last 12 months
+controls:
+  required: required
+  dialogClose: Close dialog
+  tooltipInfo: How this is calculated
+  suggestions: Suggestions
+  options: Options
+  search:
+    label: Search
+    placeholder: Search…
+    clear: Clear search
+  select:
+    choose: Choose an option
+    searchLabel: Search options
+    searchPlaceholder: Search options
+    noMatches: No matching options.
+    namedList: "{label} options"
+    searchNamed: "Search {label}"
+    resultCount: "{count, plural, one {# option} other {# options}}"
+  editable:
+    showSuggestions: Show suggestions
+    hideSuggestions: Hide suggestions
+    noMatches: No matching suggestions. Your custom value will be kept.
+    customValuesAccepted: Custom values accepted
+    acceptedCustomValue: "Custom value accepted: {value}"
+    namedList: "{label} suggestions"
+    resultCount: "{count, plural, one {# suggestion} other {# suggestions}}"
+  currency:
+    noDecimals: No decimal places
+    decimalPlaces: "{count, plural, one {# decimal place} other {# decimal places}}"
+    optionLabel: "{code}, {name}, {precision}"
+    choose: Choose currency
+    catalogHelp: Search the ISO 4217 catalog
+    required: Required.
+    searchLabel: Search currencies
+    searchPlaceholder: Search by code, name or symbol
+    matches: "{count, plural, one {# match} other {# matches}}"
+    commonFirst: Common currencies first
+    isoHeading: ISO 4217
+    currenciesList: Currencies
+    commonGroup: Common
+    noMatches: "No currencies match “{query}”."
+  chart:
+    valueLabel: "Value {index}"
+    valueTitle: "{label}: {amount}"
+  progress: Progress
+  month:
+    previous: Previous month
+    next: Next month
+request:
+  failedWithStatus: "Request failed ({status})"
+  unexpected: Something went wrong.
+  saveFailed: Could not save changes

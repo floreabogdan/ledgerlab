@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
+import { useTranslations } from "@/i18n/client";
 
 function Tooltip({ content, children }: { content: ReactNode; children: ReactNode }) {
   const id = useId();
@@ -116,10 +117,11 @@ function Tooltip({ content, children }: { content: ReactNode; children: ReactNod
   );
 }
 
-export function InfoTooltip({ content, label = "How this is calculated" }: { content: ReactNode; label?: string }) {
+export function InfoTooltip({ content, label }: { content: ReactNode; label?: string }) {
+  const t = useTranslations();
   return (
     <Tooltip content={content}>
-      <button type="button" className="info-button" aria-label={label}>
+      <button type="button" className="info-button" aria-label={label ?? t("common.controls.tooltipInfo")}>
         <Info size={13} aria-hidden="true" />
       </button>
     </Tooltip>

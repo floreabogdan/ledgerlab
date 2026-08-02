@@ -10,11 +10,15 @@ import {
   Upload,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { useTranslator } from "@/i18n/client";
+import type { Translator } from "@/i18n/runtime";
+import { parseApiError, translateApiError } from "@/lib/api-error";
 import {
   Button,
   FormMessage,
   Modal,
   Page,
+  RequestError,
   requestJson,
   Section,
   ViewHeader,
@@ -33,7 +37,17 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+async function translatedResponseError(
+  response: Response,
+  translator: Translator,
+) {
+  const body: unknown = await response.json().catch(() => null);
+  return translateApiError(translator, parseApiError(body));
+}
+
 export default function DataAndBackupsPage() {
+  const translator = useTranslator();
+  const t = translator.translate;
   const restoreRef = useRef<HTMLInputElement>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,12 +61,19 @@ export default function DataAndBackupsPage() {
     setWorking(true);
     setError(null);
     setSuccess(null);
+    let failure = t("settings.data.errors.exportFailed");
     try {
       const response = await fetch(`/api/export?format=${format}`);
-      if (!response.ok) throw new Error(`Export failed (${response.status}).`);
-      downloadBlob(await response.blob(), `ledgerlab-transactions-${new Date().toISOString().slice(0, 10)}.${format}`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not export data");
+      if (!response.ok) {
+        failure = await translatedResponseError(response, translator);
+        throw new Error("export_request_rejected");
+      }
+      downloadBlob(
+        await response.blob(),
+        `ledgerlab-transactions-${new Date().toISOString().slice(0, 10)}.${format}`,
+      );
+    } catch {
+      setError(failure);
     } finally {
       setWorking(false);
     }
@@ -62,12 +83,19 @@ export default function DataAndBackupsPage() {
     setWorking(true);
     setError(null);
     setSuccess(null);
+    let failure = t("settings.data.errors.backupFailed");
     try {
       const response = await fetch("/api/backup");
-      if (!response.ok) throw new Error(`Backup failed (${response.status}).`);
-      downloadBlob(await response.blob(), `ledgerlab-backup-${new Date().toISOString().slice(0, 10)}.json`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create backup");
+      if (!response.ok) {
+        failure = await translatedResponseError(response, translator);
+        throw new Error("backup_request_rejected");
+      }
+      downloadBlob(
+        await response.blob(),
+        `ledgerlab-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      );
+    } catch {
+      setError(failure);
     } finally {
       setWorking(false);
     }
@@ -78,15 +106,16 @@ export default function DataAndBackupsPage() {
     setError(null);
     setSuccess(null);
     if (file.size > 100 * 1024 * 1024) {
-      setError("Backup files must be smaller than 100 MB.");
+      setError(t("settings.data.errors.fileTooLarge"));
       return;
     }
 
-    const text = await file.text();
+    let text: string;
     try {
+      text = await file.text();
       JSON.parse(text);
     } catch {
-      setError("This is not a valid LedgerLab JSON backup.");
+      setError(t("settings.data.errors.invalidFile"));
       return;
     }
 
@@ -97,26 +126,38 @@ export default function DataAndBackupsPage() {
   }
 
   async function restoreBackup() {
-    setWorking(true);
     setError(null);
     setSuccess(null);
+    if (!restoreConfirmed) {
+      setError(t("settings.data.errors.confirmationRequired"));
+      return;
+    }
+
+    setWorking(true);
     try {
-      if (!restoreConfirmed) throw new Error("Confirm that you understand the current database will be replaced.");
-      await requestJson("/api/backup", {
-        method: "POST",
-        body: JSON.stringify({
-          backup: JSON.parse(restoreText),
-          fileName: restoreName,
-          action: "restore",
-          confirmation: "RESTORE",
-        }),
-      });
+      await requestJson(
+        "/api/backup",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            backup: JSON.parse(restoreText),
+            fileName: restoreName,
+            action: "restore",
+            confirmation: "RESTORE",
+          }),
+        },
+        translator,
+      );
       setRestoreOpen(false);
       setRestoreText("");
       if (restoreRef.current) restoreRef.current.value = "";
-      setSuccess("Backup restored. Reload other open LedgerLab tabs before making changes.");
+      setSuccess(t("settings.data.restored"));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not restore this backup");
+      setError(
+        caught instanceof RequestError
+          ? caught.message
+          : t("settings.data.errors.restoreFailed"),
+      );
     } finally {
       setWorking(false);
     }
@@ -134,57 +175,115 @@ export default function DataAndBackupsPage() {
   return (
     <Page>
       <ViewHeader
-        eyebrow="Data management"
-        title="Data & backups"
-        description="Export portable transaction data, create a complete local backup, or safely restore a previous LedgerLab database."
-        actions={<Link href="/import" className={`${kit.button} ${kit.button_secondary}`}><Upload size={15} /> Import transactions</Link>}
+        eyebrow={t("settings.data.eyebrow")}
+        title={t("settings.data.title")}
+        description={t("settings.data.description")}
+        actions={
+          <Link
+            href="/import"
+            className={`${kit.button} ${kit.button_secondary}`}
+          >
+            <Upload size={15} aria-hidden="true" />
+            {t("settings.data.importTransactions")}
+          </Link>
+        }
       />
       <FormMessage error={error} success={success} />
 
       <div className={ui.equalColumns}>
-        <Section title="Portable exports" description="Download actual transaction data">
+        <Section
+          title={t("settings.data.portable.title")}
+          description={t("settings.data.portable.description")}
+        >
           <div className={ui.dataAction}>
-            <span className={ui.dataActionIcon}><FileSpreadsheet size={21} /></span>
+            <span className={ui.dataActionIcon}>
+              <FileSpreadsheet size={21} aria-hidden="true" />
+            </span>
             <div>
-              <strong>CSV export</strong>
-              <p>Spreadsheet-friendly actual transactions with readable and integer posted amounts, original currencies, and applied FX snapshots.</p>
+              <strong>{t("settings.data.portable.csvTitle")}</strong>
+              <p>{t("settings.data.portable.csvDescription")}</p>
             </div>
             <div className={ui.dataActionButtons}>
-              <Button disabled={working} variant="secondary" icon={<Download size={15} />} onClick={() => void exportData("csv")}>Download CSV</Button>
+              <Button
+                disabled={working}
+                variant="secondary"
+                icon={<Download size={15} />}
+                onClick={() => void exportData("csv")}
+              >
+                {t("settings.data.portable.csvButton")}
+              </Button>
             </div>
           </div>
           <div className={ui.dataAction}>
-            <span className={ui.dataActionIcon}><FileJson size={21} /></span>
+            <span className={ui.dataActionIcon}>
+              <FileJson size={21} aria-hidden="true" />
+            </span>
             <div>
-              <strong>JSON export</strong>
-              <p>Structured accounts, categories and actual transactions, including exact dated exchange-rate provenance.</p>
+              <strong>{t("settings.data.portable.jsonTitle")}</strong>
+              <p>{t("settings.data.portable.jsonDescription")}</p>
             </div>
             <div className={ui.dataActionButtons}>
-              <Button disabled={working} variant="secondary" icon={<Download size={15} />} onClick={() => void exportData("json")}>Download JSON</Button>
+              <Button
+                disabled={working}
+                variant="secondary"
+                icon={<Download size={15} />}
+                onClick={() => void exportData("json")}
+              >
+                {t("settings.data.portable.jsonButton")}
+              </Button>
             </div>
           </div>
         </Section>
 
-        <Section title="Full database safety" description="Backup or restore all local LedgerLab data">
+        <Section
+          title={t("settings.data.safety.title")}
+          description={t("settings.data.safety.description")}
+        >
           <div className={ui.dataAction}>
-            <span className={ui.dataActionIcon}><HardDriveDownload size={21} /></span>
+            <span className={ui.dataActionIcon}>
+              <HardDriveDownload size={21} aria-hidden="true" />
+            </span>
             <div>
-              <strong>Create full backup</strong>
-              <p>Includes accounts, balances, transactions, plans, budgets, recurrence rules, profile settings, and the downloaded BNR rate cache.</p>
+              <strong>{t("settings.data.safety.createTitle")}</strong>
+              <p>{t("settings.data.safety.createDescription")}</p>
             </div>
             <div className={ui.dataActionButtons}>
-              <Button disabled={working} variant="secondary" icon={<Download size={15} />} onClick={() => void downloadBackup()}>Download backup</Button>
+              <Button
+                disabled={working}
+                variant="secondary"
+                icon={<Download size={15} />}
+                onClick={() => void downloadBackup()}
+              >
+                {t("settings.data.safety.createButton")}
+              </Button>
             </div>
           </div>
           <div className={ui.dataAction}>
-            <span className={ui.dataActionIcon}><Database size={21} /></span>
+            <span className={ui.dataActionIcon}>
+              <Database size={21} aria-hidden="true" />
+            </span>
             <div>
-              <strong>Restore a backup</strong>
-              <p>Validates a LedgerLab backup before replacing data for the signed-in local user.</p>
+              <strong>{t("settings.data.safety.restoreTitle")}</strong>
+              <p>{t("settings.data.safety.restoreDescription")}</p>
             </div>
             <div className={ui.dataActionButtons}>
-              <Button disabled={working} variant="secondary" icon={<Upload size={15} />} onClick={() => restoreRef.current?.click()}>Choose backup</Button>
-              <input ref={restoreRef} className={ui.hiddenFile} type="file" accept=".json,application/json" onChange={(event) => void chooseBackup(event.target.files?.[0])} />
+              <Button
+                disabled={working}
+                variant="secondary"
+                icon={<Upload size={15} />}
+                onClick={() => restoreRef.current?.click()}
+              >
+                {t("settings.data.safety.restoreButton")}
+              </Button>
+              <input
+                ref={restoreRef}
+                className={ui.hiddenFile}
+                type="file"
+                accept=".json,application/json"
+                onChange={(event) =>
+                  void chooseBackup(event.target.files?.[0])
+                }
+              />
             </div>
           </div>
         </Section>
@@ -193,22 +292,40 @@ export default function DataAndBackupsPage() {
       <Modal
         open={restoreOpen}
         onClose={closeRestore}
-        title="Restore full database backup?"
+        title={t("settings.data.confirmation.title")}
         description={restoreName}
-        footer={(
+        footer={
           <>
-            <Button variant="ghost" disabled={working} onClick={closeRestore}>Cancel</Button>
-            <Button variant="danger" disabled={working || !restoreConfirmed} onClick={() => void restoreBackup()}>{working ? "Restoring…" : "Replace data & restore"}</Button>
+            <Button variant="ghost" disabled={working} onClick={closeRestore}>
+              {t("settings.data.confirmation.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={working || !restoreConfirmed}
+              onClick={() => void restoreBackup()}
+            >
+              {working
+                ? t("settings.data.confirmation.restoring")
+                : t("settings.data.confirmation.replace")}
+            </Button>
           </>
-        )}
+        }
       >
         <div className={`${ui.inlineNotice} ${ui.inlineNoticeDanger}`}>
-          <Database size={17} />
-          <span><strong>This replaces current LedgerLab data.</strong><br />Create a fresh backup first if you may need to recover the current state. Sessions for other browser tabs may become stale.</span>
+          <Database size={17} aria-hidden="true" />
+          <span>
+            <strong>{t("settings.data.confirmation.warning")}</strong>
+            <br />
+            {t("settings.data.confirmation.warningHelp")}
+          </span>
         </div>
         <label className={`${ui.inlineNotice} ${ui.noticeOffset}`}>
-          <input type="checkbox" checked={restoreConfirmed} onChange={(event) => setRestoreConfirmed(event.target.checked)} />
-          <span>I understand that current finance data will be replaced by the selected backup.</span>
+          <input
+            type="checkbox"
+            checked={restoreConfirmed}
+            onChange={(event) => setRestoreConfirmed(event.target.checked)}
+          />
+          <span>{t("settings.data.confirmation.acknowledgement")}</span>
         </label>
       </Modal>
     </Page>

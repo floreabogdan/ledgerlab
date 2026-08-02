@@ -2,6 +2,7 @@
 
 import { Archive, Pencil, RotateCcw, Tag as TagIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslations, useTranslator } from "@/i18n/client";
 import {
   AddButton,
   Button,
@@ -35,6 +36,8 @@ function isArchived(tag: Tag) {
 }
 
 export default function TagsPage() {
+  const t = useTranslations();
+  const translator = useTranslator();
   const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>("/api/tags?archived=all", {});
   const tags = readList<Tag>(raw, "tags");
   const [showArchived, setShowArchived] = useState(false);
@@ -58,12 +61,12 @@ export default function TagsPage() {
       await requestJson("/api/tags", {
         method: "POST",
         body: JSON.stringify({ action: archive ? "archive" : "restore", id: readRecord(tag).id }),
-      });
+      }, translator);
       setPendingArchive(null);
-      setMessage(archive ? "Tag archived. Existing transaction links were preserved." : "Tag restored.");
+      setMessage(archive ? t("entities.tags.feedback.archived") : t("entities.tags.feedback.restored"));
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not update the tag");
+      setActionError(caught instanceof Error ? caught.message : t("entities.tags.feedback.updateFailed"));
     } finally {
       setSaving(false);
     }
@@ -72,29 +75,29 @@ export default function TagsPage() {
   return (
     <Page>
       <ViewHeader
-        eyebrow="Organisation"
-        title="Tags"
-        description="Use flexible labels across categories and accounts. Renaming or archiving a tag preserves every existing transaction link."
-        actions={<AddButton onClick={() => setEditing("new")}>Add tag</AddButton>}
+        eyebrow={t("entities.shared.eyebrow")}
+        title={t("entities.tags.header.title")}
+        description={t("entities.tags.header.description")}
+        actions={<AddButton onClick={() => setEditing("new")}>{t("entities.tags.actions.add")}</AddButton>}
       />
 
       <div className={ui.metricGrid}>
-        <Metric label="Active tags" value={active.length} tone="accent" detail="Available during entry" />
-        <Metric label="Transaction links" value={totalUses} detail="Across active tags" />
-        <Metric label="Unused tags" value={unused} detail="Candidates to review" />
-        <Metric label="Archived" value={archived.length} detail="Links retained" />
+        <Metric label={t("entities.tags.metrics.active.label")} value={active.length} tone="accent" detail={t("entities.tags.metrics.active.detail")} />
+        <Metric label={t("entities.tags.metrics.links.label")} value={totalUses} detail={t("entities.tags.metrics.links.detail")} />
+        <Metric label={t("entities.tags.metrics.unused.label")} value={unused} detail={t("entities.tags.metrics.unused.detail")} />
+        <Metric label={t("entities.tags.metrics.archived.label")} value={archived.length} detail={t("entities.tags.metrics.archived.detail")} />
       </div>
 
       <FormMessage error={actionError} success={message} />
       <Section
-        title="Tag library"
-        description="Usage counts exclude voided transactions."
+        title={t("entities.tags.section.title")}
+        description={t("entities.tags.section.description")}
         action={
           <Toggle
             checked={showArchived}
             onChange={setShowArchived}
-            label="Show archived"
-            description="Include tags unavailable for new entries."
+            label={t("entities.tags.toggle.label")}
+            description={t("entities.tags.toggle.description")}
           />
         }
       >
@@ -103,24 +106,24 @@ export default function TagsPage() {
           error={error}
           onRetry={reload}
           empty={!visible.length}
-          emptyTitle={showArchived ? "No tags yet" : "No active tags"}
-          emptyDescription="Create a tag when you need a label that cuts across categories, merchants, or accounts."
-          action={<AddButton onClick={() => setEditing("new")}>Add tag</AddButton>}
+          emptyTitle={showArchived ? t("entities.tags.empty.allTitle") : t("entities.tags.empty.activeTitle")}
+          emptyDescription={t("entities.tags.empty.description")}
+          action={<AddButton onClick={() => setEditing("new")}>{t("entities.tags.actions.add")}</AddButton>}
         >
-          <ResponsiveTable label="Tags">
+          <ResponsiveTable label={t("entities.tags.table.label")}>
             <thead>
               <tr>
-                <th>Tag</th>
-                <th>Transactions</th>
-                <th>Status</th>
-                <th><span className="sr-only">Actions</span></th>
+                <th>{t("entities.tags.table.tag")}</th>
+                <th>{t("entities.tags.table.transactions")}</th>
+                <th>{t("entities.tags.table.status")}</th>
+                <th><span className="sr-only">{t("entities.shared.table.actions")}</span></th>
               </tr>
             </thead>
             <tbody>
               {visible.map((item, index) => {
                 const tag = readRecord(item);
                 const archivedTag = isArchived(item);
-                const name = stringFrom(tag.name, "Unnamed tag");
+                const name = stringFrom(tag.name, t("entities.shared.fallback.unnamedTag"));
                 return (
                   <tr key={stringFrom(tag.id, String(index))}>
                     <td>
@@ -133,14 +136,14 @@ export default function TagsPage() {
                       </span>
                     </td>
                     <td>{numberFrom(tag.usageCount)}</td>
-                    <td><Pill tone={archivedTag ? "neutral" : "info"}>{archivedTag ? "archived" : "active"}</Pill></td>
+                    <td><Pill tone={archivedTag ? "neutral" : "info"}>{archivedTag ? t("entities.shared.status.archived") : t("entities.shared.status.active")}</Pill></td>
                     <td>
                       <div className={ui.paymentActions}>
-                        <IconButton label={`Rename ${name}`} onClick={() => setEditing(item)}><Pencil size={15} /></IconButton>
+                        <IconButton label={t("entities.tags.actions.renameNamed", { name })} onClick={() => setEditing(item)}><Pencil size={15} /></IconButton>
                         {archivedTag ? (
-                          <IconButton label={`Restore ${name}`} onClick={() => void changeArchiveState(item, false)}><RotateCcw size={15} /></IconButton>
+                          <IconButton label={t("entities.tags.actions.restoreNamed", { name })} onClick={() => void changeArchiveState(item, false)}><RotateCcw size={15} /></IconButton>
                         ) : (
-                          <IconButton label={`Archive ${name}`} onClick={() => setPendingArchive(item)}><Archive size={15} /></IconButton>
+                          <IconButton label={t("entities.tags.actions.archiveNamed", { name })} onClick={() => setPendingArchive(item)}><Archive size={15} /></IconButton>
                         )}
                       </div>
                     </td>
@@ -157,7 +160,7 @@ export default function TagsPage() {
         tag={editing}
         onClose={() => setEditing(null)}
         onSaved={async (created) => {
-          setMessage(created ? "Tag created." : "Tag updated. Existing transaction links now use the new name.");
+          setMessage(created ? t("entities.tags.feedback.created") : t("entities.tags.feedback.updated"));
           setActionError(null);
           await reload();
         }}
@@ -166,20 +169,20 @@ export default function TagsPage() {
       <Modal
         open={Boolean(pendingArchive)}
         onClose={() => setPendingArchive(null)}
-        title="Archive tag?"
-        description="It will disappear from new transaction entry, while historical links and reports remain intact."
+        title={t("entities.tags.archive.title")}
+        description={t("entities.tags.archive.description")}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPendingArchive(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setPendingArchive(null)}>{t("common.actions.cancel")}</Button>
             <Button variant="danger" disabled={saving} onClick={() => pendingArchive && void changeArchiveState(pendingArchive, true)}>
-              {saving ? "Archiving…" : "Archive tag"}
+              {saving ? t("entities.tags.actions.archiving") : t("entities.tags.archive.confirm")}
             </Button>
           </>
         }
       >
         <div className={ui.inlineNotice}>
           <TagIcon size={17} aria-hidden="true" />
-          <span><strong>{stringFrom(readRecord(pendingArchive).name, "This tag")}</strong> remains attached to its existing transactions.</span>
+          <span>{t("entities.tags.archive.notice", { name: stringFrom(readRecord(pendingArchive).name, t("entities.shared.fallback.thisTag")) })}</span>
         </div>
       </Modal>
     </Page>
@@ -187,6 +190,8 @@ export default function TagsPage() {
 }
 
 function TagForm({ tag, onClose, onSaved }: { tag: Tag | "new" | null; onClose: () => void; onSaved: (created: boolean) => Promise<void> }) {
+  const t = useTranslations();
+  const translator = useTranslator();
   const editing = tag && tag !== "new" ? readRecord(tag) : null;
   const [name, setName] = useState("");
   const [color, setColor] = useState("#2563eb");
@@ -199,11 +204,11 @@ function TagForm({ tag, onClose, onSaved }: { tag: Tag | "new" | null; onClose: 
   }, [editing]);
 
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
-    if (!name.trim()) throw new Error("Enter a tag name.");
+    if (!name.trim()) throw new Error(t("entities.tags.form.nameRequired"));
     await requestJson("/api/tags", {
       method: "POST",
       body: JSON.stringify({ action: editing ? "update" : "create", id: editing?.id, name: name.trim(), color }),
-    });
+    }, translator);
     onClose();
     await onSaved(!editing);
   });
@@ -212,20 +217,20 @@ function TagForm({ tag, onClose, onSaved }: { tag: Tag | "new" | null; onClose: 
     <Modal
       open={Boolean(tag)}
       onClose={() => { setSubmitError(null); onClose(); }}
-      title={editing ? "Rename tag" : "Add tag"}
-      description={editing ? "The updated name will appear on every linked transaction." : "Tags provide a flexible reporting dimension outside the category hierarchy."}
+      title={editing ? t("entities.tags.form.renameTitle") : t("entities.tags.form.addTitle")}
+      description={editing ? t("entities.tags.form.renameDescription") : t("entities.tags.form.addDescription")}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Saving…" : editing ? "Save changes" : "Create tag"}</Button>
+          <Button variant="ghost" onClick={onClose}>{t("common.actions.cancel")}</Button>
+          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("entities.tags.actions.saving") : editing ? t("entities.tags.actions.saveChanges") : t("entities.tags.actions.create")}</Button>
         </>
       }
     >
       <form className={ui.formGrid} onSubmit={(event) => void submit(event)}>
-        <Field label="Tag name" className={ui.formSpan}>
-          <Input autoFocus value={name} maxLength={40} onChange={(event) => setName(event.target.value)} placeholder="e.g. Reimbursable" />
+        <Field label={t("entities.tags.form.name")} className={ui.formSpan}>
+          <Input autoFocus value={name} maxLength={40} onChange={(event) => setName(event.target.value)} placeholder={t("entities.tags.form.namePlaceholder")} />
         </Field>
-        <Field label="Colour" className={ui.formSpan}>
+        <Field label={t("entities.tags.form.colour")} className={ui.formSpan}>
           <input className={ui.colorInput} type="color" value={color} onChange={(event) => setColor(event.target.value)} />
         </Field>
         <button type="submit" hidden />

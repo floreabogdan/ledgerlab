@@ -1,8 +1,476 @@
+shared:
+  fallback:
+    account: Account
+    category: Category
+    selectedAccount: selected account
+    thisAccount: this account
+    forecastItem: Forecast item
+    plannedPayment: Planned payment
+  labels:
+    actions: Actions
+    uncategorised: Uncategorised
+    unassigned: Unassigned
+    notAvailable: "—"
+  options:
+    accountWithBalance: "{name} · {currency} · {balance}"
+
 budgets:
   title: Budgets
-forecast:
-  title: Planning
+  header:
+    eyebrow: Spending guardrails
+    title: Monthly budgets
+    description: Category limits compare against actual eligible spending. Upcoming planned payments remain visible but do not consume budget until paid.
+  actions:
+    addCategoryBudget: Add category budget
+    addBudget: Add budget
+    copyPreviousMonth: Copy previous month
+    saveBudget: Save budget
+    saving: Saving…
+  feedback:
+    copied: Previous month’s budgets copied. Review and adjust before relying on them.
+    copyFailed: Could not copy budgets.
+  range:
+    endMonth: Monthly view uses the range end month
+  metrics:
+    monthlyBudget:
+      label: Monthly budget
+      info: Sum of category budgets for the selected month.
+    actualSpending:
+      label: Actual spending
+      info: Cleared actual expenses assigned to budgeted categories; pending transactions, transfers and planned-only items are excluded.
+    remaining:
+      label: Remaining
+      info: Total monthly budget minus actual eligible spending.
+    plannedAhead:
+      label: Planned ahead
+      detail: Projection only
+      info: Expected unpaid payment occurrences in budgeted categories. This does not reduce actual budget remaining.
+  progress:
+    title: Budget progress
+    description: Actual versus monthly limit
+    overCount: "{count, plural, one {# over budget} other {# over budget}}"
+    onTrack: On track
+    leftToSpend: left to spend across all categories
+    overCombined: over the combined monthly budget
+    aria: "{spent} spent of {total}"
+  categories:
+    title: Category budgets
+    description: Planned payments are shown separately from actual spending
+    emptyTitle: No budgets for this month
+    emptyDescription: Set limits for the categories you want to monitor. Transactions remain usable without budgets.
+    tableLabel: Monthly category budgets
+  table:
+    category: Category
+    monthlyLimit: Monthly limit
+    actualSpent: Actual spent
+    plannedAhead: Planned ahead
+    progress: Progress
+    remaining: Remaining
+    actual: actual
+    projection: projection
+    none: none
+    edit: "Edit {category} budget"
+  notice:
+    overBudget: "{count, plural, one {# category is} other {# categories are}} over the selected monthly limit. Consider reviewing the actual transactions or adjusting a limit if the plan changed. This is a review suggestion, not financial advice."
+  form:
+    addTitle: Add category budget
+    editTitle: Edit category budget
+    description: Budget for {month}. Only actual spending consumes it.
+    category: Category
+    chooseCategory: Choose category
+    monthlyLimit: "Monthly limit ({currency})"
+    storageNotice: LedgerLab stores this amount as integer minor units. It is compared with actual signed expense transactions in the category.
+    chooseCategoryError: Choose a category.
+    positiveAmountError: Enter a budget greater than zero.
+
 plannedPayments:
   title: Planned payments
+  header:
+    eyebrow: Future money
+    title: Planned payments
+    description: Expected obligations live here before actual activity exists. Debt payments show their cash impact separately from the portion that counts as spending.
+  actions:
+    planPayment: Plan payment
+    planAPayment: Plan a payment
+    list: List
+    calendar: Calendar
+    recordPayment: Record payment
+    viewAccount: View account
+    payRemainder: Pay remainder
+    markPaid: Mark paid
+    skipCycle: Skip this cycle without paying
+    cancelWithdrawn: Cancel a withdrawn obligation
+    undoPayment: Undo linked payment
+    restoreOccurrence: Restore this occurrence
+    keepOccurrence: Keep occurrence
+    cancelOccurrence: Cancel occurrence
+  feedback:
+    actionFailed: "{action, select, skip {Could not skip this occurrence.} cancel {Could not cancel this occurrence.} undo {Could not undo this occurrence.} other {Could not update this occurrence.}}"
+  metrics:
+    cashDue:
+      label: Cash payments due
+      rangeDetail: "{range} · {currency} reporting value"
+      info: Remaining cash expected to leave an account, converted to profile currency by due date. Native planned amounts remain unchanged.
+    spending:
+      label: Counts as spending
+      detail: "Planned expense impact · {currency}"
+      info: Expected expense impact in profile currency. Credit-card statements and loan principal do not count as new spending.
+    overdue:
+      label: Overdue
+      detail: "{count, plural, one {# occurrence} other {# occurrences}} · {currency}"
+      info: Unpaid remainder on overdue occurrences, expressed in profile currency without changing native denominations.
+    paid:
+      label: Paid occurrences
+      detail: Linked to actual transactions
+    conversionUnavailable: Reporting conversion unavailable
+  schedule:
+    title: Obligations schedule
+    description: Due in {range}; planned, pending and actual values are labelled separately
+    tabLabel: Payment status
+    upcoming: Upcoming
+    overdue: Overdue
+    paid: Paid
+    all: All
+    searchPlaceholder: Search planned payments…
+    legendPlanned: Planned
+    legendScheduled: Scheduled / pending
+    legendPaid: Actual / paid
+    reportingUnavailable: Some obligations use a different native currency, but this response does not include their reporting-currency equivalents. Native amounts remain visible; aggregate totals are withheld rather than adding unlike currencies.
+    emptyTitle: No future payments planned
+    emptyDescription: Add a one-time or repeating obligation so it appears in the selected range before any transaction exists.
+  cancel:
+    title: Cancel this occurrence?
+    description: "{name} · due {date}"
+    notice: Cancellation removes this occurrence from forecasts without changing the recurring rule or any other occurrence. You can restore it later.
+  type:
+    cardStatement: Card statement
+    cardStatementName: "{account} statement"
+    loanInstalment: Loan instalment
+    loanInstalmentName: "{account} instalment"
+    plannedIncome: Planned income
+    plannedExpense: Planned expense
+  status:
+    planned: Planned
+    scheduled: Scheduled
+    overdue: Overdue
+    paid: Paid
+    cancelled: Cancelled
+    skipped: Skipped
+    unknown: Unknown
+  recurrence:
+    debtSchedule: Debt schedule
+    weekly: "{interval, plural, one {Every week} other {Every # weeks}}"
+    monthly: "{interval, plural, one {Every month} other {Every # months}}"
+    yearly: "{interval, plural, one {Every year} other {Every # years}}"
+    recurring: Recurring
+    oneTime: One-time
+    occurrenceOnly: Occurrence only
+    currentRateEstimate: Current-rate estimate
+  money:
+    nativeDetail: "{detail} · {currency}"
+    reportingUnavailable: Reporting value unavailable
+    reportingEquivalent: "≈ {amount} reporting"
+    nativeCashProjection: native cash projection
+    settled: settled
+    noNewSpending: no new spending
+    principalExcluded: "{amount} principal excluded"
+    nativePlannedExpense: native planned expense
+    notExpense: not an expense
+    appliedToPlan: applied to this plan
+    notPosted: not posted
+  table:
+    empty: No occurrences match this view.
+    label: Planned payment occurrences
+    due: Due
+    payment: Payment
+    typeCategory: Type / category
+    recurrence: Recurrence
+    status: Status
+    cashDue: Cash due
+    spending: Counts as spending
+    appliedActual: Applied / actual
+    actions: Actions
+    pastDue: Past due
+    cardTransfer: Payment is a transfer
+    loanExpense: Interest and fees are expenses
+    amountRemains: "{amount} remains"
+  calendar:
+    monday: Mon
+    tuesday: Tue
+    wednesday: Wed
+    thursday: Thu
+    friday: Fri
+    saturday: Sat
+    sunday: Sun
+    itemTitle: "{name} — {amount} native cash due"
+    itemTitleReporting: "{name} — {amount} native cash due · approximately {reportingAmount} reporting"
+    itemTitleLiability: "{name} — {amount} native cash due · {type}"
+    itemTitleReportingLiability: "{name} — {amount} native cash due · approximately {reportingAmount} reporting · {type}"
+    more: "+{count, plural, one {# more} other {# more}}"
+  form:
+    title: Plan a payment
+    description: Create an expected payment without changing an actual balance.
+    cancel: Cancel
+    planning: Planning…
+    create: Create planned payment
+    paymentName: Payment name
+    paymentNamePlaceholder: e.g. Electricity bill
+    direction: Direction
+    expectedExpense: Expected expense
+    expectedIncome: Expected income
+    expectedAmount: "Expected amount ({currency})"
+    expectedAmountHint: This stays in the planned payment’s native currency.
+    plannedCurrency: Planned currency
+    accountCurrencyHint: "Expected account ledger: {currency}"
+    profileCurrencyHint: "No account selected · defaults to profile currency {currency}"
+    firstDueDate: First due date
+    dueDate: Due date
+    expectedAccount: Expected account
+    expectedAccountHint: Optional until the payment is made
+    decideWhenPaid: Decide when paid
+    category: Category
+    notes: Notes
+    notesPlaceholder: Optional context
+    repeatTitle: Repeat this payment
+    repeatDescription: Occurrences are generated deterministically and existing dates are never duplicated.
+    frequency: Frequency
+    week: Week
+    month: Month
+    year: Year
+    every: Every
+    endDate: End date
+    endDateHint: Optional; leave blank for no end
+    monthEndNotice: Month-end dates use deterministic calendar clamping in {timeZone}.
+    paymentNameError: Enter a payment name.
+    currencyError: Choose a supported ISO 4217 currency.
+    positiveAmountError: Expected amount must be greater than zero.
+    intervalError: Recurrence interval must be a positive whole number.
+  payment:
+    title: Record actual payment
+    description: "{name} · expected {amount} in the plan’s native currency"
+    recording: Recording…
+    recordPartial: Record partial payment
+    markPaid: Mark paid
+    expectedAmount: Expected amount
+    alreadyApplied: Already applied
+    remaining: Remaining
+    nativePlan: native plan
+    appliedAmount: "Amount applied to plan ({currency})"
+    appliedAmountHint: Edit if the amount satisfied on the plan differs from the estimate.
+    paymentDate: Payment date
+    receivedAccount: Received into account
+    paidAccount: Paid from account
+    chooseAccount: Choose account
+    conversionTitle: Payment conversion
+    conversionDescription: The plan remains in {planCurrency}; the linked actual transaction posts to {account} in {accountCurrency}.
+    loadingRate: Loading BNR rate…
+    referenceRate: BNR reference
+    manualRateNeeded: Manual rate needed
+    rateEquation: "1 {fromCurrency} = {rate} {toCurrency}"
+    effectiveRate: Effective {date}
+    effectiveFallbackRate: "Effective {date} · previous BNR day ({count, plural, one {# day} other {# days}} earlier)"
+    manualAfterError: "{error} Enter a manual exchange rate to continue."
+    staleRate: The live refresh failed, so this uses the cached official quote. Compare it with the final account statement.
+    exchangeRate: "Exchange rate ({accountCurrency} per 1 {planCurrency})"
+    exactRateHint: Derived from both exact amounts.
+    manualRateHint: Manual override; the BNR reference remains recorded when available.
+    referenceRateHint: Official BNR reference for the payment date.
+    amountPosted: "Amount posted to {account} ({currency})"
+    exactAmountHint: Exact statement amount; the rate is derived.
+    unreconciledAmountHint: This cannot reconcile at eight-decimal precision. Edit the rate instead.
+    calculatedAmountHint: Calculated with integer minor-unit rounding.
+    loading: Loading…
+    calculating: Calculating…
+    ratePlaceholder: e.g. 4.65
+    editRate: Edit exchange rate manually
+    useExactAmount: Use exact account amount
+    partialNotice: This creates and links a cleared actual transaction. Because the amount is below the remaining estimate, this occurrence stays scheduled.
+    paidNotice: This creates and links a cleared actual transaction. The occurrence becomes paid when actual payments meet the expected amount.
+    invalidReference: The reference-rate response was invalid.
+    noReference: No reference rate is available.
+    positiveAppliedError: Enter an amount greater than zero in {currency}.
+    chooseAccountError: Choose the account used for payment.
+    waitForRateError: Wait for the BNR reference rate or enter the exchange rate manually.
+    positiveRateError: Enter a positive exchange rate.
+    positiveAccountAmountError: Enter or calculate a positive account amount in {currency}.
+    exactRateError: This exact account amount cannot be represented by the derived eight-decimal exchange rate. Edit the exchange rate instead.
+
+forecast:
+  title: Planning
+  header:
+    eyebrow: Forecast workspace
+    title: Monthly forecast
+    description: Forecast cash flow from Planned Payments, opening assumptions, and optional what-if adjustments. Nothing here changes actual transactions.
+  actions:
+    copyPrior: Copy prior assumptions
+    saving: Saving…
+    saveAssumptions: Save assumptions
+    scenarioOn: Scenario on
+    tryScenario: Try a scenario
+    addExpectedPayment: Add expected payment
+    clear: Clear
+    addAdjustment: Add adjustment
+    saveScenario: Save scenario
+    removeAdjustment: Remove scenario adjustment
+  feedback:
+    assumptionsSaved: Forecast opening assumptions saved.
+    saveAssumptionsFailed: Could not save these forecast assumptions.
+    assumptionsCopied: Previous opening assumptions and scenario adjustments copied. Expected payments still come from Planned Payments.
+    copyAssumptionsFailed: Could not copy the previous forecast assumptions.
+    scenarioSaved: Scenario saved separately. Actual transactions were not changed.
+    saveScenarioFailed: Could not save this scenario.
+  validation:
+    openingBalance: Enter a valid {currency} opening balance for {account}.
+  range:
+    endMonth: Monthly view uses the range end month
+  scenario:
+    name: Working scenario
+    banner: "{name} — hypothetical adjustments affect this projection only."
+  plan:
+    defaultName: Base plan
+  metrics:
+    opening:
+      label: Expected cash opening
+      dirtyDetail: "Saved {currency} value · save native edits to refresh"
+      detail: Current, savings and cash only
+      info: Liquid opening balances converted from each account’s native currency at the month-start reporting rate. Investments and liability balances remain in their account forecasts but are not cash.
+    income:
+      label: Expected income
+      info: Income from Planned Payments, plus enabled hypothetical adjustments, expressed in profile reporting currency.
+    spending:
+      label: Expected spending
+      detail: "{fixed} fixed · {variable} variable"
+      info: Economic spending in profile reporting currency. Loan principal and card repayments are transfers, so they are excluded; loan interest and fees are included.
+    cashDue:
+      label: Cash due
+      detail: "{amount} also counts as spending"
+      info: Expected cash outflow in profile reporting currency. This includes card repayments and full loan installments, while spending includes only purchases, interest, and fees.
+    closing:
+      label: Projected cash closing
+      info: Liquid opening cash plus cleared actual cash movement in the month, then remaining income and obligations, all converted to profile reporting currency. Settled payments are not deducted twice.
+  cashPath:
+    title: Projected cash path
+    description: "Cleared actual movement plus remaining estimates across their dates · actual balances are unchanged"
+    projection: Projection
+    lowest: Lowest projected cash point
+    lowestDetail: "{date} · after actual movement, remaining payments, and adjustments"
+    timelineLabel: Projected cash timeline
+    pointLabel: "{label} · {balance}"
+    open: Open
+    close: Close
+  payments:
+    title: Expected payments
+    description: Canonical obligations and income from Planned Payments; scenario adjustments are clearly marked
+    tableLabel: Monthly expected payments and scenario adjustments
+    date: Date
+    item: Item
+    type: Type
+    priority: Priority
+    account: Account
+    cashDue: "Cash due ({currency})"
+    spending: "Spending ({currency})"
+    empty: No expected payments for this month. Add one in Planned Payments; hypothetical adjustments are available in scenario mode.
+  line:
+    hypothetical: Hypothetical · scenario only
+    settled: "{source} · settled"
+    historical: "{source} · not applied to this historical close"
+    partial: "{source} · partial · {amount} outstanding"
+    status: "{source} · {status}"
+    sourceOnly: "{source}"
+    estimate: "{context} · estimate"
+  source:
+    recurringPayment: recurring planned payment
+    plannedPayment: planned payment
+    cardStatement: card statement
+    loanSchedule: loan schedule
+    scenario: scenario
+    other: planned item
+  status:
+    planned: planned
+    scheduled: scheduled
+    overdue: overdue
+    paid: paid
+    cancelled: cancelled
+    skipped: skipped
+    other: pending
+  labels:
+    income: income
+    fixed: fixed
+    variable: variable
+    essential: Essential
+    discretionary: Discretionary
+  openings:
+    title: Expected opening balances
+    dirtyDescription: "Edit each account in its native currency · save to refresh reporting totals"
+    description: Each assumption stays in its account’s native currency
+    tableLabel: Expected opening balances
+    account: Account
+    actualNow: Actual now
+    expectedOpening: Expected opening (native)
+    difference: Difference
+    accountDetail: "{type} · {currency}"
+    inputLabel: Expected opening for {account} in {currency}
+  accountType:
+    current: Current account
+    savings: Savings
+    cash: Cash
+    creditCard: Credit card
+    loan: Loan
+    investment: Investment
+    custom: Custom
+    other: Other account
+  discretionary:
+    title: Discretionary money
+    description: After essential expected commitments
+    openingCash: Opening cash
+    actualMovement: Cleared actual movement
+    outstandingIncome: Outstanding income
+    outstandingEssentials: Outstanding essentials
+    outstandingDiscretionary: Outstanding discretionary
+    remaining: Remaining
+  accounts:
+    title: Forecast by account
+    scenarioDescription: "Canonical closings in native currencies · scenario effects remain in the overall reporting forecast"
+    description: Projected closing balances in each account’s native currency
+    ledger: "{currency} ledger"
+    reportingEquivalent: "≈ {amount} reporting"
+    empty: Add accounts to allocate forecast cash.
+  comparison:
+    title: Planned versus actual
+    description: Planned values come from expected payments; historical actuals never include unpaid obligations
+    income: Income
+    spending: Spending
+    cashObligations: Cash obligations
+    monthProgress: Month progress
+    variance: Spending variance
+    plannedActual: "{planned} planned\n{actual} actual"
+    outstanding: "{amount} outstanding"
+    transfersIncluded: principal and card transfers included
+    progressLabel: "{current} / {total, plural, one {# day} other {# days}}"
+    overExpected: over expected
+    remainingExpected: remaining expected
+  scenarioForm:
+    title: Add scenario adjustment
+    description: This hypothetical change affects the forecast only; it never creates a Planned Payment or actual transaction.
+    cancel: Cancel
+    add: Add adjustment
+    itemName: Item name
+    incomePlaceholder: Expected salary
+    expensePlaceholder: Expected expense
+    direction: Direction
+    expense: Expense
+    income: Income
+    amount: "Amount ({currency} reporting)"
+    expectedDate: Expected date
+    account: Account
+    accountHint: Optional allocation; the scenario amount remains in reporting currency.
+    spendingType: Spending type
+    fixed: Fixed
+    variable: Variable
+    category: Category
+    essential: Treat this as essential spending when calculating discretionary money.
+    nameError: Enter an item name.
+    amountError: Enter an amount greater than zero.
+
 statistics:
   title: Statistics

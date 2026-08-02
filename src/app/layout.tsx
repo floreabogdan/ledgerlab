@@ -3,17 +3,23 @@ import type { ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import { I18nProvider } from "@/i18n/client";
 import { getRequestI18nContext } from "@/i18n/request-context";
+import { createServerTranslator } from "@/i18n/server";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: {
-    default: "LedgerLab",
-    template: "%s · LedgerLab",
-  },
-  description: "A focused personal finance workspace for planning, liabilities, and multi-currency transaction tracking.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const i18n = await getRequestI18nContext();
+  const t = createServerTranslator(i18n).translate;
+
+  return {
+    title: {
+      default: t("common.app.name"),
+      template: t("common.metadata.titleTemplate", { title: "%s" }),
+    },
+    description: t("common.metadata.description"),
+  };
+}
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const i18n = await getRequestI18nContext();

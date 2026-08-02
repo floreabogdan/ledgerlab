@@ -36,6 +36,11 @@ import {
   type SelectComboboxOption,
 } from "@/components/ui/select-combobox";
 import { InfoTooltip } from "@/components/ui/tooltip";
+import { useTranslator, useTranslations } from "@/i18n/client";
+import { defaultLanguage, messageCatalogs } from "@/i18n/generated";
+import { createTranslator, type Translator } from "@/i18n/runtime";
+import { parseApiError, translateApiError } from "@/lib/api-error";
+import type { ApiErrorDescriptor } from "@/lib/api-response";
 import {
   currencyMinorToInput,
   currencyMinorUnitDigits,
@@ -51,6 +56,30 @@ const cx = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
 
 const moneyFormatters = new Map<string, Intl.NumberFormat>();
+const englishTranslator = createTranslator({
+  language: defaultLanguage,
+  catalog: messageCatalogs[defaultLanguage],
+  fallbackCatalog: messageCatalogs[defaultLanguage],
+});
+
+function activeBrowserTranslator() {
+  if (typeof document === "undefined") return englishTranslator;
+  const requestedLanguage = document.documentElement.lang || defaultLanguage;
+  const catalogs = messageCatalogs as Readonly<
+    Record<string, (typeof messageCatalogs)[typeof defaultLanguage] | undefined>
+  >;
+  const catalog = catalogs[requestedLanguage] ?? messageCatalogs[defaultLanguage];
+  return createTranslator({
+    language: requestedLanguage,
+    direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
+    catalog,
+    fallbackCatalog: messageCatalogs[defaultLanguage],
+    fallbackLanguage: defaultLanguage,
+    formattingLocale:
+      document.documentElement.dataset.locale || requestedLanguage,
+    timeZone: document.documentElement.dataset.timeZone || undefined,
+  });
+}
 
 type FieldContextValue = {
   controlId: string;
@@ -128,6 +157,8 @@ export function stringFrom(value: unknown, fallback = ""): string {
 }
 
 export function useJson<T>(url: string, fallback: T) {
+  const translator = useTranslator();
+  const t = translator.translate;
   const [data, setData] = useState<T>(fallback);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,16 +182,21 @@ export function useJson<T>(url: string, fallback: T) {
       });
       const body = (await response.json().catch(() => null)) as unknown;
       if (!response.ok) {
-        const message = stringFrom(readRecord(body).error) ||
-          stringFrom(readRecord(body).message) ||
-          `Request failed (${response.status})`;
-        throw new Error(message);
+        const apiError = parseApiError(body);
+        throw new RequestError(
+          response.status,
+          translateApiError(translator, apiError),
+          body && typeof body === "object" && !Array.isArray(body)
+            ? body as JsonRecord
+            : null,
+          apiError,
+        );
       }
       if (!mountedRef.current || controller.signal.aborted || requestId !== requestIdRef.current) return;
       setData((body ?? fallback) as T);
     } catch (caught) {
       if (!mountedRef.current || controller.signal.aborted || requestId !== requestIdRef.current) return;
-      setError(caught instanceof Error ? caught.message : "Something went wrong");
+      setError(caught instanceof RequestError ? caught.message : t("common.request.unexpected"));
     } finally {
       if (mountedRef.current && requestId === requestIdRef.current) {
         controllerRef.current = null;
@@ -170,7 +206,7 @@ export function useJson<T>(url: string, fallback: T) {
   // `fallback` is only an initial/empty-state value. Depending on object identity
   // here would refetch forever when a page supplies an inline empty object.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [t, translator, url]);
 
   useEffect(() => {
     let active = true;
@@ -195,33 +231,52 @@ export function useJson<T>(url: string, fallback: T) {
 export class RequestError extends Error {
   readonly status: number;
   readonly body: JsonRecord | null;
+  readonly apiError: ApiErrorDescriptor | null;
 
-  constructor(status: number, message: string, body: JsonRecord | null) {
+  constructor(
+    status: number,
+    message: string,
+    body: JsonRecord | null,
+    apiError: ApiErrorDescriptor | null,
+  ) {
     super(message);
     this.name = "RequestError";
     this.status = status;
     this.body = body;
+    this.apiError = apiError;
   }
 }
 
 export async function requestJson<T = unknown>(
   url: string,
   init: RequestInit = {},
+  translator?: Translator,
 ): Promise<T> {
+  const activeTranslator = translator ?? activeBrowserTranslator();
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Accept", "application/json");
-  const response = await fetch(url, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, headers });
+  } catch {
+    throw new RequestError(
+      0,
+      activeTranslator.translate("common.request.unexpected"),
+      null,
+      null,
+    );
+  }
   const body = (await response.json().catch(() => null)) as JsonRecord | null;
   if (!response.ok) {
+    const apiError = parseApiError(body);
     throw new RequestError(
       response.status,
-      stringFrom(body?.error) ||
-        stringFrom(body?.message) ||
-        `Request failed (${response.status})`,
+      translateApiError(activeTranslator, apiError),
       body,
+      apiError,
     );
   }
   return body as T;
@@ -491,13 +546,16 @@ export function SuggestionInput({
   onBlur,
   ...props
 }: SuggestionInputProps) {
+  const t = useTranslations();
   const field = useContext(FieldContext);
   const ariaInvalid = props["aria-invalid"] === true
     || props["aria-invalid"] === "true"
     || field?.invalid
     || false;
   const ariaLabel = props["aria-label"];
-  const accessibleName = String(ariaLabel ?? field?.label ?? "Suggestions");
+  const accessibleName = String(
+    ariaLabel ?? field?.label ?? t("common.controls.suggestions"),
+  );
 
   return (
     <EditableCombobox
@@ -509,7 +567,7 @@ export function SuggestionInput({
       placeholder={placeholder}
       emptyMessage={emptyMessage}
       ariaLabel={ariaLabel}
-      listboxLabel={`${accessibleName} suggestions`}
+      listboxLabel={t("common.controls.editable.namedList", { label: accessibleName })}
       describedBy={props["aria-describedby"] ?? field?.descriptionId}
       invalid={ariaInvalid}
       disabled={disabled}
@@ -585,6 +643,7 @@ export function Select({
   searchPlaceholder,
   ...props
 }: FeatureSelectProps) {
+  const t = useTranslations();
   const field = useContext(FieldContext);
   const options = useMemo(() => comboboxOptions(children), [children]);
   const currentValue = String(value);
@@ -593,7 +652,9 @@ export function Select({
     || field?.invalid
     || false;
   const ariaLabel = props["aria-label"];
-  const accessibleName = String(ariaLabel ?? field?.label ?? "Options");
+  const accessibleName = String(
+    ariaLabel ?? field?.label ?? t("common.controls.options"),
+  );
 
   return (
     <SelectCombobox
@@ -603,9 +664,9 @@ export function Select({
       options={options}
       onChange={onValueChange}
       searchable={searchable ?? options.length >= 8}
-      searchPlaceholder={searchPlaceholder ?? `Search ${accessibleName.toLocaleLowerCase()}`}
+      searchPlaceholder={searchPlaceholder ?? t("common.controls.select.searchNamed", { label: accessibleName })}
       ariaLabel={ariaLabel}
-      listboxLabel={`${accessibleName} options`}
+      listboxLabel={t("common.controls.select.namedList", { label: accessibleName })}
       disabled={disabled}
       invalid={ariaInvalid}
       describedBy={props["aria-describedby"] ?? field?.descriptionId}
@@ -708,20 +769,22 @@ export function Tabs<T extends string>({
 export function SearchField({
   value,
   onChange,
-  placeholder = "Search",
+  placeholder,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
 }) {
+  const t = useTranslations();
+  const resolvedPlaceholder = placeholder ?? t("common.controls.search.label");
   const inputId = useId();
   return (
     <div className={styles.searchField}>
-      <label className="sr-only" htmlFor={inputId}>{placeholder}</label>
+      <label className="sr-only" htmlFor={inputId}>{resolvedPlaceholder}</label>
       <Search size={17} aria-hidden="true" />
-      <input id={inputId} type="search" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      <input id={inputId} type="search" value={value} onChange={(event) => onChange(event.target.value)} placeholder={resolvedPlaceholder} />
       {value ? (
-        <button type="button" aria-label="Clear search" onClick={() => onChange("")}>
+        <button type="button" aria-label={t("common.controls.search.clear")} onClick={() => onChange("")}>
           <X size={15} aria-hidden="true" />
         </button>
       ) : null}
@@ -733,8 +796,8 @@ export function DataState({
   loading,
   error,
   empty,
-  emptyTitle = "Nothing here yet",
-  emptyDescription = "Add your first item to get started.",
+  emptyTitle,
+  emptyDescription,
   onRetry,
   action,
   children,
@@ -748,12 +811,15 @@ export function DataState({
   action?: ReactNode;
   children: ReactNode;
 }) {
+  const t = useTranslations();
+  const resolvedEmptyTitle = emptyTitle ?? t("common.status.emptyTitle");
+  const resolvedEmptyDescription = emptyDescription ?? t("common.status.emptyDescription");
   if (loading) {
     return (
       <div className={styles.state} role="status">
         <LoaderCircle className={styles.spin} aria-hidden="true" />
-        <strong>Loading</strong>
-        <span>Bringing your numbers together…</span>
+        <strong>{t("common.status.loading")}</strong>
+        <span>{t("common.status.loadingDetails")}</span>
       </div>
     );
   }
@@ -761,9 +827,9 @@ export function DataState({
     return (
       <div className={cx(styles.state, styles.stateError)} role="alert">
         <AlertCircle aria-hidden="true" />
-        <strong>We couldn’t load this</strong>
+        <strong>{t("common.status.failureTitle")}</strong>
         <span>{error}</span>
-        {onRetry ? <Button variant="secondary" icon={<RefreshCw size={15} />} onClick={onRetry}>Try again</Button> : null}
+        {onRetry ? <Button variant="secondary" icon={<RefreshCw size={15} />} onClick={onRetry}>{t("common.actions.tryAgain")}</Button> : null}
       </div>
     );
   }
@@ -771,8 +837,8 @@ export function DataState({
     return (
       <div className={styles.state}>
         <div className={styles.stateCheck}><Check size={19} aria-hidden="true" /></div>
-        <strong>{emptyTitle}</strong>
-        <span>{emptyDescription}</span>
+        <strong>{resolvedEmptyTitle}</strong>
+        <span>{resolvedEmptyDescription}</span>
         {action}
       </div>
     );
@@ -848,14 +914,21 @@ export function SparkBars({
   tone?: "accent" | "positive" | "negative" | "mixed";
   height?: number;
 }) {
+  const t = useTranslations();
   const max = Math.max(...values.map((item) => Math.abs(item)), 1);
+  const chartLabels = values.map(
+    (_, index) => labels?.[index] ?? t("common.controls.chart.valueLabel", { index: index + 1 }),
+  );
   return (
     <div
       className={styles.sparkBars}
       style={{ height }}
       role="img"
-      aria-label={(labels ?? values.map((_, index) => `Value ${index + 1}`))
-        .map((label, index) => `${label}: ${formatMoney(values[index] ?? 0)}`)
+      aria-label={chartLabels
+        .map((label, index) => t("common.controls.chart.valueTitle", {
+          label,
+          amount: formatMoney(values[index] ?? 0),
+        }))
         .join(", ")}
     >
       {values.map((value, index) => (
@@ -867,7 +940,10 @@ export function SparkBars({
                 styles[`spark_${tone === "mixed" ? (value < 0 ? "negative" : "positive") : tone}`],
               )}
               style={{ height: `${Math.max(4, (Math.abs(value) / max) * 100)}%` }}
-              title={`${labels?.[index] ?? ""}: ${formatMoney(value)}`}
+              title={t("common.controls.chart.valueTitle", {
+                label: chartLabels[index] ?? t("common.controls.chart.valueLabel", { index: index + 1 }),
+                amount: formatMoney(value),
+              })}
             />
           </div>
           {labels?.[index] ? <small>{labels[index]}</small> : null}
@@ -888,6 +964,7 @@ export function Progress({
   label?: string;
   tone?: "accent" | "positive" | "warning" | "negative";
 }) {
+  const t = useTranslations();
   const percent = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   return (
     <div className={styles.progressWrap}>
@@ -895,7 +972,7 @@ export function Progress({
       <div
         className={styles.progressTrack}
         role="progressbar"
-        aria-label={label ?? "Progress"}
+        aria-label={label ?? t("common.controls.progress")}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percent)}
@@ -907,6 +984,7 @@ export function Progress({
 }
 
 export function MonthStepper({ value, onChange }: { value: string; onChange: (month: string) => void }) {
+  const t = useTranslations();
   const date = useMemo(() => new Date(`${value}-01T12:00:00`), [value]);
   const move = (amount: number) => {
     const next = new Date(date);
@@ -915,14 +993,15 @@ export function MonthStepper({ value, onChange }: { value: string; onChange: (mo
   };
   return (
     <div className={styles.monthStepper}>
-      <IconButton label="Previous month" onClick={() => move(-1)}><ChevronLeft size={18} /></IconButton>
+      <IconButton label={t("common.controls.month.previous")} onClick={() => move(-1)}><ChevronLeft size={18} /></IconButton>
       <strong>{new Intl.DateTimeFormat(workspaceLocale(), { month: "long", year: "numeric", timeZone: "UTC" }).format(date)}</strong>
-      <IconButton label="Next month" onClick={() => move(1)}><ChevronRight size={18} /></IconButton>
+      <IconButton label={t("common.controls.month.next")} onClick={() => move(1)}><ChevronRight size={18} /></IconButton>
     </div>
   );
 }
 
 export function useSubmit(onSubmit: () => Promise<void>) {
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submittingRef = useRef(false);
@@ -942,7 +1021,13 @@ export function useSubmit(onSubmit: () => Promise<void>) {
     try {
       await onSubmit();
     } catch (caught) {
-      if (mountedRef.current) setSubmitError(caught instanceof Error ? caught.message : "Could not save changes");
+      if (mountedRef.current) {
+        setSubmitError(
+          caught instanceof Error && caught.message
+            ? caught.message
+            : t("common.request.saveFailed"),
+        );
+      }
     } finally {
       submittingRef.current = false;
       if (mountedRef.current) setSubmitting(false);

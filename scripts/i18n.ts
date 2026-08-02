@@ -15,6 +15,7 @@ export const catalogNames = [
   "common",
   "auth",
   "finance",
+  "entities",
   "planning",
   "settings",
   "errors",
