@@ -8,6 +8,14 @@ function uniqueEmail(prefix: string) {
   return `${prefix}-${nonce}@ledgerlab.test`;
 }
 
+function uniqueTestClientAddress() {
+  const suffix = Array.from(
+    { length: 4 },
+    () => Math.floor(Math.random() * 0x10000).toString(16),
+  ).join(":");
+  return `2001:db8:${suffix}`;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -81,6 +89,10 @@ async function selectDesktopDateRange(page: Page, quickPick: string) {
 
 async function register(page: Page, prefix: string) {
   const email = uniqueEmail(prefix);
+  // Keep independent scenarios and their CI retries in separate anti-abuse buckets.
+  await page.context().setExtraHTTPHeaders({
+    "x-forwarded-for": uniqueTestClientAddress(),
+  });
   await navigate(page, "/register");
   await page.getByRole("button", { name: "Show", exact: true }).click();
   await expect(page.getByRole("button", { name: "Hide", exact: true })).toBeVisible();
@@ -272,12 +284,21 @@ test.describe("Romanian interface workflow", () => {
     const accountName = "Cont curent comun";
     const merchantName = "Magazin de cartier";
     const paymentName = "Factura de energie";
+    const fallbackWarnings: string[] = [];
+    page.on("console", (message) => {
+      if (message.text().includes("Missing ro translation")) {
+        fallbackWarnings.push(message.text());
+      }
+    });
 
     await context.addCookies([{
       name: "ledgerlab_ui_language",
       value: "ro",
       url: new URL(baseURL).origin,
     }]);
+    await context.setExtraHTTPHeaders({
+      "x-forwarded-for": uniqueTestClientAddress(),
+    });
 
     const email = uniqueEmail("romanian");
     await navigate(page, "/register");
@@ -330,6 +351,10 @@ test.describe("Romanian interface workflow", () => {
       name: romanian["finance.accounts.title"],
       exact: true,
     })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.accounts.title"],
+      exact: true,
+    })).toHaveCount(0);
     await page.getByRole("button", {
       name: romanian["finance.accounts.header.add"],
       exact: true,
@@ -453,6 +478,10 @@ test.describe("Romanian interface workflow", () => {
       name: romanian["settings.title"],
       exact: true,
     })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toHaveCount(0);
     await selectComboboxValue(
       page.getByRole("combobox", {
         name: romanian["settings.preferences.interfaceLanguage"],
@@ -486,12 +515,17 @@ test.describe("Romanian interface workflow", () => {
       name: romanian["settings.title"],
       exact: true,
     })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toHaveCount(0);
 
     await navigate(page, "/transactions");
     await expect(page.getByText(merchantName, { exact: true })).toBeVisible();
     await navigate(page, "/planned");
     await expect(page.getByText(paymentName, { exact: true })).toBeVisible();
     await expectNoRawMessageKeys(page);
+    expect(fallbackWarnings).toEqual([]);
   });
 });
 
@@ -677,7 +711,9 @@ test.describe("complete desktop finance workflow", () => {
     const plannedTable = page.getByRole("region", { name: "Planned payment occurrences" });
     const plannedRow = plannedTable.getByRole("row").filter({ hasText: "Future electricity E2E" });
     await expect(plannedRow).toHaveCount(1);
-    await expect(plannedRow).toContainText("planned");
+    await expect(plannedRow).toContainText(
+      messageCatalogs.en["planning.plannedPayments.status.planned"],
+    );
     await expect(plannedRow).toContainText("300.00");
     await plannedRow.getByRole("button", { name: "Mark paid" }).click();
 
@@ -693,7 +729,9 @@ test.describe("complete desktop finance workflow", () => {
       .getByRole("region", { name: "Planned payment occurrences" })
       .getByRole("row")
       .filter({ hasText: "Future electricity E2E" });
-    await expect(paidRow).toContainText("paid");
+    await expect(paidRow).toContainText(
+      messageCatalogs.en["planning.plannedPayments.status.paid"],
+    );
     await expect(paidRow).toContainText("312.34");
 
     await selectDesktopDateRange(page, "This month");
@@ -1083,7 +1121,9 @@ test.describe("adaptive account and category workflow", () => {
     const gardenRow = page.getByRole("region", { name: "Category hierarchy" })
       .getByRole("row")
       .filter({ has: page.getByText("Garden E2E", { exact: true }) });
-    await expect(gardenRow).toContainText("expense");
+    await expect(gardenRow).toContainText(
+      messageCatalogs.en["entities.categories.kind.expense"],
+    );
     await expect(gardenRow).toContainText("Under Household E2E");
     await expectNoHorizontalWindowScroll(page);
   });
@@ -1120,7 +1160,12 @@ test.describe("multi-currency transaction workflow", () => {
     await dialog.getByLabel(/^Purchase amount \(EUR\)/).fill("20.00");
 
     await expect(dialog.getByText("Manual rate needed", { exact: true })).toBeVisible();
-    await expect(dialog.getByText(/Deterministic test: BNR unavailable/)).toBeVisible();
+    const fxError = dialog.getByRole("status");
+    await expect(fxError).toContainText(messageWithValues(
+      messageCatalogs.en["finance.transactions.fx.errorInstruction"],
+      { error: messageCatalogs.en["errors.generic.unexpected"] },
+    ));
+    await expect(fxError).not.toContainText("Deterministic test: BNR unavailable");
     await dialog.getByLabel("Edit exchange rate manually").check();
     await dialog.getByLabel(/^Exchange rate \(USD per 1 EUR\)/).fill("1.15");
     await expect(dialog.getByLabel(/^Amount posted to FX Current \(USD\)/)).toHaveValue("23.00");

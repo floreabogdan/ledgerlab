@@ -5,6 +5,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createTranslator,
+  type RuntimeMessageCatalog,
+} from "../../src/i18n/runtime";
+
+import {
   defaultLocalesDirectory,
   loadCatalogs,
   renderGeneratedFiles,
@@ -51,14 +56,39 @@ afterEach(async () => {
 describe("YAML language packs", () => {
   it("discovers a synthetic language and generates it without a source registry", async () => {
     const locales = await createLocalesFixture();
-    await addSyntheticLanguage(locales);
+    const directory = await addSyntheticLanguage(locales);
+    const commonFile = path.join(directory, "common.yaml");
+    const common = await readFile(commonFile, "utf8");
+    const syntheticWelcome = "Synthetic greeting for {name}.";
+    expect(common).toContain("Welcome, {name}.");
+    await writeFile(
+      commonFile,
+      common.replace("Welcome, {name}.", syntheticWelcome),
+      "utf8",
+    );
 
     const build = await loadCatalogs(locales);
     const generated = renderGeneratedFiles(build);
+    const english = build.packs.find((pack) => pack.manifest.tag === "en");
+    const synthetic = build.packs.find((pack) => pack.manifest.tag === "zz");
+
+    expect(english).toBeDefined();
+    expect(synthetic).toBeDefined();
 
     expect(build.packs.map((pack) => pack.manifest.tag)).toEqual(["en", "zz"]);
     expect(generated.get("manifests.ts")).toContain('"tag": "zz"');
     expect(generated.get("catalogs.ts")).toContain('"zz"');
+    expect(generated.get("catalogs.ts")).toContain(syntheticWelcome);
+
+    const translator = createTranslator({
+      language: "zz",
+      formattingLocale: "en-US",
+      catalog: synthetic!.messages as RuntimeMessageCatalog,
+      fallbackCatalog: english!.messages as RuntimeMessageCatalog,
+      fallbackLanguage: "en",
+    });
+    expect(translator.translate("common.welcome.named", { name: "Ada" }))
+      .toBe("Synthetic greeting for Ada.");
   });
 
   it("reports missing and unknown keys", async () => {

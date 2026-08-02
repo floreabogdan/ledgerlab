@@ -2021,6 +2021,7 @@ export function payPlannedOccurrence(
   const occurrence = one<{
     id: string;
     paymentId: string;
+    title: string;
     direction: "income" | "expense";
     expectedAmountMinor: number;
     paidAmountMinor: number;
@@ -2032,7 +2033,7 @@ export function payPlannedOccurrence(
     active: number;
     archivedAt: string | null;
   }>(
-    `SELECT o.id, p.id AS paymentId, p.direction, p.currency,
+    `SELECT o.id, p.id AS paymentId, p.title, p.direction, p.currency,
             o.expected_amount_minor AS expectedAmountMinor, o.paid_amount_minor AS paidAmountMinor,
             o.status, p.category_id AS categoryId, p.merchant_id AS merchantId, m.name AS merchant,
             p.active, p.archived_at AS archivedAt
@@ -2124,7 +2125,7 @@ export function payPlannedOccurrence(
       date: input.date,
       categoryId: occurrence.categoryId,
       merchant: occurrence.merchant,
-      note: input.note ?? null,
+      note: input.note ?? occurrence.title,
       duplicateConfirmed: true,
       plannedOccurrenceId: occurrence.id,
     }, occurrence.merchantId);

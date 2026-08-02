@@ -325,7 +325,7 @@ describe("production backend integrity boundaries", () => {
     expect(paid.result).toMatchObject({ status: "scheduled", paidAmountMinor: 1_000 });
     expect(db.sqlite.prepare(
       `SELECT amount_minor AS amountMinor, currency, original_amount_minor AS originalAmountMinor,
-              original_currency AS originalCurrency, fx_rate_scaled AS fxRateScaled
+              original_currency AS originalCurrency, fx_rate_scaled AS fxRateScaled, notes AS note
          FROM transactions WHERE id = ?`,
     ).get(paid.result.transactionId)).toEqual({
       amountMinor: -4_600,
@@ -333,7 +333,10 @@ describe("production backend integrity boundaries", () => {
       originalAmountMinor: 1_000,
       originalCurrency: "USD",
       fxRateScaled: 460_000_000,
+      note: "USD subscription",
     });
+    expect(core.listTransactions("planned-fx-owner", { search: "USD subscription" }))
+      .toEqual([expect.objectContaining({ id: paid.result.transactionId, note: "USD subscription" })]);
     expect(db.sqlite.prepare(
       `SELECT o.paid_amount_minor AS paidAmountMinor, link.applied_amount_minor AS appliedAmountMinor
          FROM planned_payment_occurrences o
