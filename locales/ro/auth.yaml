@@ -1,0 +1,58 @@
+metadata:
+  loginTitle: Autentificare
+  registerTitle: Creează un cont
+layout:
+  homeAria: Pagina principală LedgerLab
+  footnote: Spațiu local · mai multe monede · setările tale regionale
+  aboutAria: Despre LedgerLab
+  eyebrow: O imagine lunară mai clară
+  headline: Banii reali, obligațiile viitoare, într-un singur spațiu liniștit.
+  description: Urmărește ce s-a întâmplat, pregătește ce urmează și păstrează proiecțiile clar separate de soldurile reale.
+  previewAria: Previzualizarea unui spațiu de lucru gol
+  preview:
+    cashLabel: Numerar disponibil
+    cashValue: $0.00
+    dueLabel: Scadențe apropiate
+    paymentCount: "{count, plural, =0 {Nicio plată} one {# plată} few {# plăți} other {# de plăți}}"
+    forecastLabel: Prognoza lunii
+    notPlanned: Fără planificare
+login:
+  title: Bine ai revenit
+  subtitle: Autentifică-te pentru a continua la panoul tău de finanțe personale.
+  submit: Autentificare
+  switchPrompt: Nu ai încă un cont LedgerLab?
+  switchAction: Creează un cont
+register:
+  title: Creează-ți spațiul de lucru
+  subtitle: Începe cu un registru gol și privat. Ulterior poți adăuga opțional date demonstrative.
+  submit: Creează spațiul de lucru
+  switchPrompt: Ai deja un cont?
+  switchAction: Autentificare
+registration:
+  checking: Se verifică dacă această instalare acceptă conturi noi…
+  closed: Înregistrarea este închisă pentru această instalare. Cere acces administratorului sau autentifică-te cu un cont existent.
+  unavailable: Starea înregistrării nu a putut fi verificată. Reîncarcă pagina pentru a încerca din nou.
+fields:
+  displayName: Nume
+  email: Adresă de e-mail
+  workspaceCurrency: Moneda spațiului de lucru
+  password: Parolă
+  confirmPassword: Confirmă parola
+placeholders:
+  displayName: Numele tău
+  email: you@example.com
+  password: Introdu parola
+  confirmPassword: Repetă parola
+workspaceCurrencyHelp: "Este folosită pentru solduri, bugete și rapoarte. Datele vor folosi fusul orar {timeZone}."
+passwordHelp: Folosește cel puțin 10 caractere.
+password:
+  show: Arată
+  hide: Ascunde
+validation:
+  nameMinimum: "Introdu cel puțin {count} caractere."
+  currencyUnsupported: Alege o monedă acceptată.
+  emailInvalid: Introdu o adresă de e-mail validă.
+  passwordMinimum: "Parola trebuie să conțină cel puțin {count} caractere."
+  passwordsMismatch: Parolele nu coincid.
+errors:
+  requestFailed: Cererea nu a putut fi finalizată. Încearcă din nou.

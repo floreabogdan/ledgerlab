@@ -37,7 +37,11 @@ import {
 } from "@/components/ui/select-combobox";
 import { InfoTooltip } from "@/components/ui/tooltip";
 import { useTranslator, useTranslations } from "@/i18n/client";
-import { defaultLanguage, messageCatalogs } from "@/i18n/generated";
+import {
+  defaultLanguage,
+  messageCatalogs,
+  type MessageCatalog,
+} from "@/i18n/generated";
 import { createTranslator, type Translator } from "@/i18n/runtime";
 import { parseApiError, translateApiError } from "@/lib/api-error";
 import type { ApiErrorDescriptor } from "@/lib/api-response";
@@ -65,9 +69,8 @@ const englishTranslator = createTranslator({
 function activeBrowserTranslator() {
   if (typeof document === "undefined") return englishTranslator;
   const requestedLanguage = document.documentElement.lang || defaultLanguage;
-  const catalogs = messageCatalogs as Readonly<
-    Record<string, (typeof messageCatalogs)[typeof defaultLanguage] | undefined>
-  >;
+  const catalogs: Readonly<Record<string, MessageCatalog | undefined>> =
+    messageCatalogs;
   const catalog = catalogs[requestedLanguage] ?? messageCatalogs[defaultLanguage];
   return createTranslator({
     language: requestedLanguage,

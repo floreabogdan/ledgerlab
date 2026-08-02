@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { messageCatalogs } from "../../src/i18n/generated";
 
 const PASSWORD = "LedgerLab-E2E-2026!";
 
@@ -9,6 +10,10 @@ function uniqueEmail(prefix: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function labelStartsWith(value: string) {
+  return new RegExp(`^${escapeRegExp(value)}`);
 }
 
 function isoDateOffset(days: number) {
@@ -125,6 +130,22 @@ async function selectNamedOption(combobox: Locator, optionText: string) {
   await expect(combobox).toHaveAttribute("aria-expanded", "false");
 }
 
+async function expectNoRawMessageKeys(page: Page) {
+  await expect(page.locator("body")).not.toContainText(
+    /\b(?:auth|common|entities|errors|finance|planning|settings)\.[a-z][\w.]+/,
+  );
+}
+
+function messageWithValues(
+  message: string,
+  values: Readonly<Record<string, string>>,
+) {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replaceAll(`{${key}}`, value),
+    message,
+  );
+}
+
 async function createAccount(
   page: Page,
   account: { name: string; type: "current_account" | "savings" | "cash"; openingBalance: string; currency?: string },
@@ -234,6 +255,245 @@ async function expectReorganizedDesktopNavigation(page: Page) {
   await sidebar.getByRole("link", { name: "Dashboard", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
 }
+
+test.describe("Romanian interface workflow", () => {
+  test.skip(({ isMobile }) => Boolean(isMobile), "The bilingual workflow runs in the desktop project.");
+
+  test("registers, records actual and planned activity, and persists language changes", async ({
+    baseURL,
+    context,
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    if (!baseURL) throw new Error("The Romanian workflow requires a configured base URL.");
+
+    const english = messageCatalogs.en;
+    const romanian = messageCatalogs.ro;
+    const accountName = "Cont curent comun";
+    const merchantName = "Magazin de cartier";
+    const paymentName = "Factura de energie";
+
+    await context.addCookies([{
+      name: "ledgerlab_ui_language",
+      value: "ro",
+      url: new URL(baseURL).origin,
+    }]);
+
+    const email = uniqueEmail("romanian");
+    await navigate(page, "/register");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ro");
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    await expect(page.getByRole("heading", {
+      name: romanian["auth.register.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["auth.register.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.displayName"],
+    )).fill("Utilizator român");
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.email"],
+    )).fill(email);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.password"],
+    )).fill(PASSWORD);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.confirmPassword"],
+    )).fill(PASSWORD);
+    await selectComboboxValue(
+      page.getByLabel(labelStartsWith(
+        romanian["auth.fields.workspaceCurrency"],
+      )),
+      "RON",
+    );
+    await page.getByRole("button", {
+      name: romanian["auth.register.submit"],
+      exact: true,
+    }).click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.dashboard.header.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.dashboard.header.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/accounts");
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.accounts.title"],
+      exact: true,
+    })).toBeVisible();
+    await page.getByRole("button", {
+      name: romanian["finance.accounts.header.add"],
+      exact: true,
+    }).first().click();
+    const accountDialog = page.getByRole("dialog", {
+      name: romanian["finance.accounts.form.title"],
+    });
+    await accountDialog.getByLabel(labelStartsWith(
+      romanian["finance.accounts.form.fields.accountName"],
+    )).fill(accountName);
+    await accountDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["finance.accounts.form.asset.openingBalance"],
+      { currency: "RON" },
+    ))).fill("1000.00");
+    await accountDialog.getByRole("button", {
+      name: romanian["finance.accounts.form.actions.create"],
+      exact: true,
+    }).click();
+    await expect(accountDialog).toBeHidden();
+    await expect(page.getByText(accountName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/transactions");
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.transactions.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.transactions.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByRole("button", {
+      name: romanian["finance.transactions.header.add"],
+      exact: true,
+    }).first().click();
+    const transactionDialog = page.getByRole("dialog", {
+      name: romanian["finance.transactions.form.title"],
+    });
+    await transactionDialog.getByRole("button", {
+      name: romanian["finance.transactions.kinds.expense"],
+      exact: true,
+    }).click();
+    await selectNamedOption(
+      transactionDialog.getByLabel(labelStartsWith(
+        romanian["finance.transactions.common.account"],
+      )),
+      accountName,
+    );
+    await transactionDialog.getByLabel(labelStartsWith(
+      romanian["finance.transactions.form.merchant"],
+    )).fill(merchantName);
+    await transactionDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["finance.transactions.form.amountLabel"],
+      {
+        label: romanian["finance.transactions.form.amount"],
+        currency: "RON",
+      },
+    ))).fill("42.50");
+    await selectNamedOption(
+      transactionDialog.getByLabel(labelStartsWith(
+        romanian["finance.transactions.common.category"],
+      )),
+      romanian["finance.defaultCategories.groceries"],
+    );
+    await transactionDialog.getByRole("button", {
+      name: romanian["finance.transactions.form.save"],
+      exact: true,
+    }).click();
+    await expect(transactionDialog).toBeHidden();
+    await expect(page.getByText(merchantName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/planned");
+    await expect(page.getByRole("heading", {
+      name: romanian["planning.plannedPayments.header.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["planning.plannedPayments.header.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByRole("button", {
+      name: romanian["planning.plannedPayments.actions.planPayment"],
+      exact: true,
+    }).first().click();
+    const planningDialog = page.getByRole("dialog", {
+      name: romanian["planning.plannedPayments.form.title"],
+    });
+    await planningDialog.getByLabel(labelStartsWith(
+      romanian["planning.plannedPayments.form.paymentName"],
+    )).fill(paymentName);
+    await planningDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["planning.plannedPayments.form.expectedAmount"],
+      { currency: "RON" },
+    ))).fill("125.00");
+    await planningDialog.getByLabel(labelStartsWith(
+      romanian["planning.plannedPayments.form.dueDate"],
+    )).fill(isoDateOffset(7));
+    await selectNamedOption(
+      planningDialog.getByLabel(labelStartsWith(
+        romanian["planning.plannedPayments.form.expectedAccount"],
+      )),
+      accountName,
+    );
+    await selectNamedOption(
+      planningDialog.getByLabel(labelStartsWith(
+        romanian["planning.plannedPayments.form.category"],
+      )),
+      romanian["finance.defaultCategories.utilities"],
+    );
+    await planningDialog.getByRole("button", {
+      name: romanian["planning.plannedPayments.form.create"],
+      exact: true,
+    }).click();
+    await expect(planningDialog).toBeHidden();
+    await expect(page.getByText(paymentName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/settings");
+    await expect(page.getByRole("heading", {
+      name: romanian["settings.title"],
+      exact: true,
+    })).toBeVisible();
+    await selectComboboxValue(
+      page.getByRole("combobox", {
+        name: romanian["settings.preferences.interfaceLanguage"],
+        exact: true,
+      }),
+      "en",
+    );
+    await page.getByRole("button", {
+      name: romanian["settings.preferences.save"],
+      exact: true,
+    }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toBeVisible();
+
+    await selectComboboxValue(
+      page.getByRole("combobox", {
+        name: english["settings.preferences.interfaceLanguage"],
+        exact: true,
+      }),
+      "ro",
+    );
+    await page.getByRole("button", {
+      name: english["settings.preferences.save"],
+      exact: true,
+    }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ro");
+    await expect(page.getByRole("heading", {
+      name: romanian["settings.title"],
+      exact: true,
+    })).toBeVisible();
+
+    await navigate(page, "/transactions");
+    await expect(page.getByText(merchantName, { exact: true })).toBeVisible();
+    await navigate(page, "/planned");
+    await expect(page.getByText(paymentName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+  });
+});
 
 test.describe("complete desktop finance workflow", () => {
   test.skip(({ isMobile }) => Boolean(isMobile), "The complete workflow runs in the desktop project.");
