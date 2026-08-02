@@ -1,0 +1,9 @@
+title: Settings
+profile:
+  title: Profile
+language:
+  label: Interface language
+  help: Changes the words used by LedgerLab.
+locale:
+  label: Formatting locale
+  help: Controls date and number formatting independently from language.

@@ -25,16 +25,25 @@
     "npm": ">=11"
   },
   "scripts": {
+    "predev": "npm run i18n:generate",
     "dev": "next dev",
+    "prebuild": "npm run i18n:generate",
     "build": "next build",
     "postbuild": "node scripts/prepare-standalone.mjs",
     "start": "node scripts/start.mjs",
+    "prelint": "npm run i18n:generate",
     "lint": "eslint .",
+    "pretypecheck": "npm run i18n:generate",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run i18n:generate",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run i18n:generate",
     "test:e2e": "playwright test",
+    "pree2e:serve": "npm run i18n:generate",
     "e2e:serve": "tsx scripts/prepare-e2e.ts && next dev --hostname 127.0.0.1 --port 3210",
+    "i18n:check": "tsx scripts/i18n.ts check",
+    "i18n:generate": "tsx scripts/i18n.ts generate",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed-demo.ts"
@@ -43,6 +52,7 @@
     "better-sqlite3": "13.0.2",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
+    "intl-messageformat": "^11.2.13",
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
     "papaparse": "^5.5.3",
@@ -51,6 +61,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@formatjs/icu-messageformat-parser": "^3.5.16",
     "@playwright/test": "^1.62.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.13.3",
@@ -62,7 +73,8 @@
     "eslint-config-next": "16.2.12",
     "tsx": "^4.20.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "yaml": "^2.9.0"
   },
   "overrides": {
     "@esbuild-kit/core-utils": {

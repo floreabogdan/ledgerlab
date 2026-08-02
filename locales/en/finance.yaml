@@ -1,0 +1,16 @@
+accounts:
+  title: Accounts
+transactions:
+  title: Transactions
+categories:
+  title: Categories
+defaultCategories:
+  salary: Salary
+  otherIncome: Other income
+  housing: Housing
+  utilities: Utilities
+  groceries: Groceries
+  transport: Transport
+  health: Health
+  leisure: Leisure
+  other: Other

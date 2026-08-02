@@ -1,0 +1,14 @@
+layout:
+  tagline: Personal finance, clearly understood.
+login:
+  title: Welcome back
+  subtitle: Sign in to continue to your workspace.
+  submit: Sign in
+register:
+  title: Create your account
+  subtitle: Set up your private financial workspace.
+  submit: Create account
+fields:
+  email: Email address
+  password: Password
+  displayName: Display name

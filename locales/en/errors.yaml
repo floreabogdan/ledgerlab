@@ -1,0 +1,10 @@
+generic:
+  unexpected: Something went wrong. Please try again.
+  validation: Check the highlighted fields and try again.
+auth:
+  invalidCredentials: The email address or password is incorrect.
+  emailTaken: An account already exists for this email address.
+validation:
+  required: This field is required.
+  invalidEmail: Enter a valid email address.
+  minimumCharacters: "Enter at least {count, plural, one {# character} other {# characters}}."

@@ -1,0 +1,8 @@
+budgets:
+  title: Budgets
+forecast:
+  title: Planning
+plannedPayments:
+  title: Planned payments
+statistics:
+  title: Statistics
