@@ -149,7 +149,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           document.documentElement.dataset.currency = payload.user.defaultCurrency || fallbackUser.defaultCurrency;
           document.documentElement.dataset.locale = payload.user.locale || fallbackUser.locale;
           document.documentElement.dataset.timeZone = payload.user.timeZone || fallbackUser.timeZone;
-          document.documentElement.lang = payload.user.locale || fallbackUser.locale;
           document.documentElement.dataset.tableDensity = payload.preferences?.compactTables === false
             ? "comfortable"
             : "compact";

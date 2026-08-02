@@ -19,7 +19,7 @@
   color: var(--ink);
   box-shadow: inset 0 1px 1px rgb(30 58 138 / 0.03);
   padding: 0 var(--control-padding-inline, 11px);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition:
     border-color 120ms ease,
@@ -182,7 +182,7 @@
   background: transparent;
   color: var(--ink);
   padding: var(--space-2) var(--space-3);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 

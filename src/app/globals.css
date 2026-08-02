@@ -174,7 +174,7 @@ svg {
   position: fixed;
   z-index: 1000;
   top: 8px;
-  left: 8px;
+  inset-inline-start: 8px;
   transform: translateY(-150%);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -195,12 +195,13 @@ svg {
 .app-sidebar {
   position: fixed;
   z-index: 50;
-  inset: 0 auto 0 0;
+  inset-block: 0;
+  inset-inline-start: 0;
   display: flex;
   width: var(--sidebar-width);
   flex-direction: column;
   overflow-y: auto;
-  border-right: 1px solid var(--sidebar-line);
+  border-inline-end: 1px solid var(--sidebar-line);
   background: var(--sidebar);
   color: var(--sidebar-ink);
 }
@@ -308,7 +309,7 @@ svg {
 .app-main {
   min-height: 100vh;
   min-height: 100dvh;
-  margin-left: var(--sidebar-width);
+  margin-inline-start: var(--sidebar-width);
 }
 
 .app-topbar {
@@ -364,7 +365,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: 1.25;
-  text-align: left;
+  text-align: start;
   box-shadow: var(--shadow-sm);
 }
 
@@ -373,7 +374,7 @@ svg {
   min-height: 22px;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
+  margin-inline-start: auto;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--surface-subtle);
@@ -443,7 +444,7 @@ svg {
   position: absolute;
   z-index: 220;
   top: calc(100% + 9px);
-  left: 0;
+  inset-inline-start: 0;
   width: min(430px, calc(100vw - 28px));
   max-height: calc(100vh - 86px);
   max-height: calc(100dvh - 86px);
@@ -453,7 +454,7 @@ svg {
   background: var(--surface);
   box-shadow: 0 20px 50px rgb(23 37 84 / 0.2);
   color: var(--ink);
-  text-align: left;
+  text-align: start;
   animation: fade-in 120ms ease-out;
 }
 
@@ -492,7 +493,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .date-range-quick-picks button:hover {
@@ -566,11 +567,12 @@ svg {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
-  padding: 5px 10px 5px 5px;
+  padding-block: 5px;
+  padding-inline: 5px 10px;
   color: var(--ink);
   font: inherit;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   box-shadow: var(--shadow-sm);
 }
 
@@ -615,7 +617,7 @@ svg {
   position: absolute;
   z-index: 220;
   top: calc(100% + 8px);
-  right: 0;
+  inset-inline-end: 0;
   width: min(300px, calc(100vw - 24px));
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -671,7 +673,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .account-menu-item:hover,
@@ -787,7 +789,7 @@ svg {
   width: 14px;
   height: 14px;
   border: 2px solid currentColor;
-  border-right-color: transparent;
+  border-inline-end-color: transparent;
   border-radius: 50%;
   animation: spin 700ms linear infinite;
 }
@@ -861,11 +863,11 @@ svg {
   width: 100%;
 }
 
-.input-wrap .input { padding-left: 36px; }
+.input-wrap .input { padding-inline-start: 36px; }
 .input-leading {
   position: absolute;
   top: 50%;
-  left: var(--control-padding-inline);
+  inset-inline-start: var(--control-padding-inline);
   color: var(--ink-faint);
   pointer-events: none;
   transform: translateY(-50%);
@@ -889,7 +891,7 @@ svg {
   background: var(--surface);
   color: var(--ink);
   padding: 4px var(--control-padding-inline);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
@@ -925,7 +927,7 @@ svg {
   position: absolute;
   z-index: 260;
   top: calc(100% + 7px);
-  left: 0;
+  inset-inline-start: 0;
   width: 100%;
   min-width: min(320px, calc(100vw - 40px));
   overflow: hidden;
@@ -967,7 +969,7 @@ svg {
   color: var(--ink);
   min-height: 48px;
   padding: var(--space-2);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -1093,7 +1095,7 @@ svg {
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: 600;
-  text-align: left;
+  text-align: start;
 }
 
 .command-result:hover,
@@ -1182,8 +1184,8 @@ svg {
   content: "";
 }
 
-.auth-aside::before { width: 520px; height: 520px; top: -270px; right: -160px; }
-.auth-aside::after { width: 360px; height: 360px; bottom: -200px; left: -100px; }
+.auth-aside::before { width: 520px; height: 520px; inset-block-start: -270px; inset-inline-end: -160px; }
+.auth-aside::after { width: 360px; height: 360px; inset-block-end: -200px; inset-inline-start: -100px; }
 .auth-aside-content { position: relative; z-index: 1; width: min(100%, 590px); }
 .auth-aside-label { color: #67e8f9; font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
 .auth-aside h2 { max-width: 16ch; margin: var(--space-3) 0 var(--space-4); font-size: clamp(2.125rem, 4vw, 3.25rem); font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
@@ -1211,11 +1213,12 @@ svg {
 @media (max-width: 900px) {
   :root { --sidebar-width: 0px; }
   .app-sidebar, .app-topbar { display: none; }
-  .app-main { margin-left: 0; padding-top: 104px; padding-bottom: 64px; }
+  .app-main { margin-inline-start: 0; padding-top: 104px; padding-bottom: 64px; }
   .mobile-topbar {
     position: fixed;
     z-index: 80;
-    inset: 0 auto auto 0;
+    inset-block-start: 0;
+    inset-inline-start: 0;
     width: 100%;
     max-width: 100%;
     display: grid;
@@ -1261,10 +1264,11 @@ svg {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .date-range-control-compact .date-range-chevron { margin-left: auto; }
+  .date-range-control-compact .date-range-chevron { margin-inline-start: auto; }
   .date-range-control-compact .date-range-popover {
     position: fixed;
-    inset: 112px 12px auto;
+    inset-block: 112px auto;
+    inset-inline: 12px;
     width: auto;
     max-height: calc(100dvh - 190px);
     overflow-y: auto;
@@ -1274,7 +1278,8 @@ svg {
   .mobile-nav {
     position: fixed;
     z-index: 70;
-    inset: auto auto 0 0;
+    inset-block-end: 0;
+    inset-inline-start: 0;
     width: 100%;
     max-width: 100%;
     display: grid;
