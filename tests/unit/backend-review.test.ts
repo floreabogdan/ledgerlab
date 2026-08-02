@@ -118,7 +118,9 @@ describe("production backend integrity boundaries", () => {
         { params: Promise.resolve({ path: ["auth", "register"] }) },
       );
       expect(registerResponse.status).toBe(403);
-      await expect(registerResponse.json()).resolves.toMatchObject({ error: "Registration is closed for this installation" });
+      await expect(registerResponse.json()).resolves.toEqual({
+        error: { code: "REGISTRATION_CLOSED" },
+      });
     } finally {
       process.env.REGISTRATION_MODE = "open";
     }
@@ -145,8 +147,10 @@ describe("production backend integrity boundaries", () => {
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
     await expect(blocked.json()).resolves.toMatchObject({
-      error: expect.stringMatching(/too many authentication attempts/i),
-      details: { retryAfterSeconds: expect.any(Number) },
+      error: {
+        code: "RATE_LIMITED",
+        params: { retryAfterSeconds: expect.any(Number) },
+      },
     });
   });
 
@@ -560,7 +564,7 @@ describe("production backend integrity boundaries", () => {
     );
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringMatching(/choose one account before filtering by amount/i),
+      error: { code: "TRANSACTION_AMOUNT_FILTER_ACCOUNT_REQUIRED" },
     });
   });
 
@@ -933,7 +937,7 @@ describe("production backend integrity boundaries", () => {
         { params: Promise.resolve({ path: ["tags"] }) },
       );
       expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({ error: "Cross-origin changes are not allowed" });
+      await expect(response.json()).resolves.toEqual({ error: { code: "CROSS_ORIGIN_FORBIDDEN" } });
     }
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM tags WHERE user_id = 'owner'").get())
       .toEqual({ count: 0 });

@@ -103,8 +103,8 @@ describe("CSV import safety", () => {
       "SELECT status, validation_errors AS validationErrors FROM import_records ORDER BY row_number",
     ).all() as Array<{ status: string; validationErrors: string }>;
     expect(records.map((record) => record.status)).toEqual(["invalid", "invalid"]);
-    expect(records[0].validationErrors).toContain("Invalid date or amount");
-    expect(records[1].validationErrors).toContain("belongs to this profile");
+    expect(JSON.parse(records[0].validationErrors)).toContainEqual({ code: "IMPORT_INVALID_DATE_OR_AMOUNT" });
+    expect(JSON.parse(records[1].validationErrors)).toContainEqual({ code: "IMPORT_CATEGORY_UNAVAILABLE" });
   });
 
   it("can intentionally import a duplicate external id without violating its unique index", () => {
@@ -160,9 +160,7 @@ describe("CSV import safety", () => {
     };
     const automatic = portability.previewImport("current-owner", input);
     expect(automatic.rows[0]).toMatchObject({ date: null, valid: false });
-    expect(automatic.rows[0].validationErrors).toContain(
-      "Ambiguous date; choose DD/MM/YYYY or MM/DD/YYYY before importing",
-    );
+    expect(automatic.rows[0].validationErrors).toContainEqual({ code: "IMPORT_AMBIGUOUS_DATE" });
 
     expect(portability.previewImport("current-owner", {
       ...input,

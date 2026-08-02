@@ -16,17 +16,28 @@ export function getUserRegionalSettings(userId: string): UserRegionalSettings {
     `SELECT default_currency AS currency, locale, time_zone AS timeZone
        FROM users WHERE id = ?`,
   ).get(userId) as UserRegionalSettings | undefined;
-  if (!row) throw new HttpError(404, "User profile not found");
+  if (!row) {
+    throw new HttpError(404, {
+      code: "PROFILE_NOT_FOUND",
+      message: "User profile not found",
+    });
+  }
 
   const currency = normalizeCurrencyCode(row.currency);
   if (!isSupportedCurrency(currency)) {
-    throw new HttpError(500, "The user profile contains an unsupported default currency");
+    throw new HttpError(500, {
+      code: "PROFILE_CURRENCY_INVALID",
+      message: "The user profile contains an unsupported default currency",
+    });
   }
   try {
     void new Intl.Locale(row.locale);
     void new Intl.DateTimeFormat("en", { timeZone: row.timeZone });
   } catch {
-    throw new HttpError(500, "The user profile contains invalid regional settings");
+    throw new HttpError(500, {
+      code: "PROFILE_REGIONAL_SETTINGS_INVALID",
+      message: "The user profile contains invalid regional settings",
+    });
   }
   return { currency, locale: row.locale, timeZone: row.timeZone };
 }
