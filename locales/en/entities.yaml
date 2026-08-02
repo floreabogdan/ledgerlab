@@ -1,0 +1,226 @@
+shared:
+  eyebrow: Organisation
+  status:
+    active: Active
+    archived: Archived
+  table:
+    actions: Actions
+  fallback:
+    category: Category
+    unnamedCategory: Unnamed category
+    thisCategory: This category
+    unnamedTag: Unnamed tag
+    thisTag: This tag
+    unnamedMerchant: Unnamed merchant
+    thisMerchant: This merchant
+
+categories:
+  header:
+    title: Categories
+    description: Build a clear income and spending hierarchy for entry, budgets and reporting. Archiving never rewrites history.
+  actions:
+    add: Add category
+    editNamed: "Edit {name}"
+    restoreNamed: "Restore {name}"
+    archiveNamed: "Archive {name}"
+    saving: Saving…
+    archiving: Archiving…
+    saveChanges: Save changes
+    create: Create category
+  metrics:
+    active:
+      label: Active categories
+      detail: Available for new entries
+    roots:
+      label: Top-level groups
+      detail: Hierarchy roots
+    nested:
+      label: Nested categories
+      detail: Across every depth
+    archived:
+      label: Archived
+      detail: History retained
+  section:
+    title: Category hierarchy
+    description: Indentation shows parentage; fixed/variable and essential/discretionary classifications feed planning and statistics.
+  toggle:
+    label: Show archived
+    description: Include categories unavailable for new entries.
+  empty:
+    allTitle: No categories yet
+    activeTitle: No active categories
+    description: Add a top-level category or nest one beneath any compatible category.
+  table:
+    label: Category hierarchy
+    category: Category
+    type: Type
+    spendingPattern: Spending pattern
+    priority: Priority
+    status: Status
+  hierarchy:
+    topLevel: Top level
+    under: "Under {parent}"
+    directSubcategories: "{count, plural, one {# direct subcategory} other {# direct subcategories}}"
+  kind:
+    expense: Expense
+    income: Income
+    both: Income and expense
+  spendingNature:
+    variable: Variable
+    fixed: Fixed
+  spendingPriority:
+    discretionary: Discretionary
+    essential: Essential
+  feedback:
+    archived: Category archived. Historical transactions and reports were preserved.
+    restored: Category restored.
+    updateFailed: Could not update the category
+    created: Category created.
+    updated: Category updated.
+  archive:
+    title: Archive category?
+    description: It will no longer be offered for new transactions or budgets. Existing history remains unchanged.
+    confirm: Archive category
+    notice: "{name} will remain attached to every historical transaction. Active descendants must be moved or archived first."
+  form:
+    editTitle: Edit category
+    addTitle: Add category
+    editDescription: "Update {path} without changing historical assignments."
+    addDescription: Create a top-level category or nest it beneath a compatible parent.
+    name: Name
+    namePlaceholder: e.g. Home maintenance
+    nameRequired: Enter a category name.
+    parent: Parent category
+    parentHint: Choose any active parent with a compatible type, or leave this at top level.
+    parentSearchPlaceholder: Search the hierarchy
+    noParent: None — top level
+    categoryType: Category type
+    categoryTypeChildrenHint: The server will preserve type compatibility across descendants.
+    spendingPattern: Spending pattern
+    priority: Priority
+    colour: Colour
+
+tags:
+  header:
+    title: Tags
+    description: Use flexible labels across categories and accounts. Renaming or archiving a tag preserves every existing transaction link.
+  actions:
+    add: Add tag
+    renameNamed: "Rename {name}"
+    restoreNamed: "Restore {name}"
+    archiveNamed: "Archive {name}"
+    saving: Saving…
+    archiving: Archiving…
+    saveChanges: Save changes
+    create: Create tag
+  metrics:
+    active:
+      label: Active tags
+      detail: Available during entry
+    links:
+      label: Transaction links
+      detail: Across active tags
+    unused:
+      label: Unused tags
+      detail: Candidates to review
+    archived:
+      label: Archived
+      detail: Links retained
+  section:
+    title: Tag library
+    description: Usage counts exclude voided transactions.
+  toggle:
+    label: Show archived
+    description: Include tags unavailable for new entries.
+  empty:
+    allTitle: No tags yet
+    activeTitle: No active tags
+    description: Create a tag when you need a label that cuts across categories, merchants, or accounts.
+  table:
+    label: Tags
+    tag: Tag
+    transactions: Transactions
+    status: Status
+  feedback:
+    archived: Tag archived. Existing transaction links were preserved.
+    restored: Tag restored.
+    updateFailed: Could not update the tag
+    created: Tag created.
+    updated: Tag updated. Existing transaction links now use the new name.
+  archive:
+    title: Archive tag?
+    description: It will disappear from new transaction entry, while historical links and reports remain intact.
+    confirm: Archive tag
+    notice: "{name} remains attached to its existing transactions."
+  form:
+    renameTitle: Rename tag
+    addTitle: Add tag
+    renameDescription: The updated name will appear on every linked transaction.
+    addDescription: Tags provide a flexible reporting dimension outside the category hierarchy.
+    name: Tag name
+    namePlaceholder: e.g. Reimbursable
+    nameRequired: Enter a tag name.
+    colour: Colour
+
+merchants:
+  header:
+    title: Merchants
+    description: Merchant records are created from actual transaction entry. Normalise their names, assign defaults, or archive them without rewriting history.
+  actions:
+    editNamed: "Edit {name}"
+    restoreNamed: "Restore {name}"
+    archiveNamed: "Archive {name}"
+    saving: Saving…
+    archiving: Archiving…
+    saveChanges: Save changes
+  metrics:
+    active:
+      label: Active merchants
+      detail: Available during entry
+    transactions:
+      label: Transactions
+      detail: Non-void actuals
+    noDefault:
+      label: Without a default
+      detail: Category chosen per entry
+    archived:
+      label: Archived
+      detail: History retained
+  section:
+    title: Merchant directory
+    description: Default categories apply when a matching merchant is used without an explicit category.
+  search:
+    placeholder: Search merchants or categories
+    noMatchesTitle: No merchants match this search
+    noMatchesDescription: Try a different merchant or category name.
+  toggle:
+    label: Show archived
+    description: Include merchants unavailable for new matching.
+  empty:
+    allTitle: No merchants yet
+    activeTitle: No active merchants
+    description: Merchants appear automatically when you add or import actual transactions.
+  table:
+    label: Merchants
+    merchant: Merchant
+    transactions: Transactions
+    defaultCategory: Default category
+    status: Status
+  feedback:
+    archived: Merchant archived. Existing transactions still show the original merchant.
+    restored: Merchant restored.
+    updateFailed: Could not update the merchant
+    updated: Merchant updated. Existing linked transactions now use the normalised name.
+  archive:
+    title: Archive merchant?
+    description: It will no longer be matched for new entries. Existing transactions retain their merchant history.
+    confirm: Archive merchant
+    notice: "{name} remains visible on its existing transactions and reports."
+  form:
+    title: Edit merchant
+    description: Renaming normalises every linked view without changing the original transaction amounts or dates.
+    name: Merchant name
+    nameRequired: Enter a merchant name.
+    defaultCategory: Default category
+    defaultCategoryHint: Used only when an entry has no explicit category.
+    noDefaultCategory: No default category

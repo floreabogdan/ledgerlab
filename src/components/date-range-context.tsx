@@ -13,6 +13,9 @@ import {
 
 import { monthBounds, parseDateKey, parseMonthKey } from "@/lib/domain/dates";
 import { DEFAULT_LOCALE, DEFAULT_TIME_ZONE } from "@/lib/currencies";
+import { useTranslations } from "@/i18n/client";
+import { defaultLanguage, messageCatalogs } from "@/i18n/generated";
+import { createTranslator, type Translator } from "@/i18n/runtime";
 
 const DATE_RANGE_STORAGE_KEY = "ledgerlab.date-range.v1";
 
@@ -41,9 +44,14 @@ export type DateRangeValidationResult =
 
 export interface DateRangeQuickPick {
   id: DateRangeQuickPickId;
-  label: string;
   getRange: (referenceDate?: Date, timeZone?: string) => DateRange;
 }
+
+const englishTranslator = createTranslator({
+  language: defaultLanguage,
+  catalog: messageCatalogs[defaultLanguage],
+  fallbackCatalog: messageCatalogs[defaultLanguage],
+});
 
 export interface DateRangeContextValue {
   range: DateRange;
@@ -98,7 +106,7 @@ function calendarMonthSpan(referenceDate: Date, monthCount: number, timeZone: st
 /** Returns the calendar date at the supplied instant in the requested IANA time zone. */
 export function getDateKey(referenceDate: Date = new Date(), timeZone = DEFAULT_TIME_ZONE): string {
   if (Number.isNaN(referenceDate.getTime())) {
-    throw new RangeError("Invalid reference date");
+    throw new RangeError("invalid_reference_date");
   }
 
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -159,28 +167,24 @@ export function getQuickPickRange(
 }
 
 export const DATE_RANGE_QUICK_PICKS: readonly DateRangeQuickPick[] = [
-  { id: "this_month", label: "This month", getRange: (date, timeZone) => getQuickPickRange("this_month", date, timeZone) },
+  { id: "this_month", getRange: (date, timeZone) => getQuickPickRange("this_month", date, timeZone) },
   {
     id: "month_to_date",
-    label: "Month to date",
     getRange: (date, timeZone) => getQuickPickRange("month_to_date", date, timeZone),
   },
-  { id: "last_month", label: "Last month", getRange: (date, timeZone) => getQuickPickRange("last_month", date, timeZone) },
-  { id: "next_month", label: "Next month", getRange: (date, timeZone) => getQuickPickRange("next_month", date, timeZone) },
+  { id: "last_month", getRange: (date, timeZone) => getQuickPickRange("last_month", date, timeZone) },
+  { id: "next_month", getRange: (date, timeZone) => getQuickPickRange("next_month", date, timeZone) },
   {
     id: "last_3_months",
-    label: "Last 3 months",
     getRange: (date, timeZone) => getQuickPickRange("last_3_months", date, timeZone),
   },
   {
     id: "last_6_months",
-    label: "Last 6 months",
     getRange: (date, timeZone) => getQuickPickRange("last_6_months", date, timeZone),
   },
-  { id: "this_year", label: "Year to date", getRange: (date, timeZone) => getQuickPickRange("this_year", date, timeZone) },
+  { id: "this_year", getRange: (date, timeZone) => getQuickPickRange("this_year", date, timeZone) },
   {
     id: "last_12_months",
-    label: "Last 12 months",
     getRange: (date, timeZone) => getQuickPickRange("last_12_months", date, timeZone),
   },
 ] as const;
@@ -194,9 +198,12 @@ function validDateKey(value: string): boolean {
   }
 }
 
-export function validateDateRange(input: unknown): DateRangeValidationResult {
+export function validateDateRange(
+  input: unknown,
+  t: Translator["translate"] = englishTranslator.translate,
+): DateRangeValidationResult {
   if (!input || typeof input !== "object") {
-    return { success: false, error: "Choose a start and end date." };
+    return { success: false, error: t("common.dateRange.validation.missing") };
   }
 
   const candidate = input as { from?: unknown; to?: unknown };
@@ -204,17 +211,17 @@ export function validateDateRange(input: unknown): DateRangeValidationResult {
   const to = typeof candidate.to === "string" ? candidate.to.trim() : "";
 
   if (!from || !to) {
-    return { success: false, error: "Choose a start and end date." };
+    return { success: false, error: t("common.dateRange.validation.missing") };
   }
   if (!validDateKey(from) || !validDateKey(to)) {
-    return { success: false, error: "Use valid calendar dates." };
+    return { success: false, error: t("common.dateRange.validation.invalidCalendar") };
   }
   if (from > to) {
-    return { success: false, error: "The start date must be on or before the end date." };
+    return { success: false, error: t("common.dateRange.validation.reversed") };
   }
   const spanDays = (parseDateKey(to).getTime() - parseDateKey(from).getTime()) / 86_400_000;
   if (spanDays > 3_660) {
-    return { success: false, error: "Choose a date range of ten years or less." };
+    return { success: false, error: t("common.dateRange.validation.tooLong") };
   }
 
   return { success: true, range: { from, to } };
@@ -251,9 +258,13 @@ function capitalizeDateLabel(value: string, locale: string) {
 }
 
 /** Compact label using the workspace locale. */
-export function getDateRangeLabel(range: DateRange, locale = DEFAULT_LOCALE): string {
+export function getDateRangeLabel(
+  range: DateRange,
+  locale = DEFAULT_LOCALE,
+  invalidLabel = englishTranslator.translate("common.dateRange.invalid"),
+): string {
   const normalized = normalizeDateRange(range);
-  if (!normalized) return "Invalid date range";
+  if (!normalized) return invalidLabel;
 
   const fromMonth = monthKeyForDate(normalized.from);
   const toMonth = monthKeyForDate(normalized.to);
@@ -325,6 +336,7 @@ export function DateRangeProvider({
   locale = DEFAULT_LOCALE,
   timeZone = DEFAULT_TIME_ZONE,
 }: DateRangeProviderProps) {
+  const t = useTranslations();
   const fixedNowTime = now?.getTime();
   const [liveReferenceDate, setLiveReferenceDate] = useState(() =>
     new Date(fixedNowTime ?? Date.now()),
@@ -402,10 +414,10 @@ export function DateRangeProvider({
   }, [storageKey]);
 
   const setRange = useCallback((nextRange: DateRange): DateRangeValidationResult => {
-    const result = validateDateRange(nextRange);
+    const result = validateDateRange(nextRange, t);
     if (result.success) setRangeState(result.range);
     return result;
-  }, []);
+  }, [t]);
 
   const setCustomRange = useCallback(
     (from: string, to: string): DateRangeValidationResult => setRange({ from, to }),
@@ -432,7 +444,7 @@ export function DateRangeProvider({
   const value = useMemo<DateRangeContextValue>(
     () => ({
       range,
-      label: getDateRangeLabel(range, locale),
+      label: getDateRangeLabel(range, locale, t("common.dateRange.invalid")),
       activeRange: identifyQuickPick(range, referenceDate, timeZone),
       hydrated,
       locale,
@@ -442,7 +454,7 @@ export function DateRangeProvider({
       selectQuickPick,
       resetDateRange,
     }),
-    [hydrated, locale, range, referenceDate, resetDateRange, selectQuickPick, setCustomRange, setRange, timeZone],
+    [hydrated, locale, range, referenceDate, resetDateRange, selectQuickPick, setCustomRange, setRange, t, timeZone],
   );
 
   return <DateRangeContext.Provider value={value}>{children}</DateRangeContext.Provider>;
@@ -450,6 +462,6 @@ export function DateRangeProvider({
 
 export function useDateRange(): DateRangeContextValue {
   const context = useContext(DateRangeContext);
-  if (!context) throw new Error("useDateRange must be used within a DateRangeProvider");
+  if (!context) throw new Error("missing_date_range_provider");
   return context;
 }

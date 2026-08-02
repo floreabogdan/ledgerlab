@@ -1,0 +1,476 @@
+shared:
+  fallback:
+    account: Cont
+    category: Categorie
+    selectedAccount: contul selectat
+    thisAccount: acest cont
+    forecastItem: Element de prognoză
+    plannedPayment: Plată planificată
+  labels:
+    actions: Acțiuni
+    uncategorised: Fără categorie
+    unassigned: Neatribuit
+    notAvailable: "—"
+  options:
+    accountWithBalance: "{name} · {currency} · {balance}"
+
+budgets:
+  title: Bugete
+  header:
+    eyebrow: Limite pentru cheltuieli
+    title: Bugete lunare
+    description: Limitele pe categorii sunt comparate cu cheltuielile efective eligibile. Plățile planificate viitoare rămân vizibile, dar nu consumă din buget până când nu sunt plătite.
+  actions:
+    addCategoryBudget: Adaugă buget pentru categorie
+    addBudget: Adaugă buget
+    copyPreviousMonth: Copiază luna precedentă
+    saveBudget: Salvează bugetul
+    saving: Se salvează…
+  feedback:
+    copied: Bugetele lunii precedente au fost copiate. Verifică-le și ajustează-le înainte de a te baza pe ele.
+    copyFailed: Bugetele nu au putut fi copiate.
+  range:
+    endMonth: Vizualizarea lunară folosește luna de sfârșit a intervalului
+  metrics:
+    monthlyBudget:
+      label: Buget lunar
+      info: Suma bugetelor pe categorii pentru luna selectată.
+    actualSpending:
+      label: Cheltuieli efective
+      info: Cheltuieli efective decontate, atribuite categoriilor bugetate; tranzacțiile în așteptare, transferurile și elementele doar planificate sunt excluse.
+    remaining:
+      label: Rămas
+      info: Bugetul lunar total minus cheltuielile efective eligibile.
+    plannedAhead:
+      label: Planificat în avans
+      detail: Doar proiecție
+      info: Apariții de plăți estimate și neachitate din categoriile bugetate. Acestea nu reduc suma efectivă rămasă din buget.
+  progress:
+    title: Evoluția bugetului
+    description: Cheltuieli efective față de limita lunară
+    overCount: "{count, plural, one {# peste buget} few {# peste buget} other {# peste buget}}"
+    onTrack: În limite
+    leftToSpend: disponibili pentru cheltuieli în toate categoriile
+    overCombined: peste bugetul lunar cumulat
+    aria: "{spent} cheltuiți din {total}"
+  categories:
+    title: Bugete pe categorii
+    description: Plățile planificate sunt afișate separat de cheltuielile efective
+    emptyTitle: Niciun buget pentru această lună
+    emptyDescription: Stabilește limite pentru categoriile pe care vrei să le urmărești. Tranzacțiile pot fi folosite și fără bugete.
+    tableLabel: Bugete lunare pe categorii
+  table:
+    category: Categorie
+    monthlyLimit: Limită lunară
+    actualSpent: Cheltuit efectiv
+    plannedAhead: Planificat în avans
+    progress: Evoluție
+    remaining: Rămas
+    actual: efectiv
+    projection: proiecție
+    none: niciunul
+    edit: "Editează bugetul pentru {category}"
+  notice:
+    overBudget: "{count, plural, one {# categorie depășește} few {# categorii depășesc} other {# de categorii depășesc}} limita lunară selectată. Poți verifica tranzacțiile efective sau ajusta limita dacă planul s-a schimbat. Aceasta este o sugestie de verificare, nu consultanță financiară."
+  form:
+    addTitle: Adaugă buget pentru categorie
+    editTitle: Editează bugetul categoriei
+    description: Buget pentru {month}. Doar cheltuielile efective îl consumă.
+    category: Categorie
+    chooseCategory: Alege categoria
+    monthlyLimit: "Limită lunară ({currency})"
+    storageNotice: LedgerLab stochează această sumă ca număr întreg de unități monetare minore. Ea este comparată cu tranzacțiile efective de cheltuieli, cu semn, din categorie.
+    chooseCategoryError: Alege o categorie.
+    positiveAmountError: Introdu un buget mai mare decât zero.
+
+plannedPayments:
+  title: Plăți planificate
+  header:
+    eyebrow: Bani viitori
+    title: Plăți planificate
+    description: Obligațiile estimate sunt păstrate aici înainte să existe activitatea efectivă. Plățile datoriilor afișează separat impactul asupra numerarului și partea care este considerată cheltuială.
+  actions:
+    planPayment: Planifică plata
+    planAPayment: Planifică o plată
+    list: Listă
+    calendar: Calendar
+    recordPayment: Înregistrează plata
+    viewAccount: Vezi contul
+    payRemainder: Plătește restul
+    markPaid: Marchează ca plătită
+    skipCycle: Omite acest ciclu fără plată
+    cancelWithdrawn: Anulează o obligație retrasă
+    undoPayment: Anulează plata asociată
+    restoreOccurrence: Restaurează această apariție
+    keepOccurrence: Păstrează apariția
+    cancelOccurrence: Anulează apariția
+  feedback:
+    actionFailed: "{action, select, skip {Această apariție nu a putut fi omisă.} cancel {Această apariție nu a putut fi anulată.} undo {Plata acestei apariții nu a putut fi anulată.} other {Această apariție nu a putut fi actualizată.}}"
+  metrics:
+    cashDue:
+      label: Plăți scadente
+      rangeDetail: "{range} · valoare de raportare în {currency}"
+      info: Numerarul rămas care urmează să iasă dintr-un cont, convertit în moneda profilului la data scadenței. Sumele planificate în moneda nativă rămân neschimbate.
+    spending:
+      label: Considerat cheltuială
+      detail: "Impactul cheltuielii planificate · {currency}"
+      info: Impactul estimat al cheltuielilor în moneda profilului. Extrasele cardurilor de credit și principalul împrumuturilor nu sunt considerate cheltuieli noi.
+    overdue:
+      label: Restante
+      detail: "{count, plural, one {# apariție} few {# apariții} other {# de apariții}} · {currency}"
+      info: Restul neachitat al aparițiilor restante, exprimat în moneda profilului fără a schimba valorile în monedele native.
+    paid:
+      label: Apariții plătite
+      detail: Asociate tranzacțiilor efective
+    conversionUnavailable: Conversia pentru raportare nu este disponibilă
+  schedule:
+    title: Calendarul obligațiilor
+    description: Scadente în {range}; valorile planificate, în așteptare și efective sunt etichetate separat
+    tabLabel: Starea plății
+    upcoming: Viitoare
+    overdue: Restante
+    paid: Plătite
+    all: Toate
+    searchPlaceholder: Caută plăți planificate…
+    legendPlanned: Planificat
+    legendScheduled: Programat / în așteptare
+    legendPaid: Efectiv / plătit
+    reportingUnavailable: Unele obligații folosesc altă monedă nativă, dar acest răspuns nu include echivalentul lor în moneda de raportare. Sumele native rămân vizibile; totalurile cumulate sunt ascunse pentru a nu aduna monede diferite.
+    emptyTitle: Nicio plată viitoare planificată
+    emptyDescription: Adaugă o obligație unică sau recurentă pentru ca aceasta să apară în intervalul selectat înainte să existe o tranzacție.
+  cancel:
+    title: Anulezi această apariție?
+    description: "{name} · scadentă la {date}"
+    notice: Anularea elimină această apariție din prognoze fără a modifica regula recurentă sau alte apariții. O poți restaura ulterior.
+  type:
+    cardStatement: Extras de card
+    cardStatementName: "Extras {account}"
+    loanInstalment: Rată de împrumut
+    loanInstalmentName: "Rată {account}"
+    plannedIncome: Venit planificat
+    plannedExpense: Cheltuială planificată
+  status:
+    planned: Planificată
+    scheduled: Programată
+    overdue: Restantă
+    paid: Plătită
+    cancelled: Anulată
+    skipped: Omisă
+    unknown: Necunoscută
+  recurrence:
+    debtSchedule: Graficul datoriei
+    weekly: "{interval, plural, one {În fiecare săptămână} few {La fiecare # săptămâni} other {La fiecare # de săptămâni}}"
+    monthly: "{interval, plural, one {În fiecare lună} few {La fiecare # luni} other {La fiecare # de luni}}"
+    yearly: "{interval, plural, one {În fiecare an} few {La fiecare # ani} other {La fiecare # de ani}}"
+    recurring: Recurentă
+    oneTime: O singură dată
+    occurrenceOnly: Doar această apariție
+    currentRateEstimate: Estimare la rata curentă
+  money:
+    nativeDetail: "{detail} · {currency}"
+    reportingUnavailable: Valoarea de raportare nu este disponibilă
+    reportingEquivalent: "≈ {amount} pentru raportare"
+    nativeCashProjection: proiecție nativă de numerar
+    settled: decontat
+    noNewSpending: fără cheltuială nouă
+    principalExcluded: "principal de {amount} exclus"
+    nativePlannedExpense: cheltuială planificată nativă
+    notExpense: nu este o cheltuială
+    appliedToPlan: aplicat acestui plan
+    notPosted: neînregistrat
+  table:
+    empty: Nicio apariție nu corespunde acestei vizualizări.
+    label: Aparițiile plăților planificate
+    due: Scadență
+    payment: Plată
+    typeCategory: Tip / categorie
+    recurrence: Recurență
+    status: Stare
+    cashDue: Numerar scadent
+    spending: Considerat cheltuială
+    appliedActual: Aplicat / efectiv
+    actions: Acțiuni
+    pastDue: Scadență depășită
+    cardTransfer: Plata este un transfer
+    loanExpense: Dobânda și comisioanele sunt cheltuieli
+    amountRemains: "Au rămas {amount}"
+  calendar:
+    monday: Lun
+    tuesday: Mar
+    wednesday: Mie
+    thursday: Joi
+    friday: Vin
+    saturday: Sâm
+    sunday: Dum
+    itemTitle: "{name} — {amount} numerar nativ scadent"
+    itemTitleReporting: "{name} — {amount} numerar nativ scadent · aproximativ {reportingAmount} pentru raportare"
+    itemTitleLiability: "{name} — {amount} numerar nativ scadent · {type}"
+    itemTitleReportingLiability: "{name} — {amount} numerar nativ scadent · aproximativ {reportingAmount} pentru raportare · {type}"
+    more: "+{count, plural, one {încă #} few {încă #} other {încă #}}"
+  form:
+    title: Planifică o plată
+    description: Creează o plată estimată fără a modifica soldul efectiv.
+    cancel: Anulează
+    planning: Se planifică…
+    create: Creează plata planificată
+    paymentName: Numele plății
+    paymentNamePlaceholder: de ex. Factura de electricitate
+    direction: Direcție
+    expectedExpense: Cheltuială estimată
+    expectedIncome: Venit estimat
+    expectedAmount: "Sumă estimată ({currency})"
+    expectedAmountHint: Aceasta rămâne în moneda nativă a plății planificate.
+    plannedCurrency: Moneda planificată
+    accountCurrencyHint: "Registrul estimat al contului: {currency}"
+    profileCurrencyHint: "Niciun cont selectat · se folosește implicit moneda profilului {currency}"
+    firstDueDate: Prima dată scadentă
+    dueDate: Data scadenței
+    expectedAccount: Cont estimat
+    expectedAccountHint: Opțional până când se efectuează plata
+    decideWhenPaid: Decide la plată
+    category: Categorie
+    notes: Notițe
+    notesPlaceholder: Context opțional
+    repeatTitle: Repetă această plată
+    repeatDescription: Aparițiile sunt generate determinist, iar datele existente nu sunt duplicate niciodată.
+    frequency: Frecvență
+    week: Săptămână
+    month: Lună
+    year: An
+    every: La fiecare
+    endDate: Data de încheiere
+    endDateHint: Opțional; lasă necompletat pentru a nu stabili un sfârșit
+    monthEndNotice: Datele de sfârșit de lună folosesc ajustarea calendaristică deterministă în {timeZone}.
+    paymentNameError: Introdu numele plății.
+    currencyError: Alege o monedă ISO 4217 acceptată.
+    positiveAmountError: Suma estimată trebuie să fie mai mare decât zero.
+    intervalError: Intervalul de recurență trebuie să fie un număr întreg pozitiv.
+  payment:
+    title: Înregistrează plata efectivă
+    description: "{name} · estimat {amount} în moneda nativă a planului"
+    recording: Se înregistrează…
+    recordPartial: Înregistrează plata parțială
+    markPaid: Marchează ca plătită
+    expectedAmount: Sumă estimată
+    alreadyApplied: Aplicat deja
+    remaining: Rămas
+    nativePlan: plan nativ
+    appliedAmount: "Sumă aplicată planului ({currency})"
+    appliedAmountHint: Modifică dacă suma acoperită în plan diferă de estimare.
+    paymentDate: Data plății
+    receivedAccount: Primită în cont
+    paidAccount: Plătită din cont
+    chooseAccount: Alege contul
+    conversionTitle: Conversia plății
+    conversionDescription: Planul rămâne în {planCurrency}; tranzacția efectivă asociată este înregistrată în contul {account}, în {accountCurrency}.
+    loadingRate: Se încarcă rata BNR…
+    referenceRate: Curs de referință BNR
+    manualRateNeeded: Este necesar un curs manual
+    rateEquation: "1 {fromCurrency} = {rate} {toCurrency}"
+    effectiveRate: Valabil la {date}
+    effectiveFallbackRate: "Valabil la {date} · ziua BNR precedentă ({count, plural, one {cu # zi înainte} few {cu # zile înainte} other {cu # de zile înainte}})"
+    manualAfterError: "{error} Introdu un curs de schimb manual pentru a continua."
+    staleRate: Actualizarea în timp real a eșuat, astfel că este folosit cursul oficial salvat. Compară-l cu extrasul final al contului.
+    exchangeRate: "Curs de schimb ({accountCurrency} pentru 1 {planCurrency})"
+    exactRateHint: Calculat din ambele sume exacte.
+    manualRateHint: Suprascriere manuală; referința BNR rămâne înregistrată când este disponibilă.
+    referenceRateHint: Cursul oficial de referință BNR pentru data plății.
+    amountPosted: "Sumă înregistrată în {account} ({currency})"
+    exactAmountHint: Suma exactă din extras; cursul este calculat din aceasta.
+    unreconciledAmountHint: Această sumă nu poate fi reconciliată la o precizie de opt zecimale. Modifică în schimb cursul.
+    calculatedAmountHint: Calculată prin rotunjire la unități monetare minore întregi.
+    loading: Se încarcă…
+    calculating: Se calculează…
+    ratePlaceholder: de ex. 4,65
+    editRate: Editează manual cursul de schimb
+    useExactAmount: Folosește suma exactă din cont
+    partialNotice: Această acțiune creează și asociază o tranzacție efectivă decontată. Deoarece suma este mai mică decât estimarea rămasă, apariția rămâne programată.
+    paidNotice: Această acțiune creează și asociază o tranzacție efectivă decontată. Apariția devine plătită când plățile efective ating suma estimată.
+    invalidReference: Răspunsul pentru cursul de referință nu este valid.
+    noReference: Nu este disponibil niciun curs de referință.
+    positiveAppliedError: Introdu o sumă mai mare decât zero în {currency}.
+    chooseAccountError: Alege contul folosit pentru plată.
+    waitForRateError: Așteaptă cursul de referință BNR sau introdu manual cursul de schimb.
+    positiveRateError: Introdu un curs de schimb pozitiv.
+    positiveAccountAmountError: Introdu sau calculează o sumă pozitivă în cont, în {currency}.
+    exactRateError: Această sumă exactă din cont nu poate fi reprezentată de cursul de schimb calculat la opt zecimale. Modifică în schimb cursul de schimb.
+
+forecast:
+  title: Planificare
+  header:
+    eyebrow: Spațiu de prognoză
+    title: Prognoză lunară
+    description: Prognozează fluxul de numerar folosind plățile planificate, ipotezele de deschidere și ajustările opționale de tip „ce-ar fi dacă”. Nimic de aici nu modifică tranzacțiile efective.
+  actions:
+    copyPrior: Copiază ipotezele precedente
+    saving: Se salvează…
+    saveAssumptions: Salvează ipotezele
+    scenarioOn: Scenariu activ
+    tryScenario: Încearcă un scenariu
+    addExpectedPayment: Adaugă plata estimată
+    clear: Șterge
+    addAdjustment: Adaugă ajustare
+    saveScenario: Salvează scenariul
+    removeAdjustment: Elimină ajustarea scenariului
+  feedback:
+    assumptionsSaved: Ipotezele soldurilor de deschidere au fost salvate.
+    saveAssumptionsFailed: Aceste ipoteze de prognoză nu au putut fi salvate.
+    assumptionsCopied: Ipotezele de deschidere și ajustările scenariului precedent au fost copiate. Plățile estimate provin în continuare din Plăți planificate.
+    copyAssumptionsFailed: Ipotezele de prognoză precedente nu au putut fi copiate.
+    scenarioSaved: Scenariul a fost salvat separat. Tranzacțiile efective nu au fost modificate.
+    saveScenarioFailed: Scenariul nu a putut fi salvat.
+  validation:
+    openingBalance: Introdu un sold de deschidere valid în {currency} pentru {account}.
+  range:
+    endMonth: Vizualizarea lunară folosește luna de sfârșit a intervalului
+  scenario:
+    name: Scenariu de lucru
+    banner: "{name} — ajustările ipotetice afectează doar această proiecție."
+  plan:
+    defaultName: Plan de bază
+  metrics:
+    opening:
+      label: Numerar estimat la deschidere
+      dirtyDetail: "Valoare salvată în {currency} · salvează modificările native pentru actualizare"
+      detail: Doar conturi curente, de economii și numerar
+      info: Soldurile lichide de deschidere, convertite din moneda nativă a fiecărui cont la cursul de raportare de la începutul lunii. Investițiile și soldurile datoriilor rămân în prognozele conturilor lor, dar nu sunt numerar.
+    income:
+      label: Venit estimat
+      info: Venituri din Plăți planificate, plus ajustările ipotetice activate, exprimate în moneda de raportare a profilului.
+    spending:
+      label: Cheltuieli estimate
+      detail: "{fixed} fixe · {variable} variabile"
+      info: Cheltuieli economice în moneda de raportare a profilului. Principalul împrumuturilor și rambursările cardurilor sunt transferuri și sunt excluse; dobânzile și comisioanele împrumuturilor sunt incluse.
+    cashDue:
+      label: Numerar scadent
+      detail: "{amount} sunt considerați și cheltuială"
+      info: Ieșirea de numerar estimată în moneda de raportare a profilului. Include rambursările cardurilor și ratele complete ale împrumuturilor, în timp ce cheltuielile includ doar cumpărături, dobânzi și comisioane.
+    closing:
+      label: Numerar proiectat la închidere
+      info: Numerarul lichid de deschidere plus mișcarea efectivă de numerar decontată în cursul lunii, apoi veniturile și obligațiile rămase, toate convertite în moneda de raportare a profilului. Plățile decontate nu sunt scăzute de două ori.
+  cashPath:
+    title: Evoluția proiectată a numerarului
+    description: "Mișcarea efectivă decontată plus estimările rămase, distribuite pe date · soldurile efective rămân neschimbate"
+    projection: Proiecție
+    lowest: Cel mai mic nivel proiectat al numerarului
+    lowestDetail: "{date} · după mișcarea efectivă, plățile rămase și ajustări"
+    timelineLabel: Cronologia numerarului proiectat
+    pointLabel: "{label} · {balance}"
+    open: Deschidere
+    close: Închidere
+  payments:
+    title: Plăți estimate
+    description: Obligații și venituri canonice din Plăți planificate; ajustările scenariului sunt marcate clar
+    tableLabel: Plăți lunare estimate și ajustări ale scenariului
+    date: Dată
+    item: Element
+    type: Tip
+    priority: Prioritate
+    account: Cont
+    cashDue: "Numerar scadent ({currency})"
+    spending: "Cheltuieli ({currency})"
+    empty: Nicio plată estimată pentru această lună. Adaugă una în Plăți planificate; ajustările ipotetice sunt disponibile în modul scenariu.
+  line:
+    hypothetical: Ipotetic · doar scenariu
+    settled: "{source} · decontat"
+    historical: "{source} · neaplicat acestei închideri istorice"
+    partial: "{source} · parțial · {amount} restant"
+    status: "{source} · {status}"
+    sourceOnly: "{source}"
+    estimate: "{context} · estimare"
+  source:
+    recurringPayment: plată planificată recurentă
+    plannedPayment: plată planificată
+    cardStatement: extras de card
+    loanSchedule: grafic de rambursare
+    scenario: scenariu
+    other: element planificat
+  status:
+    planned: planificat
+    scheduled: programat
+    overdue: restant
+    paid: plătit
+    cancelled: anulat
+    skipped: omis
+    other: în așteptare
+  labels:
+    income: venit
+    fixed: fix
+    variable: variabil
+    essential: Esențial
+    discretionary: Discreționar
+  openings:
+    title: Solduri de deschidere estimate
+    dirtyDescription: "Editează fiecare cont în moneda sa nativă · salvează pentru actualizarea totalurilor de raportare"
+    description: Fiecare ipoteză rămâne în moneda nativă a contului său
+    tableLabel: Solduri de deschidere estimate
+    account: Cont
+    actualNow: Efectiv acum
+    expectedOpening: Deschidere estimată (nativă)
+    difference: Diferență
+    accountDetail: "{type} · {currency}"
+    inputLabel: Sold de deschidere estimat pentru {account}, în {currency}
+  accountType:
+    current: Cont curent
+    savings: Economii
+    cash: Numerar
+    creditCard: Card de credit
+    loan: Împrumut
+    investment: Investiție
+    custom: Personalizat
+    other: Alt cont
+  discretionary:
+    title: Bani discreționari
+    description: După angajamentele esențiale estimate
+    openingCash: Numerar la deschidere
+    actualMovement: Mișcare efectivă decontată
+    outstandingIncome: Venit restant
+    outstandingEssentials: Cheltuieli esențiale restante
+    outstandingDiscretionary: Cheltuieli discreționare restante
+    remaining: Rămas
+  accounts:
+    title: Prognoză pe cont
+    scenarioDescription: "Închideri canonice în monedele native · efectele scenariului rămân în prognoza generală de raportare"
+    description: Solduri de închidere proiectate în moneda nativă a fiecărui cont
+    ledger: "Registru în {currency}"
+    reportingEquivalent: "≈ {amount} pentru raportare"
+    empty: Adaugă conturi pentru a aloca numerarul prognozat.
+  comparison:
+    title: Planificat față de efectiv
+    description: Valorile planificate provin din plățile estimate; valorile efective istorice nu includ niciodată obligațiile neachitate
+    income: Venit
+    spending: Cheltuieli
+    cashObligations: Obligații în numerar
+    monthProgress: Progresul lunii
+    variance: Abaterea cheltuielilor
+    plannedActual: "{planned} planificat\n{actual} efectiv"
+    outstanding: "{amount} restant"
+    transfersIncluded: principalul și transferurile pentru card incluse
+    progressLabel: "{current} / {total, plural, one {# zi} few {# zile} other {# de zile}}"
+    overExpected: peste valoarea estimată
+    remainingExpected: valoare estimată rămasă
+  scenarioForm:
+    title: Adaugă o ajustare de scenariu
+    description: Această modificare ipotetică afectează doar prognoza; nu creează niciodată o plată planificată sau o tranzacție efectivă.
+    cancel: Anulează
+    add: Adaugă ajustarea
+    itemName: Numele elementului
+    incomePlaceholder: Salariu estimat
+    expensePlaceholder: Cheltuială estimată
+    direction: Direcție
+    expense: Cheltuială
+    income: Venit
+    amount: "Sumă ({currency} pentru raportare)"
+    expectedDate: Data estimată
+    account: Cont
+    accountHint: Alocare opțională; suma scenariului rămâne în moneda de raportare.
+    spendingType: Tipul cheltuielii
+    fixed: Fixă
+    variable: Variabilă
+    category: Categorie
+    essential: Consideră această cheltuială esențială la calcularea banilor discreționari.
+    nameError: Introdu numele elementului.
+    amountError: Introdu o sumă mai mare decât zero.
+
+statistics:
+  title: Statistici

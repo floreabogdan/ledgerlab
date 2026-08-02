@@ -10,6 +10,8 @@
 
 !drizzle/
 !drizzle/**
+!locales/
+!locales/**
 !scripts/
 !scripts/**
 !src/

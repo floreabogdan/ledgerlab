@@ -15,6 +15,7 @@ import {
 } from "react";
 
 import styles from "./select-combobox.module.css";
+import { useTranslations } from "@/i18n/client";
 
 export interface SelectComboboxOption {
   value: string;
@@ -82,12 +83,12 @@ export function SelectCombobox({
   onChange,
   id,
   name,
-  placeholder = "Choose an option",
+  placeholder,
   searchable = false,
-  searchPlaceholder = "Search options",
-  emptyMessage = "No matching options.",
+  searchPlaceholder,
+  emptyMessage,
   ariaLabel,
-  listboxLabel = "Options",
+  listboxLabel,
   disabled = false,
   invalid = false,
   describedBy,
@@ -95,6 +96,11 @@ export function SelectCombobox({
   triggerClassName,
   autoFocus = false,
 }: SelectComboboxProps) {
+  const t = useTranslations();
+  const resolvedPlaceholder = placeholder ?? t("common.controls.select.choose");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("common.controls.select.searchPlaceholder");
+  const resolvedEmptyMessage = emptyMessage ?? t("common.controls.select.noMatches");
+  const resolvedListboxLabel = listboxLabel ?? t("common.controls.options");
   const generatedId = useId();
   const controlId = id ?? `select-combobox-${generatedId}`;
   const listId = `${controlId}-listbox`;
@@ -443,7 +449,7 @@ export function SelectCombobox({
           <span className={styles.leading} aria-hidden="true">{selected.leading}</span>
         ) : null}
         <span className={clsx(styles.selectedLabel, !selected && styles.placeholder)}>
-          {selected?.label ?? placeholder}
+          {selected?.label ?? resolvedPlaceholder}
         </span>
         <ChevronDown className={styles.chevron} size={16} aria-hidden="true" />
       </button>
@@ -465,7 +471,7 @@ export function SelectCombobox({
           {searchable ? (
             <label className={styles.search} htmlFor={searchId}>
               <Search size={15} aria-hidden="true" />
-              <span className="sr-only">{searchPlaceholder}</span>
+              <span className="sr-only">{resolvedSearchPlaceholder}</span>
               <input
                 ref={searchRef}
                 id={searchId}
@@ -474,7 +480,7 @@ export function SelectCombobox({
                 type="search"
                 value={query}
                 autoComplete="off"
-                placeholder={searchPlaceholder}
+                placeholder={resolvedSearchPlaceholder}
                 aria-controls={listId}
                 aria-activedescendant={activeOption ? `${listId}-option-${activeIndex}` : undefined}
                 onChange={(event) => {
@@ -490,7 +496,7 @@ export function SelectCombobox({
 
           {searchable ? (
             <p className={styles.resultCount} role="status" aria-live="polite">
-              {filtered.length} {filtered.length === 1 ? "option" : "options"}
+              {t("common.controls.select.resultCount", { count: filtered.length })}
             </p>
           ) : null}
 
@@ -498,7 +504,7 @@ export function SelectCombobox({
             className={styles.list}
             id={listId}
             role="listbox"
-            aria-label={listboxLabel}
+            aria-label={resolvedListboxLabel}
           >
             {filtered.length ? filtered.map((option, index) => (
               <button
@@ -534,7 +540,7 @@ export function SelectCombobox({
                 {option.value === value ? <Check className={styles.check} size={16} aria-hidden="true" /> : null}
               </button>
             )) : (
-              <p className={styles.empty}>{emptyMessage}</p>
+              <p className={styles.empty}>{resolvedEmptyMessage}</p>
             )}
           </div>
         </div>

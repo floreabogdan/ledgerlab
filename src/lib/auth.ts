@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 
 import { db as defaultDb, type LedgerDatabase } from "@/db";
 import { sessions, users, type User } from "@/db/schema";
+import { resolveConfiguredUiLanguage } from "@/i18n/language";
 import {
   DEFAULT_CURRENCY,
   DEFAULT_LOCALE,
@@ -120,6 +121,7 @@ export type CreateUserInput = {
   currency?: string;
   locale?: string;
   timeZone?: string;
+  uiLanguage?: string;
 };
 
 export type CreateUserOptions = {
@@ -166,6 +168,7 @@ export async function createUser(
   } catch {
     throw new AuthError("Choose a valid IANA time zone.", "INVALID_TIME_ZONE");
   }
+  const uiLanguage = resolveConfiguredUiLanguage(input.uiLanguage);
 
   const passwordHash = await hashPassword(input.password);
   const now = new Date().toISOString();
@@ -175,6 +178,7 @@ export async function createUser(
     normalizedEmail,
     passwordHash,
     displayName: input.displayName.trim() || normalizedEmail.split("@")[0]!,
+    uiLanguage,
     defaultCurrency,
     locale,
     timeZone,

@@ -1,0 +1,108 @@
+title: Setări de profil
+page:
+  eyebrow: Cont local
+  description: Gestionează identitatea, setările regionale de afișare, mementourile din aplicație și parola locală. Listele financiare și instrumentele pentru date au secțiuni dedicate.
+  sectionsAria: Secțiunile setărilor de profil
+tabs:
+  profile: Profil și preferințe
+  reminders: Mementouri
+  security: Securitate
+messages:
+  actionFailed: Această setare nu a putut fi salvată
+preferences:
+  title: Profil și preferințe
+  description: Identitate, limba interfeței, moneda de raportare, formatarea regională și densitatea tabelelor
+  saved: Preferințele profilului au fost salvate.
+  profileGroup: Profil
+  displayName: Nume afișat
+  displayNamePlaceholder: Numele tău
+  email: E-mail
+  regionGroup: Raportare și regiune
+  reportingCurrency: Monedă de raportare
+  reportingCurrencyHelp: Este folosită pentru totalurile din toate conturile. Schimbarea ei recalculează rapoartele, dar nu schimbă moneda înregistrărilor istorice. Totalurile între monede necesită cursuri BNR pentru ambele monede.
+  locale: Setări regionale de formatare
+  localeHelp: Stabilesc modul de formatare a datelor, numerelor și monedelor. Nu schimbă limba interfeței.
+  localePlaceholder: de ex. en-US
+  localeNoMatches: Nicio setare regională uzuală nu corespunde. Poți păstra acest cod de localizare BCP 47 valid.
+  localeDescription: "{language} ({region})"
+  timeZone: Fus orar
+  timeZoneHelp: Stabilește ziua curentă, limitele lunare și starea scadentă sau restantă.
+  timeZonePlaceholder: de ex. Europe/Bucharest
+  timeZoneNoMatches: Niciun fus orar IANA nu corespunde. Poți păstra o valoare personalizată acceptată de mediul de execuție.
+  utcDescription: Timp universal coordonat
+  interfaceGroup: Interfață
+  interfaceLanguage: Limba interfeței
+  interfaceLanguageHelp: Schimbă textele, etichetele și mesajele afișate de LedgerLab. Setările regionale pentru date, numere și monede rămân separate.
+  compactTables: Tabele de date compacte
+  compactTablesHelp: Folosește rânduri mai înguste, păstrând lizibilitatea pe dispozitive mobile.
+  save: Salvează setările profilului
+  saving: Se salvează…
+reminders:
+  title: Mementouri în aplicație
+  description: Sunt afișate în LedgerLab; nu se trimit mesaje externe
+  saved: Preferințele pentru mementouri au fost salvate.
+  dueSoonWindow: Interval pentru scadențe apropiate
+  daysBefore: "{count, plural, one {cu # zi înainte} few {cu # zile înainte} other {cu # de zile înainte}}"
+  dueSoon: Facturi scadente în curând
+  dueSoonHelp: Evidențiază plățile planificate care se apropie de data scadenței.
+  overdue: Obligații restante
+  overdueHelp: Păstrează obligațiile neachitate după scadență vizibile în panoul de control.
+  budgetWarnings: Avertismente pentru bugete
+  budgetWarningsHelp: Semnalează cheltuielile efective apropiate de limita unei categorii sau care o depășesc.
+  save: Salvează mementourile
+  saving: Se salvează…
+security:
+  title: Securitatea contului local
+  description: Parola și opțiunile sesiunilor persistente
+  localUser: utilizator local
+  signedInAs: "Autentificat ca <identity>{identity}</identity>. Cookie-urile de sesiune sunt HttpOnly, iar tokenurile de sesiune stocate sunt păstrate sub formă de hash."
+  changeHeading: Schimbă parola
+  currentPassword: Parola curentă
+  newPassword: Parola nouă
+  newPasswordHelp: Cel puțin 10 caractere
+  confirmPassword: Confirmă parola nouă
+  validation:
+    passwordMinimum: Folosește cel puțin 10 caractere pentru parola nouă.
+    passwordsMismatch: Parolele noi nu coincid.
+  saved: Parola a fost schimbată. Celelalte sesiuni au fost revocate.
+  save: Schimbă parola
+  saving: Se schimbă…
+data:
+  eyebrow: Gestionarea datelor
+  title: Date și copii de siguranță
+  description: Exportă date portabile despre tranzacții, creează o copie locală completă sau restaurează în siguranță o bază de date LedgerLab anterioară.
+  importTransactions: Importă tranzacții
+  portable:
+    title: Exporturi portabile
+    description: Descarcă datele tranzacțiilor efective
+    csvTitle: Export CSV
+    csvDescription: Tranzacții efective potrivite pentru foi de calcul, cu sumele înregistrate în format lizibil și ca valori întregi, monedele originale și instantaneele FX aplicate.
+    csvButton: Descarcă CSV
+    jsonTitle: Export JSON
+    jsonDescription: Conturi, categorii și tranzacții efective structurate, inclusiv proveniența exactă a cursurilor de schimb aplicate la datele respective.
+    jsonButton: Descarcă JSON
+  safety:
+    title: Protejarea întregii baze de date
+    description: Creează o copie de siguranță sau restaurează toate datele locale LedgerLab
+    createTitle: Creează o copie completă
+    createDescription: Include conturile, soldurile, tranzacțiile, planurile, bugetele, regulile de recurență, setările profilului și memoria cache cu cursurile BNR descărcate.
+    createButton: Descarcă copia de siguranță
+    restoreTitle: Restaurează o copie de siguranță
+    restoreDescription: Validează o copie de siguranță LedgerLab înainte de a înlocui datele utilizatorului local autentificat.
+    restoreButton: Alege copia de siguranță
+  errors:
+    exportFailed: Datele nu au putut fi exportate
+    backupFailed: Copia de siguranță nu a putut fi creată
+    restoreFailed: Această copie de siguranță nu a putut fi restaurată
+    fileTooLarge: Fișierele copiilor de siguranță trebuie să fie mai mici de 100 MB.
+    invalidFile: Acesta nu este un fișier JSON de copie de siguranță LedgerLab valid.
+    confirmationRequired: Confirmă că înțelegi că baza de date curentă va fi înlocuită.
+  restored: Copia de siguranță a fost restaurată. Reîncarcă celelalte file LedgerLab deschise înainte de a face modificări.
+  confirmation:
+    title: Restaurezi copia completă a bazei de date?
+    cancel: Anulează
+    restoring: Se restaurează…
+    replace: Înlocuiește datele și restaurează
+    warning: Această acțiune înlocuiește datele LedgerLab curente.
+    warningHelp: Creează mai întâi o copie nouă dacă este posibil să ai nevoie de starea curentă. Sesiunile din celelalte file ale browserului pot rămâne cu date învechite.
+    acknowledgement: Înțeleg că datele financiare curente vor fi înlocuite cu cele din copia de siguranță selectată.

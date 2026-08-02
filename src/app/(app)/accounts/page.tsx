@@ -17,6 +17,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useDateRange } from "@/components/date-range-context";
 import { CurrencyCombobox } from "@/components/ui/currency-combobox";
+import { useTranslations } from "@/i18n/client";
+import type { Translator } from "@/i18n/runtime";
 import { DEFAULT_CURRENCY, isSupportedCurrency } from "@/lib/currencies";
 import {
   LOAN_INTERVAL_MONTH_SUGGESTIONS,
@@ -60,13 +62,13 @@ type Account = Record<string, unknown>;
 type AccountFilter = "active" | "archived" | "all";
 
 const accountTypes = [
-  ["current_account", "Current account"],
-  ["savings", "Savings"],
-  ["cash", "Cash"],
-  ["credit_card", "Credit card"],
-  ["loan", "Loan"],
-  ["investment", "Investment"],
-  ["custom", "Custom"],
+  ["current_account", "finance.accounts.types.currentAccount"],
+  ["savings", "finance.accounts.types.savings"],
+  ["cash", "finance.accounts.types.cash"],
+  ["credit_card", "finance.accounts.types.creditCard"],
+  ["loan", "finance.accounts.types.loan"],
+  ["investment", "finance.accounts.types.investment"],
+  ["custom", "finance.accounts.types.custom"],
 ] as const;
 
 const liabilityTypes = new Set(["credit_card", "loan"]);
@@ -79,28 +81,38 @@ function addMonths(date: string, count: number) {
   return target.toISOString().slice(0, 10);
 }
 
-function percentInputToBps(value: string, label: string, optional = false, allowNegative = false) {
+function percentInputToBps(
+  value: string,
+  label: string,
+  translate: Translator["translate"],
+  optional = false,
+  allowNegative = false,
+) {
   if (optional && !value.trim()) return null;
   const normalized = value.trim().replace(",", ".");
   if (!/^-?\d+(?:\.\d{0,2})?$/.test(normalized)) {
-    throw new Error(`Enter a valid ${label} with no more than two decimal places.`);
+    throw new Error(translate("finance.accounts.validation.invalidPercentagePrecision", { label }));
   }
   const parsed = Number(normalized);
-  if ((!allowNegative && parsed < 0) || parsed < -1_000 || parsed > 10_000) throw new Error(`Enter a valid ${label}.`);
+  if ((!allowNegative && parsed < 0) || parsed < -1_000 || parsed > 10_000) {
+    throw new Error(translate("finance.accounts.validation.invalidValue", { label }));
+  }
   return Math.round(parsed * 100);
 }
 
-function optionalMoneyInputToMinor(value: string, label: string, currency: string) {
+function optionalMoneyInputToMinor(value: string, label: string, currency: string, translate: Translator["translate"]) {
   if (!value.trim()) return null;
   const result = moneyInputToMinor(value, currency);
-  if (result === null || result < 0) throw new Error(`Enter a valid ${label} for ${currency}.`);
+  if (result === null || result < 0) throw new Error(translate("finance.accounts.validation.invalidMoney", { label, currency }));
   return result;
 }
 
-function optionalInteger(value: string, label: string, minimum: number, maximum: number) {
+function optionalInteger(value: string, label: string, minimum: number, maximum: number, translate: Translator["translate"]) {
   if (!value.trim()) return null;
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error(`Enter a valid ${label}.`);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(translate("finance.accounts.validation.invalidValue", { label }));
+  }
   return parsed;
 }
 
@@ -114,7 +126,16 @@ function accountIcon(type: string) {
   return <Wallet size={18} />;
 }
 
+function accountTypeLabel(type: string, translate: Translator["translate"]) {
+  const normalized = type === "current" ? "current_account" : type;
+  const definition = accountTypes.find(([value]) => value === normalized);
+  return definition
+    ? translate(definition[1])
+    : translate("finance.accounts.types.custom");
+}
+
 export default function AccountsPage() {
+  const t = useTranslations();
   const router = useRouter();
   const { range, label: rangeLabel } = useDateRange();
   const accountsUrl = useMemo(() => {
@@ -162,40 +183,40 @@ export default function AccountsPage() {
       if (selected && selected.id === record.id) setSelected(null);
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not update account");
+      setActionError(caught instanceof Error ? caught.message : t("finance.accounts.validation.updateFallback"));
     }
   }
 
   return (
     <Page>
       <ViewHeader
-        eyebrow="Money locations"
-        title="Accounts"
-        description="Opening balances and actual transactions reconcile into each current balance. Archiving keeps every historical record intact."
-        actions={<AddButton onClick={() => setCreateOpen(true)}>Add account</AddButton>}
+        eyebrow={t("finance.accounts.header.eyebrow")}
+        title={t("finance.accounts.title")}
+        description={t("finance.accounts.header.description")}
+        actions={<AddButton onClick={() => setCreateOpen(true)}>{t("finance.accounts.header.add")}</AddButton>}
       />
 
       <div className={ui.metricGrid}>
-        <Metric label="Net account value" value={formatMoney(total, workspaceCurrency)} tone={total >= 0 ? "accent" : "negative"} info={`Active account balances translated to ${workspaceCurrency} at the latest available as-of rates. Native balances are never rewritten.`} />
-        <Metric label="Assets" value={formatMoney(assets, workspaceCurrency)} detail={`${activeAccounts.filter((item) => !liabilityTypes.has(stringFrom(readRecord(item).type))).length} active asset accounts`} info={`Cross-account total in your ${workspaceCurrency} reporting currency.`} />
-        <Metric label="Debt outstanding" value={formatMoney(liabilities, workspaceCurrency)} tone={liabilities > 0 ? "warning" : "default"} info={`Amounts currently owed, translated to ${workspaceCurrency}; overpayments are not counted as debt.`} />
-        <Metric label="Archived" value={archivedAccounts.length} detail="History remains available" />
+        <Metric label={t("finance.accounts.metrics.netValue")} value={formatMoney(total, workspaceCurrency)} tone={total >= 0 ? "accent" : "negative"} info={t("finance.accounts.metrics.netInfo", { currency: workspaceCurrency })} />
+        <Metric label={t("finance.accounts.metrics.assets")} value={formatMoney(assets, workspaceCurrency)} detail={t("finance.accounts.metrics.assetCount", { count: activeAccounts.filter((item) => !liabilityTypes.has(stringFrom(readRecord(item).type))).length })} info={t("finance.accounts.metrics.assetsInfo", { currency: workspaceCurrency })} />
+        <Metric label={t("finance.accounts.metrics.debt")} value={formatMoney(liabilities, workspaceCurrency)} tone={liabilities > 0 ? "warning" : "default"} info={t("finance.accounts.metrics.debtInfo", { currency: workspaceCurrency })} />
+        <Metric label={t("finance.accounts.metrics.archived")} value={archivedAccounts.length} detail={t("finance.accounts.metrics.archivedDetail")} />
       </div>
 
       <Section
-        title="Your accounts"
-        description="Balances shown are actual and exclude unpaid planned payments"
+        title={t("finance.accounts.list.title")}
+        description={t("finance.accounts.list.description")}
         action={
           <Tabs
             id="account-visibility"
             panelId="account-visibility-panel"
-            label="Account visibility"
+            label={t("finance.accounts.list.visibility")}
             value={filter}
             onChange={setFilter}
             items={[
-              { value: "active", label: "Active", count: activeAccounts.length },
-              { value: "archived", label: "Archived", count: archivedAccounts.length },
-              { value: "all", label: "All", count: accounts.length },
+              { value: "active", label: t("finance.accounts.list.active"), count: activeAccounts.length },
+              { value: "archived", label: t("finance.accounts.list.archived"), count: archivedAccounts.length },
+              { value: "all", label: t("finance.accounts.list.all"), count: accounts.length },
             ]}
           />
         }
@@ -208,15 +229,18 @@ export default function AccountsPage() {
             error={error}
             onRetry={reload}
             empty={!visibleAccounts.length}
-            emptyTitle={filter === "archived" ? "No archived accounts" : "Create your first account"}
-            emptyDescription={filter === "archived" ? "Accounts you archive will appear here with all history preserved." : "Start with the account you use most. Its opening balance becomes the reconciliation baseline."}
-            action={filter !== "archived" ? <AddButton onClick={() => setCreateOpen(true)}>Add account</AddButton> : undefined}
+            emptyTitle={filter === "archived" ? t("finance.accounts.list.noArchived") : t("finance.accounts.list.createFirst")}
+            emptyDescription={filter === "archived" ? t("finance.accounts.list.archivedDescription") : t("finance.accounts.list.createDescription")}
+            action={filter !== "archived" ? <AddButton onClick={() => setCreateOpen(true)}>{t("finance.accounts.header.add")}</AddButton> : undefined}
           >
             <div className={ui.accountGrid}>
             {visibleAccounts.map((item, index) => {
               const account = readRecord(item);
               const archived = Boolean(account.archivedAt ?? account.isArchived);
               const type = stringFrom(account.type, "custom");
+              const translatedType = account.customType || account.customTypeLabel
+                ? stringFrom(account.customType ?? account.customTypeLabel)
+                : accountTypeLabel(type, t);
               const balance = numberFrom(account.balanceMinor ?? account.currentBalanceMinor);
               const currency = stringFrom(account.currency, DEFAULT_CURRENCY);
               const isLiability = liabilityTypes.has(type);
@@ -241,43 +265,45 @@ export default function AccountsPage() {
                     <div className={ui.accountTitle}>
                       <span aria-hidden="true">{accountIcon(type)}</span>
                       <span>
-                        <strong>{stringFrom(account.name, "Unnamed account")}</strong>
-                        <small>{stringFrom(account.customType ?? account.customTypeLabel, type).replaceAll("_", " ")} · {currency}{account.institution ? ` · ${stringFrom(account.institution)}` : ""}</small>
+                        <strong>{stringFrom(account.name, t("finance.accounts.card.unnamed"))}</strong>
+                        <small>{account.institution
+                          ? t("finance.accounts.card.typeCurrencyInstitution", { type: translatedType, currency, institution: stringFrom(account.institution) })
+                          : t("finance.accounts.card.typeCurrency", { type: translatedType, currency })}</small>
                       </span>
                     </div>
-                    {archived ? <Pill>archived</Pill> : <IconButton label={isLiability ? "Manage debt" : "Account details"} onClick={openDetails}><Ellipsis size={18} /></IconButton>}
+                    {archived ? <Pill>{t("finance.accounts.card.archived")}</Pill> : <IconButton label={isLiability ? t("finance.accounts.card.manageDebt") : t("finance.accounts.card.details")} onClick={openDetails}><Ellipsis size={18} /></IconButton>}
                   </div>
-                  <span className={ui.accountBalanceLabel}>{isLiability ? (balance > 0 ? "Credit balance" : "Outstanding") : "Current balance"}</span>
+                  <span className={ui.accountBalanceLabel}>{isLiability ? (balance > 0 ? t("finance.accounts.card.creditBalance") : t("finance.accounts.card.outstanding")) : t("finance.accounts.card.currentBalance")}</span>
                   <strong className={`${ui.accountBalance} ${debt > 0 ? ui.negative : ""}`}>{formatMoney(isLiability ? (balance > 0 ? balance : debt) : balance, currency)}</strong>
                   {type === "credit_card" && Object.keys(creditMetrics).length ? (
                     <div className={ui.liabilitySnapshot}>
-                      <div className={ui.liabilityProgress} aria-label={utilizationBps >= 0 ? `Credit utilization ${(utilizationBps / 100).toFixed(1)} percent` : "Credit utilization unavailable"}>
+                      <div className={ui.liabilityProgress} aria-label={utilizationBps >= 0 ? t("finance.accounts.card.utilization", { percent: utilizationBps / 100 }) : t("finance.accounts.card.utilizationUnavailable")}>
                         <span style={{ width: `${utilizationBps < 0 ? 0 : Math.min(100, utilizationBps / 100)}%` }} />
                       </div>
                       <div className={ui.liabilityFacts}>
-                        <span>Available <strong>{formatMoney(creditMetrics.availableCreditMinor, currency)}</strong></span>
-                        <span>{utilizationBps >= 0 ? `${(utilizationBps / 100).toFixed(1)}% used` : "No limit set"}</span>
+                        <span>{t("finance.accounts.card.available")} <strong>{formatMoney(creditMetrics.availableCreditMinor, currency)}</strong></span>
+                        <span>{utilizationBps >= 0 ? t("finance.accounts.card.used", { percent: utilizationBps / 100 }) : t("finance.accounts.card.noLimit")}</span>
                       </div>
                     </div>
                   ) : null}
                   {type === "loan" && Object.keys(loanMetrics).length ? (
                     <div className={ui.liabilitySnapshot}>
-                      <div className={`${ui.liabilityProgress} ${ui.loanProgress}`} aria-label={`${repaymentPercent.toFixed(1)} percent of scheduled principal repaid`}>
+                      <div className={`${ui.liabilityProgress} ${ui.loanProgress}`} aria-label={t("finance.accounts.card.repaymentAria", { percent: repaymentPercent })}>
                         <span style={{ width: `${repaymentPercent}%` }} />
                       </div>
                       <div className={ui.liabilityFacts}>
-                        <span>Original <strong>{formatMoney(originalPrincipal, currency)}</strong></span>
-                        <span>{repaymentPercent.toFixed(1)}% repaid</span>
+                        <span>{t("finance.accounts.card.original")} <strong>{formatMoney(originalPrincipal, currency)}</strong></span>
+                        <span>{t("finance.accounts.card.repaid", { percent: repaymentPercent })}</span>
                       </div>
                     </div>
                   ) : null}
                   <div className={ui.accountMeta}>
-                    <span>{isLiability ? "Opening debt" : "Opening"} {formatMoney(isLiability ? Math.max(0, -numberFrom(account.openingBalanceMinor)) : account.openingBalanceMinor, currency)}</span>
-                    <span>as of {formatDate(account.openingDate ?? account.openingBalanceDate ?? account.createdAt, { day: "2-digit", month: "short", year: undefined })}</span>
+                    <span>{t(isLiability ? "finance.accounts.card.openingDebt" : "finance.accounts.card.opening", { amount: formatMoney(isLiability ? Math.max(0, -numberFrom(account.openingBalanceMinor)) : account.openingBalanceMinor, currency) })}</span>
+                    <span>{t("finance.accounts.card.asOf", { date: formatDate(account.openingDate ?? account.openingBalanceDate ?? account.createdAt, { day: "2-digit", month: "short", year: undefined }) })}</span>
                   </div>
                   <div className={ui.accountActions}>
-                    <Button variant="ghost" onClick={openDetails}>{isLiability ? "Manage debt" : "Balance history"}</Button>
-                    <Button variant="ghost" onClick={() => void archiveAccount(account)}>{archived ? "Restore" : "Archive"}</Button>
+                    <Button variant="ghost" onClick={openDetails}>{isLiability ? t("finance.accounts.card.manageDebt") : t("finance.accounts.card.balanceHistory")}</Button>
+                    <Button variant="ghost" onClick={() => void archiveAccount(account)}>{archived ? t("finance.accounts.card.restore") : t("finance.accounts.card.archive")}</Button>
                   </div>
                 </article>
               );
@@ -371,6 +397,7 @@ function AccountForm({
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
+  const t = useTranslations();
   const [form, setForm] = useState<AccountFormDraft>(() => initialAccountDraft(defaultCurrency));
   const today = isoToday();
   const setValue = <Key extends keyof AccountFormDraft>(key: Key, value: AccountFormDraft[Key]) => {
@@ -385,12 +412,21 @@ function AccountForm({
   const previewCardAmount = Math.max(0, moneyInputToMinor(form.cardOpeningAmount, currency) ?? 0);
   const previewOutstanding = form.cardOpeningMode === "available" ? Math.max(0, previewLimit - previewCardAmount) : previewCardAmount;
   const isLiability = liabilityTypes.has(form.type);
+  const loanReferenceIndexSuggestions = LOAN_REFERENCE_INDEX_SUGGESTIONS.map((suggestion) => ({
+    value: suggestion.value,
+    label: t(suggestion.labelKey),
+    description: t(suggestion.descriptionKey),
+  }));
+  const loanIntervalMonthSuggestions = LOAN_INTERVAL_MONTH_SUGGESTIONS.map((suggestion) => ({
+    value: suggestion.value,
+    label: t(suggestion.labelKey),
+  }));
 
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
-    if (!form.name.trim()) throw new Error("Enter an account name.");
-    if (!isSupportedCurrency(currency)) throw new Error("Choose a supported ISO 4217 currency.");
-    if (!form.openingDate) throw new Error("Choose the balance date.");
-    if (form.type === "custom" && !form.customTypeLabel.trim()) throw new Error("Describe the custom account type.");
+    if (!form.name.trim()) throw new Error(t("finance.accounts.validation.accountName"));
+    if (!isSupportedCurrency(currency)) throw new Error(t("finance.accounts.validation.currency"));
+    if (!form.openingDate) throw new Error(t("finance.accounts.validation.balanceDate"));
+    if (form.type === "custom" && !form.customTypeLabel.trim()) throw new Error(t("finance.accounts.validation.customType"));
 
     let openingBalanceMinor = moneyInputToMinor(form.openingBalance, currency);
     let creditLimitMinor: number | null = null;
@@ -400,25 +436,25 @@ function AccountForm({
     if (form.type === "credit_card") {
       const limit = moneyInputToMinor(form.cardLimit, currency);
       const enteredAmount = moneyInputToMinor(form.cardOpeningAmount, currency);
-      if (limit === null || limit <= 0) throw new Error("Enter a positive credit limit.");
-      if (enteredAmount === null || enteredAmount < 0) throw new Error("Enter a valid opening card amount.");
-      if (form.cardOpeningMode === "available" && enteredAmount > limit) throw new Error("Opening available credit cannot exceed the card limit.");
+      if (limit === null || limit <= 0) throw new Error(t("finance.accounts.validation.creditLimit"));
+      if (enteredAmount === null || enteredAmount < 0) throw new Error(t("finance.accounts.validation.openingCardAmount"));
+      if (form.cardOpeningMode === "available" && enteredAmount > limit) throw new Error(t("finance.accounts.validation.availableExceedsLimit"));
       const outstanding = form.cardOpeningMode === "available" ? limit - enteredAmount : enteredAmount;
       openingBalanceMinor = -outstanding;
       creditLimitMinor = limit;
       const minimumPaymentRateBps = form.cardMinimumMode === "percentage"
-        ? percentInputToBps(form.cardMinimumRate, "minimum payment percentage")
+        ? percentInputToBps(form.cardMinimumRate, t("finance.accounts.validation.labels.minimumPaymentPercentage"), t)
         : null;
       const minimumPaymentFixedMinor = form.cardMinimumMode === "fixed"
-        ? optionalMoneyInputToMinor(form.cardMinimumFixed, "fixed minimum payment", currency)
+        ? optionalMoneyInputToMinor(form.cardMinimumFixed, t("finance.accounts.validation.labels.fixedMinimumPayment"), currency, t)
         : null;
-      if (form.cardMinimumMode === "fixed" && minimumPaymentFixedMinor === null) throw new Error("Enter the fixed minimum payment.");
+      if (form.cardMinimumMode === "fixed" && minimumPaymentFixedMinor === null) throw new Error(t("finance.accounts.validation.fixedMinimum"));
       creditCard = {
         creditLimitMinor: limit,
-        statementDay: optionalInteger(form.cardStatementDay, "statement day", 1, 31),
-        dueDay: optionalInteger(form.cardDueDay, "payment due day", 1, 31),
-        gracePeriodDays: optionalInteger(form.cardGraceDays, "grace period", 0, 180),
-        purchaseAprBps: percentInputToBps(form.cardApr, "purchase APR", true),
+        statementDay: optionalInteger(form.cardStatementDay, t("finance.accounts.validation.labels.statementDay"), 1, 31, t),
+        dueDay: optionalInteger(form.cardDueDay, t("finance.accounts.validation.labels.dueDay"), 1, 31, t),
+        gracePeriodDays: optionalInteger(form.cardGraceDays, t("finance.accounts.validation.labels.gracePeriod"), 0, 180, t),
+        purchaseAprBps: percentInputToBps(form.cardApr, t("finance.accounts.validation.labels.purchaseApr"), t, true),
         minimumPaymentMode: form.cardMinimumMode,
         minimumPaymentRateBps,
         minimumPaymentFixedMinor,
@@ -427,38 +463,38 @@ function AccountForm({
       };
     } else if (form.type === "loan") {
       const outstanding = moneyInputToMinor(form.loanOutstanding, currency);
-      if (outstanding === null || outstanding <= 0) throw new Error("Enter the loan principal currently outstanding.");
-      const originalPrincipal = optionalMoneyInputToMinor(form.loanOriginalPrincipal, "original principal", currency) ?? outstanding;
-      if (originalPrincipal <= 0) throw new Error("Original principal must be positive.");
-      const termMonths = optionalInteger(form.loanTermMonths, "loan term in months", 1, 1200);
-      const paymentIntervalMonths = optionalInteger(form.loanPaymentIntervalMonths, "payment interval", 1, 120);
-      if (termMonths === null || paymentIntervalMonths === null) throw new Error("Enter the loan term and payment interval.");
-      if (!form.loanOriginationDate || !form.loanFirstPaymentDate) throw new Error("Choose the origination and first payment dates.");
+      if (outstanding === null || outstanding <= 0) throw new Error(t("finance.accounts.validation.loanOutstanding"));
+      const originalPrincipal = optionalMoneyInputToMinor(form.loanOriginalPrincipal, t("finance.accounts.validation.labels.originalPrincipal"), currency, t) ?? outstanding;
+      if (originalPrincipal <= 0) throw new Error(t("finance.accounts.validation.originalPrincipalPositive"));
+      const termMonths = optionalInteger(form.loanTermMonths, t("finance.accounts.validation.labels.loanTerm"), 1, 1200, t);
+      const paymentIntervalMonths = optionalInteger(form.loanPaymentIntervalMonths, t("finance.accounts.validation.labels.paymentInterval"), 1, 120, t);
+      if (termMonths === null || paymentIntervalMonths === null) throw new Error(t("finance.accounts.validation.termAndInterval"));
+      if (!form.loanOriginationDate || !form.loanFirstPaymentDate) throw new Error(t("finance.accounts.validation.loanDates"));
       openingBalanceMinor = -outstanding;
       const rate = form.loanRateType === "fixed"
         ? {
             rateType: "fixed",
             effectiveFrom: form.loanOriginationDate,
             effectiveTo: null,
-            fixedRateBps: percentInputToBps(form.loanFixedRate, "fixed annual interest rate"),
+            fixedRateBps: percentInputToBps(form.loanFixedRate, t("finance.accounts.validation.labels.fixedAnnualRate"), t),
           }
         : {
             rateType: "variable",
             effectiveFrom: form.loanOriginationDate,
             effectiveTo: null,
             referenceIndex: form.loanReferenceIndex.trim(),
-            referenceTenorMonths: optionalInteger(form.loanReferenceTenorMonths, "reference index tenor", 1, 120),
-            referenceRateBps: percentInputToBps(form.loanReferenceRate, "reference index rate", false, true),
-            marginBps: percentInputToBps(form.loanMargin, "lender margin", false, true),
-            resetFrequencyMonths: optionalInteger(form.loanResetFrequencyMonths, "rate reset frequency", 1, 120),
+            referenceTenorMonths: optionalInteger(form.loanReferenceTenorMonths, t("finance.accounts.validation.labels.referenceTenor"), 1, 120, t),
+            referenceRateBps: percentInputToBps(form.loanReferenceRate, t("finance.accounts.validation.labels.referenceRate"), t, false, true),
+            marginBps: percentInputToBps(form.loanMargin, t("finance.accounts.validation.labels.lenderMargin"), t, false, true),
+            resetFrequencyMonths: optionalInteger(form.loanResetFrequencyMonths, t("finance.accounts.validation.labels.resetFrequency"), 1, 120, t),
             nextResetDate: form.loanNextResetDate || null,
-            observationLagMonths: optionalInteger(form.loanObservationLagMonths, "observation lag", 0, 120) ?? 0,
-            floorRateBps: percentInputToBps(form.loanFloorRate, "rate floor", true, true),
-            capRateBps: percentInputToBps(form.loanCapRate, "rate cap", true, true),
+            observationLagMonths: optionalInteger(form.loanObservationLagMonths, t("finance.accounts.validation.labels.observationLag"), 0, 120, t) ?? 0,
+            floorRateBps: percentInputToBps(form.loanFloorRate, t("finance.accounts.validation.labels.rateFloor"), t, true, true),
+            capRateBps: percentInputToBps(form.loanCapRate, t("finance.accounts.validation.labels.rateCap"), t, true, true),
           };
-      if (form.loanRateType === "variable" && !form.loanReferenceIndex.trim()) throw new Error("Enter the reference index name.");
+      if (form.loanRateType === "variable" && !form.loanReferenceIndex.trim()) throw new Error(t("finance.accounts.validation.referenceIndex"));
       if (form.loanRateType === "variable" && (rate.referenceTenorMonths === null || rate.resetFrequencyMonths === null)) {
-        throw new Error("Enter the index tenor and reset frequency.");
+        throw new Error(t("finance.accounts.validation.indexIntervals"));
       }
       loan = {
         originalPrincipalMinor: originalPrincipal,
@@ -478,7 +514,7 @@ function AccountForm({
       };
     }
 
-    if (openingBalanceMinor === null) throw new Error(`Enter a valid opening balance for ${currency}.`);
+    if (openingBalanceMinor === null) throw new Error(t("finance.accounts.validation.openingBalance", { currency }));
     await requestJson("/api/accounts", {
       method: "POST",
       body: JSON.stringify({
@@ -499,24 +535,29 @@ function AccountForm({
     await onCreated();
   });
 
-  const accountLabel = form.type === "credit_card" ? "Credit card name" : form.type === "loan" ? "Loan name" : "Account name";
-  const formDescription = form.type === "credit_card"
-    ? "Enter the limit and either what you owe or what is still available. LedgerLab derives the signed opening debt for you."
+  const accountLabel = form.type === "credit_card"
+    ? t("finance.accounts.form.fields.cardName")
     : form.type === "loan"
-      ? "Loan principal is stored as a liability. The generated schedule keeps principal transfers separate from interest and fees."
-      : "The opening balance establishes the account’s actual starting point.";
+      ? t("finance.accounts.form.fields.loanName")
+      : t("finance.accounts.form.fields.accountName");
+  const formDescription = form.type === "credit_card"
+    ? t("finance.accounts.form.descriptions.card")
+    : form.type === "loan"
+      ? t("finance.accounts.form.descriptions.loan")
+      : t("finance.accounts.form.descriptions.account");
+  const currencyLabel = currency || t("finance.accounts.form.fields.currencyFallback");
 
   return (
     <Modal
       open={open}
       size={isLiability ? "xl" : "lg"}
       onClose={() => { setSubmitError(null); onClose(); }}
-      title="Add account"
+      title={t("finance.accounts.form.title")}
       description={formDescription}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Creating…" : "Create account"}</Button>
+          <Button variant="ghost" onClick={onClose}>{t("common.actions.cancel")}</Button>
+          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("finance.accounts.form.actions.creating") : t("finance.accounts.form.actions.create")}</Button>
         </>
       }
     >
@@ -525,17 +566,17 @@ function AccountForm({
         onSubmit={(event) => void submit(event)}
       >
         <Field label={accountLabel} className={ui.formSpan}>
-          <Input autoFocus value={form.name} onChange={(event) => setValue("name", event.target.value)} placeholder={form.type === "loan" ? "e.g. Home mortgage" : form.type === "credit_card" ? "e.g. Everyday Visa" : "e.g. Main current account"} maxLength={80} />
+          <Input autoFocus value={form.name} onChange={(event) => setValue("name", event.target.value)} placeholder={form.type === "loan" ? t("finance.accounts.form.fields.loanPlaceholder") : form.type === "credit_card" ? t("finance.accounts.form.fields.cardPlaceholder") : t("finance.accounts.form.fields.accountPlaceholder")} maxLength={80} />
         </Field>
-        <Field label="Account type">
+        <Field label={t("finance.accounts.form.fields.accountType")}>
           <Select value={form.type} onValueChange={(value) => setValue("type", value)}>
-            {accountTypes.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+            {accountTypes.map(([value, labelKey]) => <option value={value} key={value}>{t(labelKey)}</option>)}
           </Select>
         </Field>
         <Field
           htmlFor="account-currency"
-          label="Currency"
-          hint={`Immutable ledger currency · defaults to ${defaultCurrency}. Cross-currency totals require BNR coverage.`}
+          label={t("finance.accounts.form.fields.currency")}
+          hint={t("finance.accounts.form.fields.currencyHint", { currency: defaultCurrency })}
         >
           <CurrencyCombobox
             id="account-currency"
@@ -555,80 +596,80 @@ function AccountForm({
             }}
           />
         </Field>
-        <Field label="Institution" hint="Optional bank or lender">
-          <Input value={form.institution} onChange={(event) => setValue("institution", event.target.value)} placeholder="e.g. Your bank" maxLength={120} />
+        <Field label={t("finance.accounts.form.fields.institution")} hint={t("finance.accounts.form.fields.institutionHint")}>
+          <Input value={form.institution} onChange={(event) => setValue("institution", event.target.value)} placeholder={t("finance.accounts.form.fields.institutionPlaceholder")} maxLength={120} />
         </Field>
-        <Field label="Balance date">
+        <Field label={t("finance.accounts.form.fields.balanceDate")}>
           <Input type="date" max={today} value={form.openingDate} onChange={(event) => setValue("openingDate", event.target.value)} />
         </Field>
         {form.type === "custom" ? (
-          <Field label="Custom type" className={ui.formSpan}>
-            <Input value={form.customTypeLabel} onChange={(event) => setValue("customTypeLabel", event.target.value)} placeholder="e.g. Employee benefit card" maxLength={60} />
+          <Field label={t("finance.accounts.form.fields.customType")} className={ui.formSpan}>
+            <Input value={form.customTypeLabel} onChange={(event) => setValue("customTypeLabel", event.target.value)} placeholder={t("finance.accounts.form.fields.customTypePlaceholder")} maxLength={60} />
           </Field>
         ) : null}
 
         {form.type === "credit_card" ? (
           <>
-            <div className={`${ui.formSectionTitle} ${ui.formSpan}`}><strong>Credit position</strong><span>The credit limit is capacity, not money you own.</span></div>
-            <Field label={`Credit limit (${currency || "currency"})`} hint="Enter a positive limit">
+            <div className={`${ui.formSectionTitle} ${ui.formSpan}`}><strong>{t("finance.accounts.form.card.section")}</strong><span>{t("finance.accounts.form.card.sectionDescription")}</span></div>
+            <Field label={t("finance.accounts.form.card.creditLimit", { currency: currencyLabel })} hint={t("finance.accounts.form.card.creditLimitHint")}>
               <Input inputMode="decimal" value={form.cardLimit} onChange={(event) => setValue("cardLimit", event.target.value)} placeholder="5000" />
             </Field>
-            <Field label="Opening amount represents">
+            <Field label={t("finance.accounts.form.card.openingRepresents")}>
               <Select value={form.cardOpeningMode} onValueChange={(value) => setValue("cardOpeningMode", value as AccountFormDraft["cardOpeningMode"])}>
-                <option value="outstanding">Amount already used / owed</option>
-                <option value="available">Credit still available</option>
+                <option value="outstanding">{t("finance.accounts.form.card.alreadyUsed")}</option>
+                <option value="available">{t("finance.accounts.form.card.stillAvailable")}</option>
               </Select>
             </Field>
-            <Field label={`${form.cardOpeningMode === "outstanding" ? "Outstanding debt" : "Available credit"} (${currency || "currency"})`}>
+            <Field label={t(form.cardOpeningMode === "outstanding" ? "finance.accounts.form.card.outstandingDebt" : "finance.accounts.form.card.availableCredit", { currency: currencyLabel })}>
               <Input inputMode="decimal" value={form.cardOpeningAmount} onChange={(event) => setValue("cardOpeningAmount", event.target.value)} />
             </Field>
             <div className={`${ui.derivedValue} ${ui.accountDerivedValue} ${ui.formSpan}`} aria-live="polite">
-              <span>Opening debt LedgerLab will record</span>
+              <span>{t("finance.accounts.form.card.recordedDebt")}</span>
               <strong>{formatMoney(previewOutstanding, currency || DEFAULT_CURRENCY)}</strong>
             </div>
             <details className={`${ui.formDisclosure} ${ui.formSpan}`}>
-              <summary className={ui.formDisclosureSummary} aria-label="Advanced card setup">
+              <summary className={ui.formDisclosureSummary} aria-label={t("finance.accounts.form.card.advancedAria")}>
                 <span>
-                  <strong>Advanced card setup</strong>
-                  <small>Statement dates, APR and the issuer&apos;s minimum-payment rule</small>
+                  <strong>{t("finance.accounts.form.card.advanced")}</strong>
+                  <small>{t("finance.accounts.form.card.advancedDescription")}</small>
                 </span>
                 <ChevronDown size={18} aria-hidden="true" />
               </summary>
               <div className={ui.formDisclosureBody}>
                 <div className={`${ui.formGrid} ${ui.accountAdvancedGrid}`}>
-                <Field label="Usual statement day (reference)" hint="Day of month, 1–31">
-                  <Input type="number" min={1} max={31} value={form.cardStatementDay} onChange={(event) => setValue("cardStatementDay", event.target.value)} placeholder="e.g. 15" />
+                <Field label={t("finance.accounts.form.card.statementDay")} hint={t("finance.accounts.form.card.statementDayHint")}>
+                  <Input type="number" min={1} max={31} value={form.cardStatementDay} onChange={(event) => setValue("cardStatementDay", event.target.value)} placeholder={t("finance.accounts.form.card.statementDayPlaceholder")} />
                 </Field>
-                <Field label="Usual payment due day (reference)" hint="Day of month, if fixed">
-                  <Input type="number" min={1} max={31} value={form.cardDueDay} onChange={(event) => setValue("cardDueDay", event.target.value)} placeholder="e.g. 5" />
+                <Field label={t("finance.accounts.form.card.dueDay")} hint={t("finance.accounts.form.card.dueDayHint")}>
+                  <Input type="number" min={1} max={31} value={form.cardDueDay} onChange={(event) => setValue("cardDueDay", event.target.value)} placeholder={t("finance.accounts.form.card.dueDayPlaceholder")} />
                 </Field>
-                <Field label="Grace period (reference)" hint="Optional issuer rule in days">
+                <Field label={t("finance.accounts.form.card.gracePeriod")} hint={t("finance.accounts.form.card.gracePeriodHint")}>
                   <Input type="number" min={0} max={180} value={form.cardGraceDays} onChange={(event) => setValue("cardGraceDays", event.target.value)} />
                 </Field>
-                <Field label="Purchase APR (reference, %)" hint="Stored contract rate; statement interest is entered from the lender">
-                  <Input inputMode="decimal" value={form.cardApr} onChange={(event) => setValue("cardApr", event.target.value)} placeholder="e.g. 24.99" />
+                <Field label={t("finance.accounts.form.card.purchaseApr")} hint={t("finance.accounts.form.card.purchaseAprHint")}>
+                  <Input inputMode="decimal" value={form.cardApr} onChange={(event) => setValue("cardApr", event.target.value)} placeholder={t("finance.accounts.form.card.purchaseAprPlaceholder")} />
                 </Field>
-                <Field label="Contract minimum rule (reference)">
+                <Field label={t("finance.accounts.form.card.minimumRule")}>
                   <Select value={form.cardMinimumMode} onValueChange={(value) => setValue("cardMinimumMode", value as AccountFormDraft["cardMinimumMode"])}>
-                    <option value="manual">Enter on each statement</option>
-                    <option value="percentage">Percentage of statement</option>
-                    <option value="fixed">Fixed amount</option>
+                    <option value="manual">{t("finance.accounts.form.card.minimumManual")}</option>
+                    <option value="percentage">{t("finance.accounts.form.card.minimumPercentage")}</option>
+                    <option value="fixed">{t("finance.accounts.form.card.minimumFixed")}</option>
                   </Select>
                 </Field>
                 {form.cardMinimumMode === "percentage" ? (
-                  <Field label="Minimum payment (%)">
-                    <Input inputMode="decimal" value={form.cardMinimumRate} onChange={(event) => setValue("cardMinimumRate", event.target.value)} placeholder="e.g. 5" />
+                  <Field label={t("finance.accounts.form.card.minimumPaymentPercent")}>
+                    <Input inputMode="decimal" value={form.cardMinimumRate} onChange={(event) => setValue("cardMinimumRate", event.target.value)} placeholder={t("finance.accounts.form.card.minimumPaymentPlaceholder")} />
                   </Field>
                 ) : form.cardMinimumMode === "fixed" ? (
-                  <Field label={`Fixed minimum (${currency || "currency"})`}>
+                  <Field label={t("finance.accounts.form.card.fixedMinimum", { currency: currencyLabel })}>
                     <Input inputMode="decimal" value={form.cardMinimumFixed} onChange={(event) => setValue("cardMinimumFixed", event.target.value)} />
                   </Field>
                 ) : <div />}
-                <Field label="Default payment plan" className={ui.formSpan}>
+                <Field label={t("finance.accounts.form.card.paymentPlan")} className={ui.formSpan}>
                   <Select value={form.cardPaymentPreference} onValueChange={(value) => setValue("cardPaymentPreference", value as AccountFormDraft["cardPaymentPreference"])}>
-                    <option value="full_statement">Full statement balance</option>
-                    <option value="minimum">Minimum amount due</option>
-                    <option value="custom">Custom amount</option>
+                    <option value="full_statement">{t("finance.accounts.form.card.fullStatement")}</option>
+                    <option value="minimum">{t("finance.accounts.form.card.minimumDue")}</option>
+                    <option value="custom">{t("finance.accounts.form.card.customAmount")}</option>
                   </Select>
                 </Field>
                 </div>
@@ -637,88 +678,88 @@ function AccountForm({
           </>
         ) : form.type === "loan" ? (
           <>
-            <div className={`${ui.formSectionTitle} ${ui.formSpan}`}><strong>Loan position</strong><span>Enter positive amounts; LedgerLab stores the outstanding principal as negative liability value.</span></div>
-            <Field label={`Principal outstanding (${currency || "currency"})`} hint="What you owe on the balance date">
-              <Input inputMode="decimal" value={form.loanOutstanding} onChange={(event) => setValue("loanOutstanding", event.target.value)} placeholder="e.g. 250000" />
+            <div className={`${ui.formSectionTitle} ${ui.formSpan}`}><strong>{t("finance.accounts.form.loan.section")}</strong><span>{t("finance.accounts.form.loan.sectionDescription")}</span></div>
+            <Field label={t("finance.accounts.form.loan.outstanding", { currency: currencyLabel })} hint={t("finance.accounts.form.loan.outstandingHint")}>
+              <Input inputMode="decimal" value={form.loanOutstanding} onChange={(event) => setValue("loanOutstanding", event.target.value)} placeholder={t("finance.accounts.form.loan.outstandingPlaceholder")} />
             </Field>
-            <Field label={`Original / schedule principal (${currency || "currency"})`} hint="Optional; defaults to outstanding">
+            <Field label={t("finance.accounts.form.loan.original", { currency: currencyLabel })} hint={t("finance.accounts.form.loan.originalHint")}>
               <Input inputMode="decimal" value={form.loanOriginalPrincipal} onChange={(event) => setValue("loanOriginalPrincipal", event.target.value)} />
             </Field>
-            <Field label="Origination date">
+            <Field label={t("finance.accounts.form.loan.originationDate")}>
               <Input type="date" max={today} value={form.loanOriginationDate} onChange={(event) => setValue("loanOriginationDate", event.target.value)} />
             </Field>
-            <Field label="First payment date">
+            <Field label={t("finance.accounts.form.loan.firstPaymentDate")}>
               <Input type="date" value={form.loanFirstPaymentDate} onChange={(event) => setValue("loanFirstPaymentDate", event.target.value)} />
             </Field>
-            <Field label="Term (months)" hint="Remaining schedule duration">
+            <Field label={t("finance.accounts.form.loan.term")} hint={t("finance.accounts.form.loan.termHint")}>
               <Input type="number" min={1} max={1200} value={form.loanTermMonths} onChange={(event) => setValue("loanTermMonths", event.target.value)} />
             </Field>
-            <Field label="Payment cadence">
+            <Field label={t("finance.accounts.form.loan.cadence")}>
               <Select value={form.loanPaymentFrequency} onValueChange={(value) => {
                 const frequency = value as AccountFormDraft["loanPaymentFrequency"];
                 setForm((current) => ({ ...current, loanPaymentFrequency: frequency, loanPaymentIntervalMonths: frequency === "monthly" ? "1" : frequency === "quarterly" ? "3" : frequency === "yearly" ? "12" : current.loanPaymentIntervalMonths }));
               }}>
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="yearly">Yearly</option>
-                <option value="custom">Custom interval</option>
+                <option value="monthly">{t("finance.accounts.form.loan.monthly")}</option>
+                <option value="quarterly">{t("finance.accounts.form.loan.quarterly")}</option>
+                <option value="yearly">{t("finance.accounts.form.loan.yearly")}</option>
+                <option value="custom">{t("finance.accounts.form.loan.customInterval")}</option>
               </Select>
             </Field>
-            <Field label="Rate type">
+            <Field label={t("finance.accounts.form.loan.rateType")}>
               <Select value={form.loanRateType} onValueChange={(value) => setValue("loanRateType", value as AccountFormDraft["loanRateType"])}>
-                <option value="fixed">Fixed</option>
-                <option value="variable">Variable / indexed</option>
+                <option value="fixed">{t("finance.accounts.form.loan.fixed")}</option>
+                <option value="variable">{t("finance.accounts.form.loan.variable")}</option>
               </Select>
             </Field>
             {form.loanRateType === "fixed" ? (
-              <Field label="Annual interest rate (%)">
+              <Field label={t("finance.accounts.form.loan.annualRate")}>
                 <Input inputMode="decimal" value={form.loanFixedRate} onChange={(event) => setValue("loanFixedRate", event.target.value)} />
               </Field>
             ) : (
               <>
-                <Field label="Reference index" hint="Free text; jurisdiction-neutral">
+                <Field label={t("finance.accounts.form.loan.referenceIndex")} hint={t("finance.accounts.form.loan.referenceHint")}>
                   <SuggestionInput
                     value={form.loanReferenceIndex}
-                    suggestions={LOAN_REFERENCE_INDEX_SUGGESTIONS}
+                    suggestions={loanReferenceIndexSuggestions}
                     onValueChange={(value) => setValue("loanReferenceIndex", value)}
-                    placeholder="e.g. IRCC, EURIBOR, SOFR"
+                    placeholder={t("finance.accounts.form.loan.referencePlaceholder")}
                     maxLength={80}
                   />
                 </Field>
-                <Field label="Current index rate (%)">
-                  <Input inputMode="decimal" value={form.loanReferenceRate} onChange={(event) => setValue("loanReferenceRate", event.target.value)} placeholder="e.g. 5.55" />
+                <Field label={t("finance.accounts.form.loan.currentIndexRate")}>
+                  <Input inputMode="decimal" value={form.loanReferenceRate} onChange={(event) => setValue("loanReferenceRate", event.target.value)} placeholder={t("finance.accounts.form.loan.currentIndexPlaceholder")} />
                 </Field>
-                <Field label="Lender margin (%)">
-                  <Input inputMode="decimal" value={form.loanMargin} onChange={(event) => setValue("loanMargin", event.target.value)} placeholder="e.g. 2.10" />
+                <Field label={t("finance.accounts.form.loan.margin")}>
+                  <Input inputMode="decimal" value={form.loanMargin} onChange={(event) => setValue("loanMargin", event.target.value)} placeholder={t("finance.accounts.form.loan.marginPlaceholder")} />
                 </Field>
               </>
             )}
             <details className={`${ui.formDisclosure} ${ui.formSpan}`}>
-              <summary className={ui.formDisclosureSummary} aria-label="Advanced loan setup">
+              <summary className={ui.formDisclosureSummary} aria-label={t("finance.accounts.form.loan.advancedAria")}>
                 <span>
-                  <strong>Advanced loan setup</strong>
-                  <small>Interest-rate mechanics, schedule method and lender references</small>
+                  <strong>{t("finance.accounts.form.loan.advanced")}</strong>
+                  <small>{t("finance.accounts.form.loan.advancedDescription")}</small>
                 </span>
                 <ChevronDown size={18} aria-hidden="true" />
               </summary>
               <div className={ui.formDisclosureBody}>
                 <div className={`${ui.formGrid} ${ui.accountAdvancedGrid}`}>
-                  <Field label="Contract maturity (reference)" hint="Optional lender date; the estimate uses term and cadence">
+                  <Field label={t("finance.accounts.form.loan.maturity")} hint={t("finance.accounts.form.loan.maturityHint")}>
                     <Input type="date" value={form.loanMaturityDate} onChange={(event) => setValue("loanMaturityDate", event.target.value)} />
                   </Field>
-                  <Field label="Every (months)" hint={form.loanPaymentFrequency === "custom" ? "Custom payment interval" : "Derived from cadence"}>
+                  <Field label={t("finance.accounts.form.loan.everyMonths")} hint={form.loanPaymentFrequency === "custom" ? t("finance.accounts.form.loan.customInterval") : t("finance.accounts.form.loan.derivedInterval")}>
                     <Input type="number" min={1} max={120} disabled={form.loanPaymentFrequency !== "custom"} value={form.loanPaymentIntervalMonths} onChange={(event) => setValue("loanPaymentIntervalMonths", event.target.value)} />
                   </Field>
-            <Field label="Amortization method">
+            <Field label={t("finance.accounts.form.loan.amortization")}>
               <Select value={form.loanAmortization} onValueChange={(value) => setValue("loanAmortization", value as AccountFormDraft["loanAmortization"])}>
-                <option value="annuity">Annuity / equal total payments</option>
-                <option value="equal_principal">Equal principal</option>
-                <option value="interest_only">Interest only</option>
+                <option value="annuity">{t("finance.accounts.form.loan.annuity")}</option>
+                <option value="equal_principal">{t("finance.accounts.form.loan.equalPrincipal")}</option>
+                <option value="interest_only">{t("finance.accounts.form.loan.interestOnly")}</option>
               </Select>
             </Field>
-            <Field label="Payment account" hint={availableSourceAccounts.length ? "Optional default for installments; conversion is requested when currencies differ" : "No active cash account available"}>
+            <Field label={t("finance.accounts.form.loan.paymentAccount")} hint={availableSourceAccounts.length ? t("finance.accounts.form.loan.paymentAccountHint") : t("finance.accounts.form.loan.noCashAccount")}>
               <Select value={form.loanPaymentAccountId} onValueChange={(value) => setValue("loanPaymentAccountId", value)}>
-                <option value="">Choose when paying</option>
+                <option value="">{t("finance.accounts.form.loan.chooseWhenPaying")}</option>
                 {availableSourceAccounts.map((item) => {
                   const account = readRecord(item);
                   return <option value={stringFrom(account.id)} key={stringFrom(account.id)}>{stringFrom(account.name)} · {stringFrom(account.currency, DEFAULT_CURRENCY)}</option>;
@@ -727,49 +768,49 @@ function AccountForm({
             </Field>
                 {form.loanRateType === "variable" ? (
                   <>
-                    <Field label="Index tenor (months)" hint="Common values: 1, 3, 6, 12">
+                    <Field label={t("finance.accounts.form.loan.indexTenor")} hint={t("finance.accounts.form.loan.commonIntervals")}>
                       <SuggestionInput
                         value={form.loanReferenceTenorMonths}
-                        suggestions={LOAN_INTERVAL_MONTH_SUGGESTIONS}
+                        suggestions={loanIntervalMonthSuggestions}
                         onValueChange={(value) => setValue("loanReferenceTenorMonths", value)}
                         inputMode="numeric"
                         pattern="[0-9]*"
                         maxLength={3}
                       />
                     </Field>
-                    <Field label="Rate resets every (months)">
+                    <Field label={t("finance.accounts.form.loan.resetsEvery")}>
                       <SuggestionInput
                         value={form.loanResetFrequencyMonths}
-                        suggestions={LOAN_INTERVAL_MONTH_SUGGESTIONS}
+                        suggestions={loanIntervalMonthSuggestions}
                         onValueChange={(value) => setValue("loanResetFrequencyMonths", value)}
                         inputMode="numeric"
                         pattern="[0-9]*"
                         maxLength={3}
                       />
                     </Field>
-                    <Field label="Next reset date" hint="Optional">
+                    <Field label={t("finance.accounts.form.loan.nextReset")} hint={t("finance.accounts.form.loan.optional")}>
                       <Input type="date" value={form.loanNextResetDate} onChange={(event) => setValue("loanNextResetDate", event.target.value)} />
                     </Field>
-                    <Field label="Observation lag (months)" hint="Optional index publication lag">
+                    <Field label={t("finance.accounts.form.loan.observationLag")} hint={t("finance.accounts.form.loan.observationLagHint")}>
                       <Input type="number" min={0} max={120} value={form.loanObservationLagMonths} onChange={(event) => setValue("loanObservationLagMonths", event.target.value)} />
                     </Field>
-                    <Field label="Rate floor (%)" hint="Optional">
+                    <Field label={t("finance.accounts.form.loan.rateFloor")} hint={t("finance.accounts.form.loan.optional")}>
                       <Input inputMode="decimal" value={form.loanFloorRate} onChange={(event) => setValue("loanFloorRate", event.target.value)} />
                     </Field>
-                    <Field label="Rate cap (%)" hint="Optional">
+                    <Field label={t("finance.accounts.form.loan.rateCap")} hint={t("finance.accounts.form.loan.optional")}>
                       <Input inputMode="decimal" value={form.loanCapRate} onChange={(event) => setValue("loanCapRate", event.target.value)} />
                     </Field>
                   </>
                 ) : null}
-                <Field label="Jurisdiction code" hint="Optional ISO country code; e.g. US, RO, or DE">
-                  <Input value={form.loanJurisdiction} onChange={(event) => setValue("loanJurisdiction", event.target.value.toUpperCase())} placeholder="e.g. US" maxLength={8} />
+                <Field label={t("finance.accounts.form.loan.jurisdiction")} hint={t("finance.accounts.form.loan.jurisdictionHint")}>
+                  <Input value={form.loanJurisdiction} onChange={(event) => setValue("loanJurisdiction", event.target.value.toUpperCase())} placeholder={t("finance.accounts.form.loan.jurisdictionPlaceholder")} maxLength={8} />
                 </Field>
                 </div>
               </div>
             </details>
           </>
         ) : (
-          <Field label={`Opening balance (${currency || "currency"})`} hint="Can be zero; use a minus sign only for a genuine negative asset balance.">
+          <Field label={t("finance.accounts.form.asset.openingBalance", { currency: currencyLabel })} hint={t("finance.accounts.form.asset.openingHint")}>
             <Input inputMode="decimal" value={form.openingBalance} onChange={(event) => setValue("openingBalance", event.target.value)} />
           </Field>
         )}
@@ -779,21 +820,21 @@ function AccountForm({
             <Toggle
               checked={form.generatePlannedPayments}
               onChange={(checked) => setValue("generatePlannedPayments", checked)}
-              label="Include upcoming debt payments in planning"
-              description={form.type === "loan" ? "Generate estimated installment obligations from this schedule." : "Turn recorded card statements into upcoming obligations."}
+              label={t("finance.accounts.form.includePlanning")}
+              description={form.type === "loan" ? t("finance.accounts.form.loan.planningDescription") : t("finance.accounts.form.card.planningDescription")}
             />
           </div>
         ) : null}
-        <Field label="Account colour">
+        <Field label={t("finance.accounts.form.fields.accountColour")}>
           <input className={ui.colorInput} type="color" value={form.color} onChange={(event) => setValue("color", event.target.value)} />
         </Field>
         <div className={`${ui.inlineNotice} ${ui.formSpan}`}>
           <Landmark size={16} aria-hidden="true" />
           {form.type === "credit_card"
-            ? "Card purchases are expenses on this account. Paying the card is a transfer from cash, so it never inflates spending. The limit does not affect net worth."
+            ? t("finance.accounts.form.card.notice")
             : form.type === "loan"
-              ? "Loan principal payments are transfers to the liability; only interest and fees count as spending. Future variable rates are estimates until confirmed."
-              : "Future balances are calculated as opening balance plus signed actual transactions. Planned payments never change this number until paid."}
+              ? t("finance.accounts.form.loan.notice")
+              : t("finance.accounts.form.asset.notice")}
         </div>
         <button type="submit" hidden />
       </form>
@@ -803,49 +844,54 @@ function AccountForm({
 }
 
 function AccountDetail({ account, rangeLabel, onClose, onArchive }: { account: Account | null; rangeLabel: string; onClose: () => void; onArchive: (account: Account) => Promise<void> }) {
+  const t = useTranslations();
   const history = useMemo(() => readList<Record<string, unknown>>(account, "balanceHistory", "history"), [account]);
   if (!account) return null;
   const balance = numberFrom(account.balanceMinor ?? account.currentBalanceMinor);
   const opening = numberFrom(account.openingBalanceMinor);
   const currency = stringFrom(account.currency, DEFAULT_CURRENCY);
+  const type = stringFrom(account.type, "custom");
+  const typeLabel = account.customType || account.customTypeLabel
+    ? stringFrom(account.customType ?? account.customTypeLabel)
+    : accountTypeLabel(type, t);
   const historyValues = history.map((item) => numberFrom(readRecord(item).balanceMinor));
   return (
     <Modal
       open
       onClose={onClose}
-      title={stringFrom(account.name, "Account")}
-      description={`Actual balance history for ${rangeLabel} and reconciliation basis`}
+      title={stringFrom(account.name, t("finance.accounts.detail.accountFallback"))}
+      description={t("finance.accounts.detail.description", { range: rangeLabel })}
       footer={
         <>
           <Button variant="ghost" icon={<Archive size={15} />} onClick={() => void onArchive(account)}>
-            {Boolean(account.archivedAt ?? account.isArchived) ? "Restore account" : "Archive account"}
+            {Boolean(account.archivedAt ?? account.isArchived) ? t("finance.accounts.detail.restore") : t("finance.accounts.detail.archive")}
           </Button>
-          <Button variant="secondary" onClick={onClose}>Close</Button>
+          <Button variant="secondary" onClick={onClose}>{t("common.actions.close")}</Button>
         </>
       }
     >
       <div className={ui.metricGrid}>
-        <Metric label="Current balance" value={formatMoney(balance, currency)} tone={balance < 0 ? "negative" : "accent"} />
-        <Metric label="Opening balance" value={formatMoney(opening, currency)} detail={formatDate(account.openingDate ?? account.openingBalanceDate)} />
+        <Metric label={t("finance.accounts.detail.currentBalance")} value={formatMoney(balance, currency)} tone={balance < 0 ? "negative" : "accent"} />
+        <Metric label={t("finance.accounts.detail.openingBalance")} value={formatMoney(opening, currency)} detail={formatDate(account.openingDate ?? account.openingBalanceDate)} />
       </div>
-      <Section title="Balance history" description={`Actual reconciled balance points in ${rangeLabel}`}>
+      <Section title={t("finance.accounts.detail.history")} description={t("finance.accounts.detail.historyDescription", { range: rangeLabel })}>
         <div className={ui.sectionContentPadding}>
           {history.length ? (
             <SparkBars values={historyValues} labels={history.map((item) => formatDate(readRecord(item).date, { month: "short", year: "2-digit", day: undefined }))} tone="mixed" height={140} />
           ) : (
             <div className={ui.inlineNotice}>
-              <LineChart size={16} /> No balance history exists in {rangeLabel}. This account may not have been open during the selected range.
+              <LineChart size={16} /> {t("finance.accounts.detail.noHistory", { range: rangeLabel })}
             </div>
           )}
         </div>
       </Section>
       <div className={ui.summaryList}>
-        <div className={ui.summaryRow}><span>Account type</span><strong>{stringFrom(account.customType ?? account.customTypeLabel ?? account.type, "Custom").replaceAll("_", " ")}</strong></div>
-        <div className={ui.summaryRow}><span>Currency</span><strong>{currency}</strong></div>
-        <div className={ui.summaryRow}><span>Reconciliation difference</span><strong>{formatMoney(account.reconciliationDifferenceMinor, currency)}</strong></div>
+        <div className={ui.summaryRow}><span>{t("finance.accounts.detail.accountType")}</span><strong>{typeLabel}</strong></div>
+        <div className={ui.summaryRow}><span>{t("finance.accounts.detail.currency")}</span><strong>{currency}</strong></div>
+        <div className={ui.summaryRow}><span>{t("finance.accounts.detail.reconciliation")}</span><strong>{formatMoney(account.reconciliationDifferenceMinor, currency)}</strong></div>
       </div>
       <div className={`${ui.inlineNotice} ${ui.noticeOffset}`}>
-        <LineChart size={16} /> Balance history includes actual transactions only; scheduled and planned amounts are intentionally excluded.
+        <LineChart size={16} /> {t("finance.accounts.detail.notice")}
       </div>
     </Modal>
   );

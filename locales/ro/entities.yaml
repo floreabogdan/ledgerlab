@@ -1,0 +1,226 @@
+shared:
+  eyebrow: Organizare
+  status:
+    active: Activ
+    archived: Arhivat
+  table:
+    actions: Acțiuni
+  fallback:
+    category: Categorie
+    unnamedCategory: Categorie fără nume
+    thisCategory: Această categorie
+    unnamedTag: Etichetă fără nume
+    thisTag: Această etichetă
+    unnamedMerchant: Comerciant fără nume
+    thisMerchant: Acest comerciant
+
+categories:
+  header:
+    title: Categorii
+    description: Construiește o ierarhie clară a veniturilor și cheltuielilor pentru înregistrarea tranzacțiilor, bugetare și raportare. Arhivarea nu rescrie niciodată istoricul.
+  actions:
+    add: Adaugă o categorie
+    editNamed: "Editează {name}"
+    restoreNamed: "Restaurează {name}"
+    archiveNamed: "Arhivează {name}"
+    saving: Se salvează…
+    archiving: Se arhivează…
+    saveChanges: Salvează modificările
+    create: Creează categoria
+  metrics:
+    active:
+      label: Categorii active
+      detail: Disponibile pentru înregistrări noi
+    roots:
+      label: Grupuri de nivel principal
+      detail: Rădăcinile ierarhiei
+    nested:
+      label: Categorii imbricate
+      detail: La toate nivelurile
+    archived:
+      label: Arhivate
+      detail: Istoricul este păstrat
+  section:
+    title: Ierarhia categoriilor
+    description: Indentarea indică relația cu categoria părinte; clasificările fixă/variabilă și esențială/discreționară sunt folosite în planificare și statistici.
+  toggle:
+    label: Arată categoriile arhivate
+    description: Include categoriile indisponibile pentru înregistrări noi.
+  empty:
+    allTitle: Nu există încă nicio categorie
+    activeTitle: Nu există categorii active
+    description: Adaugă o categorie de nivel principal sau plasează una sub orice categorie compatibilă.
+  table:
+    label: Ierarhia categoriilor
+    category: Categorie
+    type: Tip
+    spendingPattern: Natura cheltuielii
+    priority: Prioritate
+    status: Stare
+  hierarchy:
+    topLevel: Nivel principal
+    under: "Sub {parent}"
+    directSubcategories: "{count, plural, one {# subcategorie directă} few {# subcategorii directe} other {# de subcategorii directe}}"
+  kind:
+    expense: Cheltuială
+    income: Venit
+    both: Venit și cheltuială
+  spendingNature:
+    variable: Variabilă
+    fixed: Fixă
+  spendingPriority:
+    discretionary: Discreționară
+    essential: Esențială
+  feedback:
+    archived: Categoria a fost arhivată. Tranzacțiile și rapoartele istorice au fost păstrate.
+    restored: Categoria a fost restaurată.
+    updateFailed: Categoria nu a putut fi actualizată
+    created: Categoria a fost creată.
+    updated: Categoria a fost actualizată.
+  archive:
+    title: Arhivezi categoria?
+    description: Nu va mai fi oferită pentru tranzacții sau bugete noi. Istoricul existent rămâne neschimbat.
+    confirm: Arhivează categoria
+    notice: "{name} va rămâne asociată tuturor tranzacțiilor istorice. Descendenții activi trebuie mai întâi mutați sau arhivați."
+  form:
+    editTitle: Editează categoria
+    addTitle: Adaugă o categorie
+    editDescription: "Actualizează {path} fără a modifica asocierile istorice."
+    addDescription: Creează o categorie de nivel principal sau plaseaz-o sub o categorie părinte compatibilă.
+    name: Nume
+    namePlaceholder: de ex. Întreținerea locuinței
+    nameRequired: Introdu numele categoriei.
+    parent: Categoria părinte
+    parentHint: Alege orice categorie părinte activă cu un tip compatibil sau păstrează categoria la nivelul principal.
+    parentSearchPlaceholder: Caută în ierarhie
+    noParent: Niciuna — nivel principal
+    categoryType: Tipul categoriei
+    categoryTypeChildrenHint: Serverul va păstra compatibilitatea tipurilor pentru toți descendenții.
+    spendingPattern: Natura cheltuielii
+    priority: Prioritate
+    colour: Culoare
+
+tags:
+  header:
+    title: Etichete
+    description: Folosește etichete flexibile pentru categorii și conturi. Redenumirea sau arhivarea unei etichete păstrează toate asocierile existente cu tranzacții.
+  actions:
+    add: Adaugă o etichetă
+    renameNamed: "Redenumește {name}"
+    restoreNamed: "Restaurează {name}"
+    archiveNamed: "Arhivează {name}"
+    saving: Se salvează…
+    archiving: Se arhivează…
+    saveChanges: Salvează modificările
+    create: Creează eticheta
+  metrics:
+    active:
+      label: Etichete active
+      detail: Disponibile la introducerea tranzacțiilor
+    links:
+      label: Asocieri cu tranzacții
+      detail: Pentru etichetele active
+    unused:
+      label: Etichete nefolosite
+      detail: De verificat
+    archived:
+      label: Arhivate
+      detail: Asocierile sunt păstrate
+  section:
+    title: Biblioteca de etichete
+    description: Numărul de utilizări exclude tranzacțiile anulate.
+  toggle:
+    label: Arată etichetele arhivate
+    description: Include etichetele indisponibile pentru înregistrări noi.
+  empty:
+    allTitle: Nu există încă nicio etichetă
+    activeTitle: Nu există etichete active
+    description: Creează o etichetă când ai nevoie de o clasificare care acoperă categorii, comercianți sau conturi.
+  table:
+    label: Etichete
+    tag: Etichetă
+    transactions: Tranzacții
+    status: Stare
+  feedback:
+    archived: Eticheta a fost arhivată. Asocierile existente cu tranzacții au fost păstrate.
+    restored: Eticheta a fost restaurată.
+    updateFailed: Eticheta nu a putut fi actualizată
+    created: Eticheta a fost creată.
+    updated: Eticheta a fost actualizată. Asocierile existente cu tranzacții folosesc acum noul nume.
+  archive:
+    title: Arhivezi eticheta?
+    description: Nu va mai apărea la introducerea tranzacțiilor noi, însă asocierile și rapoartele istorice rămân intacte.
+    confirm: Arhivează eticheta
+    notice: "{name} rămâne asociată tranzacțiilor existente."
+  form:
+    renameTitle: Redenumește eticheta
+    addTitle: Adaugă o etichetă
+    renameDescription: Numele actualizat va apărea în toate tranzacțiile asociate.
+    addDescription: Etichetele oferă o dimensiune flexibilă de raportare, independentă de ierarhia categoriilor.
+    name: Numele etichetei
+    namePlaceholder: de ex. De rambursat
+    nameRequired: Introdu numele etichetei.
+    colour: Culoare
+
+merchants:
+  header:
+    title: Comercianți
+    description: Înregistrările comercianților sunt create din tranzacțiile efective introduse. Uniformizează-le denumirile, atribuie categorii implicite sau arhivează-le fără a rescrie istoricul.
+  actions:
+    editNamed: "Editează {name}"
+    restoreNamed: "Restaurează {name}"
+    archiveNamed: "Arhivează {name}"
+    saving: Se salvează…
+    archiving: Se arhivează…
+    saveChanges: Salvează modificările
+  metrics:
+    active:
+      label: Comercianți activi
+      detail: Disponibili la introducerea tranzacțiilor
+    transactions:
+      label: Tranzacții
+      detail: Tranzacții efective neanulate
+    noDefault:
+      label: Fără categorie implicită
+      detail: Categoria este aleasă pentru fiecare tranzacție
+    archived:
+      label: Arhivați
+      detail: Istoricul este păstrat
+  section:
+    title: Registrul comercianților
+    description: Categoriile implicite se aplică atunci când este folosit un comerciant corespunzător fără o categorie explicită.
+  search:
+    placeholder: Caută comercianți sau categorii
+    noMatchesTitle: Niciun comerciant nu corespunde căutării
+    noMatchesDescription: Încearcă alt nume de comerciant sau de categorie.
+  toggle:
+    label: Arată comercianții arhivați
+    description: Include comercianții indisponibili pentru potriviri noi.
+  empty:
+    allTitle: Nu există încă niciun comerciant
+    activeTitle: Nu există comercianți activi
+    description: Comercianții apar automat când adaugi sau imporți tranzacții efective.
+  table:
+    label: Comercianți
+    merchant: Comerciant
+    transactions: Tranzacții
+    defaultCategory: Categorie implicită
+    status: Stare
+  feedback:
+    archived: Comerciantul a fost arhivat. Tranzacțiile existente afișează în continuare comerciantul inițial.
+    restored: Comerciantul a fost restaurat.
+    updateFailed: Comerciantul nu a putut fi actualizat
+    updated: Comerciantul a fost actualizat. Tranzacțiile asociate folosesc acum denumirea uniformizată.
+  archive:
+    title: Arhivezi comerciantul?
+    description: Nu va mai fi folosit pentru potrivirea înregistrărilor noi. Tranzacțiile existente își păstrează istoricul comerciantului.
+    confirm: Arhivează comerciantul
+    notice: "{name} rămâne vizibil în tranzacțiile și rapoartele existente."
+  form:
+    title: Editează comerciantul
+    description: Redenumirea uniformizează toate afișările asociate, fără a modifica sumele sau datele tranzacțiilor inițiale.
+    name: Numele comerciantului
+    nameRequired: Introdu numele comerciantului.
+    defaultCategory: Categorie implicită
+    defaultCategoryHint: Este folosită numai când o înregistrare nu are o categorie explicită.
+    noDefaultCategory: Fără categorie implicită

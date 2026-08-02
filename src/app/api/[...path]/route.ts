@@ -4,6 +4,8 @@ import { db as appDb, ensureDatabase } from "@/db";
 import { users } from "@/db/schema";
 import {
   AuthError,
+  SESSION_COOKIE_NAME,
+  type SafeUser,
   authenticateUser,
   createSession,
   createUser,
@@ -11,10 +13,15 @@ import {
   readSessionToken,
   revokeSession,
   serializeExpiredSessionCookie,
-  serializeSessionCookie,
   validateSessionToken,
   verifyPassword,
 } from "@/lib/auth";
+import {
+  resolveConfiguredUiLanguage,
+  UI_LANGUAGE_COOKIE_NAME,
+  UI_LANGUAGE_COOKIE_OPTIONS,
+} from "@/i18n/language";
+import { createServerTranslator } from "@/i18n/server";
 import { HttpError, jsonError, readJson } from "@/lib/api-response";
 import { clearRateLimit, consumeRateLimit, opaqueRateLimitKey } from "@/lib/rate-limit";
 import {
@@ -136,7 +143,10 @@ type RegistrationMode = "first-user" | "open" | "closed";
 function registrationMode(): RegistrationMode {
   const configured = process.env.REGISTRATION_MODE?.trim().toLowerCase() || "first-user";
   if (configured === "first-user" || configured === "open" || configured === "closed") return configured;
-  throw new HttpError(500, "REGISTRATION_MODE must be first-user, open, or closed");
+  throw new HttpError(500, {
+    code: "AUTH_REGISTRATION_CONFIG_INVALID",
+    message: "REGISTRATION_MODE must be first-user, open, or closed",
+  });
 }
 
 function registrationAvailability() {
@@ -168,9 +178,13 @@ function enforceRateLimits(limits: Array<{ key: string; maxAttempts: number }>) 
     const minutes = Math.max(1, Math.ceil(longestRetry / 60));
     throw new HttpError(
       429,
-      `Too many authentication attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}`,
-      { retryAfterSeconds: longestRetry },
-      { "Retry-After": String(longestRetry) },
+      {
+        code: "RATE_LIMITED",
+        message: `Too many authentication attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}`,
+        params: { retryAfterSeconds: longestRetry },
+        details: { retryAfterSeconds: longestRetry },
+        headers: { "Retry-After": String(longestRetry) },
+      },
     );
   }
 }
@@ -189,7 +203,10 @@ function comparableOrigin(url: URL) {
 
 function assertSameOrigin(request: NextRequest) {
   if (request.headers.get("sec-fetch-site")?.toLowerCase() === "cross-site") {
-    throw new HttpError(403, "Cross-origin changes are not allowed");
+    throw new HttpError(403, {
+      code: "CROSS_ORIGIN_FORBIDDEN",
+      message: "Cross-origin changes are not allowed",
+    });
   }
   const origin = request.headers.get("origin");
   if (!origin) return;
@@ -197,10 +214,16 @@ function assertSameOrigin(request: NextRequest) {
   try {
     originUrl = new URL(origin);
   } catch {
-    throw new HttpError(403, "Cross-origin changes are not allowed");
+    throw new HttpError(403, {
+      code: "CROSS_ORIGIN_FORBIDDEN",
+      message: "Cross-origin changes are not allowed",
+    });
   }
   if (!new Set(["http:", "https:"]).has(originUrl.protocol)) {
-    throw new HttpError(403, "Cross-origin changes are not allowed");
+    throw new HttpError(403, {
+      code: "CROSS_ORIGIN_FORBIDDEN",
+      message: "Cross-origin changes are not allowed",
+    });
   }
 
   const requestUrl = new URL(request.url);
@@ -217,7 +240,10 @@ function assertSameOrigin(request: NextRequest) {
     }
   }
   if (!candidateUrls.some((candidate) => comparableOrigin(candidate) === comparableOrigin(originUrl))) {
-    throw new HttpError(403, "Cross-origin changes are not allowed");
+    throw new HttpError(403, {
+      code: "CROSS_ORIGIN_FORBIDDEN",
+      message: "Cross-origin changes are not allowed",
+    });
   }
 }
 
@@ -225,7 +251,12 @@ function sessionFromRequest(request: NextRequest) {
   ensureDatabase();
   const token = readSessionToken(request.headers.get("cookie"));
   const valid = validateSessionToken(token);
-  if (!valid) throw new HttpError(401, "Sign in to continue");
+  if (!valid) {
+    throw new HttpError(401, {
+      code: "AUTHENTICATION_REQUIRED",
+      message: "Sign in to continue",
+    });
+  }
   return { ...valid, token };
 }
 
@@ -236,9 +267,21 @@ function clientMetadata(request: NextRequest) {
   };
 }
 
-function authResponse(user: object, token: string, expiresAt: Date, request: NextRequest, status = 200) {
+function authResponse(user: SafeUser, token: string, expiresAt: Date, request: NextRequest, status = 200) {
   const response = NextResponse.json({ user }, { status });
-  response.headers.set("Set-Cookie", serializeSessionCookie(token, expiresAt, requestProtocol(request) === "https:"));
+  const secure = requestProtocol(request) === "https:";
+  response.cookies.set(SESSION_COOKIE_NAME, token, {
+    expires: expiresAt,
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secure,
+  });
+  response.cookies.set(
+    UI_LANGUAGE_COOKIE_NAME,
+    resolveConfiguredUiLanguage(user.uiLanguage),
+    { ...UI_LANGUAGE_COOKIE_OPTIONS, secure },
+  );
   return response;
 }
 
@@ -251,7 +294,10 @@ async function authRoute(request: NextRequest, segments: string[]) {
     const input = registerInput.parse(await readJson(request, AUTH_JSON_BODY_BYTES));
     const registration = registrationAvailability();
     if (!registration.available) {
-      throw new HttpError(403, "Registration is closed for this installation");
+      throw new HttpError(403, {
+        code: "REGISTRATION_CLOSED",
+        message: "Registration is closed for this installation",
+      });
     }
     enforceRateLimits([{
       key: opaqueRateLimitKey("register-address", clientAddress(request)),
@@ -265,14 +311,19 @@ async function authRoute(request: NextRequest, segments: string[]) {
         currency: input.currency,
         locale: input.locale,
         timeZone: input.timeZone,
+        uiLanguage: input.uiLanguage,
       }, appDb, { requireEmptyDatabase: registration.mode === "first-user" });
-      createDefaultCategories(user.id);
+      createDefaultCategories(user.id, createServerTranslator({
+        language: resolveConfiguredUiLanguage(user.uiLanguage),
+        formattingLocale: user.locale,
+        timeZone: user.timeZone,
+      }));
       const session = createSession(user.id, clientMetadata(request));
       return authResponse(user, session.token, session.expiresAt, request, 201);
     } catch (error) {
       if (error instanceof AuthError) {
         const status = error.code === "EMAIL_TAKEN" ? 409 : error.code === "REGISTRATION_CLOSED" ? 403 : 422;
-        throw new HttpError(status, error.message);
+        throw new HttpError(status, { code: error.code, message: error.message });
       }
       throw error;
     }
@@ -292,7 +343,9 @@ async function authRoute(request: NextRequest, segments: string[]) {
       const session = createSession(user.id, clientMetadata(request));
       return authResponse(user, session.token, session.expiresAt, request);
     } catch (error) {
-      if (error instanceof AuthError) throw new HttpError(401, error.message);
+      if (error instanceof AuthError) {
+        throw new HttpError(401, { code: error.code, message: error.message });
+      }
       throw error;
     }
   }
@@ -307,25 +360,50 @@ async function authRoute(request: NextRequest, segments: string[]) {
   if (request.method === "GET" && (action === "session" || action === "me")) {
     return NextResponse.json({ user: sessionFromRequest(request).user });
   }
-  throw new HttpError(404, "Authentication endpoint not found");
+  throw new HttpError(404, {
+    code: "AUTH_ENDPOINT_NOT_FOUND",
+    message: "Authentication endpoint not found",
+  });
 }
 
 function queryInteger(request: NextRequest, key: string) {
   const value = request.nextUrl.searchParams.get(key);
   if (value === null || value === "") return undefined;
-  if (!/^-?\d+$/.test(value)) throw new HttpError(422, `${key} must be a whole number`);
+  if (!/^-?\d+$/.test(value)) {
+    throw new HttpError(422, {
+      code: "QUERY_INTEGER_INVALID",
+      message: `${key} must be a whole number`,
+      params: { field: key },
+    });
+  }
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) throw new HttpError(422, `${key} must be a whole number`);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new HttpError(422, {
+      code: "QUERY_INTEGER_INVALID",
+      message: `${key} must be a whole number`,
+      params: { field: key },
+    });
+  }
   return parsed;
 }
 
 function queryDate(request: NextRequest, key: string) {
   const value = request.nextUrl.searchParams.get(key);
   if (value === null || value === "") return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpError(422, `${key} must be a calendar date`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(422, {
+      code: "QUERY_DATE_INVALID",
+      message: `${key} must be a calendar date`,
+      params: { field: key },
+    });
+  }
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
-    throw new HttpError(422, `${key} must be a valid calendar date`);
+    throw new HttpError(422, {
+      code: "QUERY_DATE_INVALID",
+      message: `${key} must be a valid calendar date`,
+      params: { field: key },
+    });
   }
   return value;
 }
@@ -334,10 +412,26 @@ function queryRange(request: NextRequest) {
   const from = queryDate(request, "from");
   const to = queryDate(request, "to");
   if (!from && !to) return undefined;
-  if (!from || !to) throw new HttpError(422, "Both from and to dates are required");
-  if (from > to) throw new HttpError(422, "The start date must be on or before the end date");
+  if (!from || !to) {
+    throw new HttpError(422, {
+      code: "QUERY_DATE_RANGE_INCOMPLETE",
+      message: "Both from and to dates are required",
+    });
+  }
+  if (from > to) {
+    throw new HttpError(422, {
+      code: "QUERY_DATE_RANGE_REVERSED",
+      message: "The start date must be on or before the end date",
+    });
+  }
   const spanDays = (new Date(`${to}T00:00:00.000Z`).getTime() - new Date(`${from}T00:00:00.000Z`).getTime()) / 86_400_000;
-  if (spanDays > 3_660) throw new HttpError(422, "Choose a date range of ten years or less");
+  if (spanDays > 3_660) {
+    throw new HttpError(422, {
+      code: "QUERY_DATE_RANGE_TOO_LONG",
+      message: "Choose a date range of ten years or less",
+      params: { maxYears: 10 },
+    });
+  }
   return { from, to };
 }
 
@@ -375,7 +469,12 @@ async function getRoute(request: NextRequest, segments: string[]) {
     const date = queryDate(request, "date");
     const from = request.nextUrl.searchParams.get("from")?.trim();
     const to = request.nextUrl.searchParams.get("to")?.trim();
-    if (!date || !from || !to) throw new HttpError(422, "FX quotes require date, from, and to query parameters");
+    if (!date || !from || !to) {
+      throw new HttpError(422, {
+        code: "FX_QUOTE_QUERY_INCOMPLETE",
+        message: "FX quotes require date, from, and to query parameters",
+      });
+    }
     return NextResponse.json({ quote: await resolveBnrQuote(date, from, to) }, {
       headers: { "Cache-Control": "private, no-store" },
     });
@@ -440,14 +539,36 @@ async function getRoute(request: NextRequest, segments: string[]) {
     const accountId = request.nextUrl.searchParams.get("account") ?? request.nextUrl.searchParams.get("accountId") ?? undefined;
     const limit = queryInteger(request, "limit");
     const offset = queryInteger(request, "offset");
-    if ((minMinor ?? 0) < 0 || (maxMinor ?? 0) < 0) throw new HttpError(422, "Amount filters cannot be negative");
-    if (minMinor !== undefined && maxMinor !== undefined && minMinor > maxMinor) {
-      throw new HttpError(422, "The minimum amount cannot exceed the maximum amount");
+    if ((minMinor ?? 0) < 0 || (maxMinor ?? 0) < 0) {
+      throw new HttpError(422, {
+        code: "TRANSACTION_AMOUNT_FILTER_NEGATIVE",
+        message: "Amount filters cannot be negative",
+      });
     }
-    if (limit !== undefined && limit < 1) throw new HttpError(422, "limit must be at least 1");
-    if (offset !== undefined && offset < 0) throw new HttpError(422, "offset cannot be negative");
+    if (minMinor !== undefined && maxMinor !== undefined && minMinor > maxMinor) {
+      throw new HttpError(422, {
+        code: "TRANSACTION_AMOUNT_RANGE_REVERSED",
+        message: "The minimum amount cannot exceed the maximum amount",
+      });
+    }
+    if (limit !== undefined && limit < 1) {
+      throw new HttpError(422, {
+        code: "QUERY_LIMIT_TOO_SMALL",
+        message: "limit must be at least 1",
+        params: { minimum: 1 },
+      });
+    }
+    if (offset !== undefined && offset < 0) {
+      throw new HttpError(422, {
+        code: "QUERY_OFFSET_NEGATIVE",
+        message: "offset cannot be negative",
+      });
+    }
     if ((minMinor !== undefined || maxMinor !== undefined) && !accountId) {
-      throw new HttpError(422, "Choose one account before filtering by amount; native account currencies cannot be compared directly");
+      throw new HttpError(422, {
+        code: "TRANSACTION_AMOUNT_FILTER_ACCOUNT_REQUIRED",
+        message: "Choose one account before filtering by amount; native account currencies cannot be compared directly",
+      });
     }
     const page = listTransactionPage(user.id, {
       from: queryDate(request, "from"),
@@ -522,11 +643,16 @@ async function getRoute(request: NextRequest, segments: string[]) {
     const liabilityObligations = nativeLiabilityObligations.map((item) => {
       const nativeCurrency = accountCurrencyById.get(item.liabilityAccountId)
         ?? (item.accountId ? accountCurrencyById.get(item.accountId) : undefined);
-      if (!nativeCurrency) throw new HttpError(422, `Cannot determine the account currency for ${item.title}`);
+      if (!nativeCurrency) {
+        throw new HttpError(422, {
+          code: "LIABILITY_CURRENCY_UNAVAILABLE",
+          message: `Cannot determine the account currency for ${item.liabilityAccountName}`,
+        });
+      }
       const convert = (amountMinor: number) => toReportingMinor(
         { amountMinor, currency: nativeCurrency, date: item.dueDate },
         reportingCurrency,
-        `the liability obligation “${item.title}”`,
+        `the liability obligation for “${item.liabilityAccountName}”`,
       );
       return {
         ...item,
@@ -622,7 +748,10 @@ async function getRoute(request: NextRequest, segments: string[]) {
       reminders: { dueSoon: true, overdue: true, budgetWarnings: true, daysBefore: 3, ...saved("reminders") },
     });
   }
-  throw new HttpError(404, "API endpoint not found");
+  throw new HttpError(404, {
+    code: "API_ENDPOINT_NOT_FOUND",
+    message: "API endpoint not found",
+  });
 }
 
 function todayStamp() {
@@ -648,7 +777,12 @@ async function postRoute(request: NextRequest, segments: string[]) {
   const { user } = currentSession;
   const endpoint = segments[0];
   if (endpoint === "transactions" && segments[1] && segments[2] === "attachments") {
-    if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+    if (request.method !== "POST") {
+      throw new HttpError(405, {
+        code: "METHOD_NOT_ALLOWED",
+        message: "Method not allowed",
+      });
+    }
     const attachment = await uploadTransactionAttachment(user.id, segments[1], {
       fileName: request.nextUrl.searchParams.get("filename") ?? "",
       claimedMimeType: request.headers.get("content-type"),
@@ -667,7 +801,12 @@ async function postRoute(request: NextRequest, segments: string[]) {
   if (endpoint === "accounts") {
     if (body.action === "archive" || body.action === "restore") {
       const id = text(body.id);
-      if (!id) throw new HttpError(422, "Account id is required");
+      if (!id) {
+        throw new HttpError(422, {
+          code: "ACCOUNT_ID_REQUIRED",
+          message: "Account id is required",
+        });
+      }
       const account = updateAccount(user.id, id, { archived: body.action === "archive" });
       return NextResponse.json({ account });
     }
@@ -681,7 +820,12 @@ async function postRoute(request: NextRequest, segments: string[]) {
     });
     const result = database().transaction(() => {
       const account = createAccount(user.id, normalized);
-      if (!account) throw new HttpError(500, "Account could not be created");
+      if (!account) {
+        throw new HttpError(500, {
+          code: "ACCOUNT_CREATE_FAILED",
+          message: "Account could not be created",
+        });
+      }
       const creditCard = object(body.creditCard);
       const loan = object(body.loan);
       if (normalized.type === "credit_card" && (Object.keys(creditCard).length || normalized.creditLimitMinor != null)) {
@@ -702,11 +846,21 @@ async function postRoute(request: NextRequest, segments: string[]) {
   if (endpoint === "liabilities") {
     if (segments[1] === "payments") {
       const paymentId = segments[2] ?? text(body.paymentId);
-      if (!paymentId || (segments[3] ?? text(body.action)) !== "undo") throw new HttpError(422, "Choose a liability payment to undo");
+      if (!paymentId || (segments[3] ?? text(body.action)) !== "undo") {
+        throw new HttpError(422, {
+          code: "LIABILITY_PAYMENT_SELECTION_REQUIRED",
+          message: "Choose a liability payment to undo",
+        });
+      }
       return NextResponse.json(undoLiabilityPayment(user.id, paymentId));
     }
     const accountId = segments[1] ?? text(body.accountId);
-    if (!accountId) throw new HttpError(422, "Account id is required");
+    if (!accountId) {
+      throw new HttpError(422, {
+        code: "ACCOUNT_ID_REQUIRED",
+        message: "Account id is required",
+      });
+    }
     const action = segments[2] ?? text(body.action);
     if (action === "card-profile") {
       return NextResponse.json(saveCreditCardProfile(user.id, accountId, creditCardProfileInput.parse(body)));
@@ -728,7 +882,10 @@ async function postRoute(request: NextRequest, segments: string[]) {
       if (kind === "loan_payment") {
         return NextResponse.json(recordLoanPayment(user.id, accountId, loanPaymentInput.parse(body)), { status: 201 });
       }
-      throw new HttpError(422, "Choose a card or loan payment type");
+      throw new HttpError(422, {
+        code: "LIABILITY_PAYMENT_KIND_INVALID",
+        message: "Choose a card or loan payment type",
+      });
     }
     if (action === "disburse") {
       return NextResponse.json(
@@ -736,13 +893,21 @@ async function postRoute(request: NextRequest, segments: string[]) {
         { status: 201 },
       );
     }
-    throw new HttpError(422, "Unknown liability action");
+    throw new HttpError(422, {
+      code: "LIABILITY_ACTION_INVALID",
+      message: "Unknown liability action",
+    });
   }
   if (endpoint === "categories") {
     const action = text(body.action, "create");
     if (action === "archive" || action === "restore") {
       const categoryId = text(body.id);
-      if (!categoryId) throw new HttpError(422, "Category id is required");
+      if (!categoryId) {
+        throw new HttpError(422, {
+          code: "CATEGORY_ID_REQUIRED",
+          message: "Category id is required",
+        });
+      }
       return NextResponse.json({ category: setCategoryArchived(user.id, categoryId, action === "archive") });
     }
     const categoryPayload = {
@@ -759,28 +924,59 @@ async function postRoute(request: NextRequest, segments: string[]) {
     }
     if (action === "update" || action === "edit") {
       const categoryId = text(body.id);
-      if (!categoryId) throw new HttpError(422, "Category id is required");
+      if (!categoryId) {
+        throw new HttpError(422, {
+          code: "CATEGORY_ID_REQUIRED",
+          message: "Category id is required",
+        });
+      }
       const normalized = categoryUpdateInput.parse(categoryPayload);
       return NextResponse.json({ category: updateCategory(user.id, categoryId, normalized) });
     }
-    throw new HttpError(422, "Unknown category action");
+    throw new HttpError(422, {
+      code: "CATEGORY_ACTION_INVALID",
+      message: "Unknown category action",
+    });
   }
   if (endpoint === "tags") {
     const action = text(body.action, "create");
     const id = text(body.id);
-    if ((action === "rename" || action === "update") && !id) throw new HttpError(422, "Tag id is required");
-    if ((action === "archive" || action === "restore") && !id) throw new HttpError(422, "Tag id is required");
+    if ((action === "rename" || action === "update") && !id) {
+      throw new HttpError(422, {
+        code: "TAG_ID_REQUIRED",
+        message: "Tag id is required",
+      });
+    }
+    if ((action === "archive" || action === "restore") && !id) {
+      throw new HttpError(422, {
+        code: "TAG_ID_REQUIRED",
+        message: "Tag id is required",
+      });
+    }
     const color = body.color === null || body.color === undefined ? undefined : text(body.color);
-    if (color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color)) throw new HttpError(422, "Tag colour must be a six-digit hex value");
+    if (color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      throw new HttpError(422, {
+        code: "TAG_COLOR_INVALID",
+        message: "Tag colour must be a six-digit hex value",
+      });
+    }
     if (action === "create") return NextResponse.json({ tag: createTag(user.id, { name: text(body.name), color }) }, { status: 201 });
     if (action === "rename" || action === "update") return NextResponse.json({ tag: updateTag(user.id, id, { name: text(body.name), color }) });
     if (action === "archive" || action === "restore") return NextResponse.json({ tag: setTagArchived(user.id, id, action === "archive") });
-    throw new HttpError(422, "Unknown tag action");
+    throw new HttpError(422, {
+      code: "TAG_ACTION_INVALID",
+      message: "Unknown tag action",
+    });
   }
   if (endpoint === "merchants") {
     const action = text(body.action, "update");
     const id = text(body.id);
-    if (!id) throw new HttpError(422, "Merchant id is required");
+    if (!id) {
+      throw new HttpError(422, {
+        code: "MERCHANT_ID_REQUIRED",
+        message: "Merchant id is required",
+      });
+    }
     if (action === "rename" || action === "update") {
       return NextResponse.json({
         merchant: updateMerchant(user.id, id, {
@@ -794,13 +990,21 @@ async function postRoute(request: NextRequest, segments: string[]) {
     if (action === "archive" || action === "restore") {
       return NextResponse.json({ merchant: setMerchantArchived(user.id, id, action === "archive") });
     }
-    throw new HttpError(422, "Unknown merchant action");
+    throw new HttpError(422, {
+      code: "MERCHANT_ACTION_INVALID",
+      message: "Unknown merchant action",
+    });
   }
   if (endpoint === "transactions") {
     const transactionAction = segments[2] ?? text(body.action);
     if (transactionAction === "clear") {
       const transactionId = segments[1] ?? text(body.id ?? body.transactionId);
-      if (!transactionId) throw new HttpError(422, "Transaction id is required");
+      if (!transactionId) {
+        throw new HttpError(422, {
+          code: "TRANSACTION_ID_REQUIRED",
+          message: "Transaction id is required",
+        });
+      }
       return NextResponse.json(clearPendingTransaction(user.id, transactionId));
     }
     const rawAmount = integer(body.amountMinor);
@@ -982,7 +1186,12 @@ async function postRoute(request: NextRequest, segments: string[]) {
         }
       }
       const accountId = text(body.accountId ?? body.defaultAccountId);
-      if (!accountId) throw new HttpError(422, "Choose the account that will receive imported transactions");
+      if (!accountId) {
+        throw new HttpError(422, {
+          code: "IMPORT_ACCOUNT_REQUIRED",
+          message: "Choose the account that will receive imported transactions",
+        });
+      }
       const previewInput = importPreviewInput.parse({
         csv: body.csv,
         mapping: normalizedMapping,
@@ -1034,24 +1243,35 @@ async function postRoute(request: NextRequest, segments: string[]) {
         currency: body.currency ?? user.defaultCurrency,
         locale: body.locale ?? user.locale,
         timeZone: body.timeZone ?? user.timeZone,
+        uiLanguage: body.uiLanguage ?? user.uiLanguage,
         compactTables: body.compactTables ?? true,
       });
       database().transaction(() => {
-        database().prepare("UPDATE users SET display_name = ?, locale = ?, default_currency = ?, time_zone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-          .run(settings.displayName, settings.locale, settings.currency, settings.timeZone, user.id);
+        database().prepare("UPDATE users SET display_name = ?, locale = ?, default_currency = ?, time_zone = ?, ui_language = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(settings.displayName, settings.locale, settings.currency, settings.timeZone, settings.uiLanguage, user.id);
         database().prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'user_settings', ?, 'preferences', ?)")
           .run(crypto.randomUUID(), user.id, user.id, JSON.stringify(settings));
       })();
-      return NextResponse.json({
+      const response = NextResponse.json({
         user: {
           ...user,
           displayName: settings.displayName,
           defaultCurrency: settings.currency,
           locale: settings.locale,
           timeZone: settings.timeZone,
+          uiLanguage: settings.uiLanguage,
         },
         preferences: settings,
       });
+      response.cookies.set(
+        UI_LANGUAGE_COOKIE_NAME,
+        settings.uiLanguage,
+        {
+          ...UI_LANGUAGE_COOKIE_OPTIONS,
+          secure: requestProtocol(request) === "https:",
+        },
+      );
+      return response;
     }
     if (action === "reminders") {
       const reminders = reminderSettingsInput.parse(body);
@@ -1062,7 +1282,12 @@ async function postRoute(request: NextRequest, segments: string[]) {
     if (action === "password-change") {
       const passwordChange = passwordChangeInput.parse(body);
       const row = one<{ passwordHash: string }>("SELECT password_hash AS passwordHash FROM users WHERE id = ?", [user.id]);
-      if (!row || !(await verifyPassword(passwordChange.currentPassword, row.passwordHash))) throw new HttpError(401, "Current password is incorrect");
+      if (!row || !(await verifyPassword(passwordChange.currentPassword, row.passwordHash))) {
+        throw new HttpError(401, {
+          code: "CURRENT_PASSWORD_INVALID",
+          message: "Current password is incorrect",
+        });
+      }
       const passwordHash = await hashPassword(passwordChange.newPassword);
       database().transaction(() => {
         database().prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(passwordHash, user.id);
@@ -1070,9 +1295,15 @@ async function postRoute(request: NextRequest, segments: string[]) {
       })();
       return NextResponse.json({ success: true });
     }
-    throw new HttpError(422, "Unknown settings action");
+    throw new HttpError(422, {
+      code: "SETTINGS_ACTION_INVALID",
+      message: "Unknown settings action",
+    });
   }
-  throw new HttpError(404, "API endpoint not found");
+  throw new HttpError(404, {
+    code: "API_ENDPOINT_NOT_FOUND",
+    message: "API endpoint not found",
+  });
 }
 
 async function deleteRoute(request: NextRequest, segments: string[]) {
@@ -1084,7 +1315,10 @@ async function deleteRoute(request: NextRequest, segments: string[]) {
   if (segments[0] === "transactions" && segments[1]) {
     return NextResponse.json(voidTransaction(user.id, segments[1]));
   }
-  throw new HttpError(404, "API endpoint not found");
+  throw new HttpError(404, {
+    code: "API_ENDPOINT_NOT_FOUND",
+    message: "API endpoint not found",
+  });
 }
 
 function finalizeApiResponse(response: Response) {
@@ -1095,14 +1329,19 @@ function finalizeApiResponse(response: Response) {
 }
 
 async function handler(request: NextRequest, context: RouteContext) {
+  let errorDomain: string | undefined;
   try {
     const { path } = await context.params;
+    errorDomain = path[0];
     if (request.method === "GET") return finalizeApiResponse(await getRoute(request, path));
     if (request.method === "POST" || request.method === "PATCH") return finalizeApiResponse(await postRoute(request, path));
     if (request.method === "DELETE") return finalizeApiResponse(await deleteRoute(request, path));
-    throw new HttpError(405, "Method not allowed");
+    throw new HttpError(405, {
+      code: "METHOD_NOT_ALLOWED",
+      message: "Method not allowed",
+    });
   } catch (error) {
-    return finalizeApiResponse(jsonError(error));
+    return finalizeApiResponse(jsonError(error, { domain: errorDomain }));
   }
 }
 

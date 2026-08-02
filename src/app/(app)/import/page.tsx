@@ -4,6 +4,9 @@ import Link from "next/link";
 import { ArrowRight, Check, FileSpreadsheet, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 import Papa from "papaparse";
 import { useRef, useState } from "react";
+import { useTranslator } from "@/i18n/client";
+import { parseApiError, translateApiError } from "@/lib/api-error";
+import type { Translator } from "@/i18n/runtime";
 import {
   Button,
   Field,
@@ -32,20 +35,24 @@ type Row = Record<string, unknown>;
 type ImportStep = 1 | 2 | 3 | 4;
 type Mapping = Record<string, string>;
 
+function translateImportError(translator: Translator, value: unknown) {
+  return translateApiError(translator, parseApiError(value));
+}
+
 const targetFields = [
-  ["", "Do not import"],
-  ["date", "Date"],
-  ["amount", "Posted account amount"],
-  ["originalAmount", "Original / merchant amount"],
-  ["originalCurrency", "Original currency"],
-  ["exchangeRate", "Exchange rate (optional check)"],
-  ["kind", "Type / direction"],
-  ["merchant", "Merchant / description"],
-  ["account", "Account"],
-  ["category", "Category"],
-  ["notes", "Notes"],
-  ["tags", "Tags"],
-  ["status", "Status"],
+  ["", "finance.import.targetFields.doNotImport"],
+  ["date", "finance.import.targetFields.date"],
+  ["amount", "finance.import.targetFields.amount"],
+  ["originalAmount", "finance.import.targetFields.originalAmount"],
+  ["originalCurrency", "finance.import.targetFields.originalCurrency"],
+  ["exchangeRate", "finance.import.targetFields.exchangeRate"],
+  ["kind", "finance.import.targetFields.kind"],
+  ["merchant", "finance.import.targetFields.merchant"],
+  ["account", "finance.import.targetFields.account"],
+  ["category", "finance.import.targetFields.category"],
+  ["notes", "finance.import.targetFields.notes"],
+  ["tags", "finance.import.targetFields.tags"],
+  ["status", "finance.import.targetFields.status"],
 ] as const;
 
 function formatFxRate(rateScaled: unknown) {
@@ -79,6 +86,8 @@ function autoMap(headers: string[]) {
 }
 
 export default function ImportTransactionsPage() {
+  const translator = useTranslator();
+  const t = translator.translate;
   const { data: accountRaw } = useJson<Record<string, unknown>>("/api/accounts", {});
   const accounts = readList<Row>(accountRaw, "accounts").filter((item) => !Boolean(readRecord(item).archivedAt ?? readRecord(item).isArchived));
   const importRef = useRef<HTMLInputElement>(null);
@@ -103,11 +112,11 @@ export default function ImportTransactionsPage() {
     setSuccess(null);
 
     if (!file.name.toLowerCase().endsWith(".csv") && file.type !== "text/csv") {
-      setError("Choose a CSV file.");
+      setError(t("finance.import.errors.chooseCsv"));
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
-      setError("CSV files must be smaller than 20 MB.");
+      setError(t("finance.import.errors.fileTooLarge"));
       return;
     }
 
@@ -115,7 +124,7 @@ export default function ImportTransactionsPage() {
     const parsed = Papa.parse<Record<string, string>>(text, { header: true, preview: 6, skipEmptyLines: true });
     const foundHeaders = parsed.meta.fields ?? [];
     if (!foundHeaders.length) {
-      setError("The file has no readable header row.");
+      setError(t("finance.import.errors.noHeader"));
       return;
     }
 
@@ -132,14 +141,14 @@ export default function ImportTransactionsPage() {
     setError(null);
     setSuccess(null);
     try {
-      if (!Object.values(mapping).includes("date")) throw new Error("Map one CSV column to Date.");
-      if (!Object.values(mapping).includes("amount")) throw new Error("Map one CSV column to Posted account amount.");
-      if (!defaultAccountId) throw new Error("Choose the destination LedgerLab account for this bank file.");
+      if (!Object.values(mapping).includes("date")) throw new Error(t("finance.import.errors.mapDate"));
+      if (!Object.values(mapping).includes("amount")) throw new Error(t("finance.import.errors.mapAmount"));
+      if (!defaultAccountId) throw new Error(t("finance.import.errors.chooseDestination"));
       const hasOriginalAmount = Object.values(mapping).includes("originalAmount");
       const hasOriginalCurrency = Object.values(mapping).includes("originalCurrency");
       const hasExchangeRate = Object.values(mapping).includes("exchangeRate");
-      if (hasOriginalAmount !== hasOriginalCurrency) throw new Error("Map Original amount and Original currency together.");
-      if (hasExchangeRate && !hasOriginalAmount) throw new Error("An exchange-rate column also requires Original amount and Original currency mappings.");
+      if (hasOriginalAmount !== hasOriginalCurrency) throw new Error(t("finance.import.errors.originalPair"));
+      if (hasExchangeRate && !hasOriginalAmount) throw new Error(t("finance.import.errors.rateNeedsOriginal"));
 
       const result = await requestJson<Record<string, unknown>>("/api/import/preview", {
         method: "POST",
@@ -154,7 +163,7 @@ export default function ImportTransactionsPage() {
       setPreview(readRecord(readRecord(result).data ?? result));
       setStep(3);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not validate this CSV");
+      setError(caught instanceof Error ? caught.message : t("finance.import.errors.validateFallback"));
     } finally {
       setWorking(false);
     }
@@ -179,10 +188,13 @@ export default function ImportTransactionsPage() {
       });
       const resultRecord = readRecord(readRecord(result).data ?? result);
       setPreview(resultRecord);
-      setSuccess(`${numberFrom(resultRecord.importedCount ?? resultRecord.imported)} transactions imported; ${numberFrom(resultRecord.skippedCount ?? resultRecord.skipped)} skipped.`);
+      setSuccess(t("finance.import.result.summary", {
+        imported: numberFrom(resultRecord.importedCount ?? resultRecord.imported),
+        skipped: numberFrom(resultRecord.skippedCount ?? resultRecord.skipped),
+      }));
       setStep(4);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not import transactions");
+      setError(caught instanceof Error ? caught.message : t("finance.import.errors.importFallback"));
     } finally {
       setWorking(false);
     }
@@ -213,17 +225,22 @@ export default function ImportTransactionsPage() {
   return (
     <Page>
       <ViewHeader
-        eyebrow="Transactions"
-        title="Import transactions"
-        description="Bring in bank CSV files through a validated preview, explicit column mapping and duplicate review before anything is saved."
-        actions={<Link href="/import-export" className={`${kit.button} ${kit.button_secondary}`}>Data &amp; backups</Link>}
+        eyebrow={t("finance.import.eyebrow")}
+        title={t("finance.import.title")}
+        description={t("finance.import.description")}
+        actions={<Link href="/import-export" className={`${kit.button} ${kit.button_secondary}`}>{t("finance.import.actions.dataAndBackups")}</Link>}
       />
       <FormMessage error={error} success={success} />
 
-      <Section title="CSV import" description="Nothing is written until preview validation succeeds and you confirm the import">
+      <Section title={t("finance.import.section.title")} description={t("finance.import.section.description")}>
         <div className={ui.contentInset}>
-          <div className={ui.stepper} aria-label={`Import step ${step} of 4`}>
-            {["Choose file", "Map columns", "Review", "Complete"].map((label, index) => (
+          <div className={ui.stepper} aria-label={t("finance.import.steps.aria", { step, total: 4 })}>
+            {[
+              t("finance.import.steps.chooseFile"),
+              t("finance.import.steps.mapColumns"),
+              t("finance.import.steps.review"),
+              t("finance.import.steps.complete"),
+            ].map((label, index) => (
               <div className={`${ui.step} ${step >= index + 1 ? ui.stepActive : ""}`} key={label}>
                 <span>{step > index + 1 ? <Check size={14} /> : index + 1}</span>
                 {label}
@@ -241,9 +258,9 @@ export default function ImportTransactionsPage() {
               }}
             >
               <FileSpreadsheet size={32} />
-              <strong>Choose or drop a bank CSV</strong>
-              <small>LedgerLab reads the header and a small sample locally, then sends the content for validated preview. Maximum 20 MB.</small>
-              <Button type="button" variant="secondary" icon={<Upload size={15} />} onClick={() => importRef.current?.click()}>Choose CSV</Button>
+              <strong>{t("finance.import.file.dropTitle")}</strong>
+              <small>{t("finance.import.file.dropDescription")}</small>
+              <Button type="button" variant="secondary" icon={<Upload size={15} />} onClick={() => importRef.current?.click()}>{t("finance.import.actions.chooseCsv")}</Button>
               <input ref={importRef} className={ui.hiddenFile} type="file" accept=".csv,text/csv" onChange={(event) => void chooseCsv(event.target.files?.[0])} />
             </label>
           ) : null}
@@ -253,19 +270,19 @@ export default function ImportTransactionsPage() {
               <div className={ui.toolbar}>
                 <div>
                   <strong>{fileName}</strong>
-                  <div className={`${ui.small} ${ui.muted}`}>{headers.length} columns detected</div>
+                  <div className={`${ui.small} ${ui.muted}`}>{t("finance.import.file.columnsDetected", { count: headers.length })}</div>
                 </div>
-                <Button variant="ghost" onClick={resetImport}>Choose another file</Button>
+                <Button variant="ghost" onClick={resetImport}>{t("finance.import.actions.chooseAnotherFile")}</Button>
               </div>
               <div className={ui.twoColumn}>
-                <Section title="Column mapping" description="Date and posted account amount are required; foreign-currency details are optional">
+                <Section title={t("finance.import.mapping.title")} description={t("finance.import.mapping.description")}>
                   <div className={`${ui.contentInsetCompact} ${ui.verticalStackCompact}`}>
                     {headers.map((header) => (
                       <div className={ui.mappingGrid} key={header}>
-                        <strong>{header}<small className={ui.tableSecondary}>{sample[0]?.[header] || "Empty sample"}</small></strong>
+                        <strong>{header}<small className={ui.tableSecondary}>{sample[0]?.[header] || t("finance.import.mapping.emptySample")}</small></strong>
                         <span><ArrowRight size={16} /></span>
                         <Select
-                          aria-label={`Map ${header}`}
+                          aria-label={t("finance.import.mapping.aria", { header })}
                           value={mapping[header] ?? ""}
                           onValueChange={(value) => setMapping((current) => {
                             const next = { ...current };
@@ -276,46 +293,46 @@ export default function ImportTransactionsPage() {
                             return next;
                           })}
                         >
-                          {targetFields.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                          {targetFields.map(([value, labelKey]) => <option value={value} key={value}>{t(labelKey)}</option>)}
                         </Select>
                       </div>
                     ))}
                   </div>
                 </Section>
-                <Section title="Import defaults" description="Applied when a mapped value is missing">
+                <Section title={t("finance.import.defaults.title")} description={t("finance.import.defaults.description")}>
                   <div className={`${ui.contentInsetCompact} ${ui.verticalStack}`}>
-                    <Field label="Default account">
+                    <Field label={t("finance.import.defaults.account")}>
                       <Select value={defaultAccountId} onValueChange={(value) => setDefaultAccountId(value)}>
-                        <option value="">Choose an account</option>
+                        <option value="">{t("finance.import.defaults.chooseAccount")}</option>
                         {accounts.map((item, index) => {
                           const account = readRecord(item);
-                          return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")}</option>;
+                          return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, t("finance.import.defaults.accountFallback"))}</option>;
                         })}
                       </Select>
                     </Field>
-                    <Field label="Date format">
+                    <Field label={t("finance.import.defaults.dateFormat")}>
                       <Select value={dateFormat} onValueChange={(value) => setDateFormat(value)}>
-                        <option value="auto">Detect automatically</option>
-                        <option value="dd.MM.yyyy">DD.MM.YYYY</option>
-                        <option value="dd/MM/yyyy">DD/MM/YYYY</option>
-                        <option value="MM/dd/yyyy">MM/DD/YYYY</option>
-                        <option value="yyyy-MM-dd">YYYY-MM-DD</option>
+                        <option value="auto">{t("finance.import.defaults.detectAutomatically")}</option>
+                        <option value="dd.MM.yyyy">{t("finance.import.defaults.dateDdMmDot")}</option>
+                        <option value="dd/MM/yyyy">{t("finance.import.defaults.dateDdMmSlash")}</option>
+                        <option value="MM/dd/yyyy">{t("finance.import.defaults.dateMmDdSlash")}</option>
+                        <option value="yyyy-MM-dd">{t("finance.import.defaults.dateIso")}</option>
                       </Select>
                     </Field>
-                    <Field label="Decimal separator">
+                    <Field label={t("finance.import.defaults.decimalSeparator")}>
                       <Select value={decimalSeparator} onValueChange={(value) => setDecimalSeparator(value)}>
-                        <option value="auto">Detect automatically</option>
-                        <option value=",">Comma (1.234,56)</option>
-                        <option value=".">Period (1,234.56)</option>
+                        <option value="auto">{t("finance.import.defaults.detectAutomatically")}</option>
+                        <option value=",">{t("finance.import.defaults.comma")}</option>
+                        <option value=".">{t("finance.import.defaults.period")}</option>
                       </Select>
                     </Field>
-                    <div className={ui.inlineNotice}><ShieldCheck size={16} />Posted amounts use the selected account currency. Map Original amount and Original currency together. The exchange-rate column is optional: LedgerLab derives the effective bank rate from both amounts and uses a mapped rate to verify that they reconcile.</div>
+                    <div className={ui.inlineNotice}><ShieldCheck size={16} />{t("finance.import.defaults.fxNotice")}</div>
                   </div>
                 </Section>
               </div>
               <div className={ui.formActions}>
-                <Button variant="ghost" onClick={resetImport}>Cancel</Button>
-                <Button disabled={working} onClick={() => void createPreview()}>{working ? "Validating…" : "Validate & preview"}</Button>
+                <Button variant="ghost" onClick={resetImport}>{t("common.actions.cancel")}</Button>
+                <Button disabled={working} onClick={() => void createPreview()}>{working ? t("finance.import.actions.validating") : t("finance.import.actions.validatePreview")}</Button>
               </div>
             </div>
           ) : null}
@@ -323,21 +340,23 @@ export default function ImportTransactionsPage() {
           {step === 3 ? (
             <div>
               <div className={ui.previewStats}>
-                <Pill tone="positive">{numberFrom(summary.validCount ?? summary.valid, previewRows.filter((row) => readRecord(row).valid === true && !readRecord(row).duplicate).length)} valid</Pill>
-                <Pill tone={previewErrors.length ? "negative" : "neutral"}>{numberFrom(summary.errorCount ?? summary.invalid, previewRows.filter((row) => readRecord(row).valid === false).length)} errors</Pill>
-                <Pill tone={previewDuplicates.length ? "warning" : "neutral"}>{numberFrom(summary.duplicateCount ?? summary.duplicates, previewDuplicates.length)} possible duplicates</Pill>
-                <Pill>{numberFrom(summary.totalCount ?? summary.total, previewRows.length + previewErrors.length)} rows</Pill>
+                <Pill tone="positive">{t("finance.import.preview.valid", { count: numberFrom(summary.validCount ?? summary.valid, previewRows.filter((row) => readRecord(row).valid === true && !readRecord(row).duplicate).length) })}</Pill>
+                <Pill tone={previewErrors.length ? "negative" : "neutral"}>{t("finance.import.preview.errors", { count: numberFrom(summary.errorCount ?? summary.invalid, previewRows.filter((row) => readRecord(row).valid === false).length) })}</Pill>
+                <Pill tone={previewDuplicates.length ? "warning" : "neutral"}>{t("finance.import.preview.duplicates", { count: numberFrom(summary.duplicateCount ?? summary.duplicates, previewDuplicates.length) })}</Pill>
+                <Pill>{t("finance.import.preview.rows", { count: numberFrom(summary.totalCount ?? summary.total, previewRows.length + previewErrors.length) })}</Pill>
               </div>
-              <Section title="Import preview" description="A sample of normalized values; amounts below are not saved yet">
-                <ResponsiveTable label="CSV import preview">
-                  <thead><tr><th>Row</th><th>Date</th><th>Merchant</th><th>Account</th><th>Category</th><th>Status</th><th>Amount</th></tr></thead>
+              <Section title={t("finance.import.preview.title")} description={t("finance.import.preview.description")}>
+                <ResponsiveTable label={t("finance.import.preview.tableLabel")}>
+                  <thead><tr><th>{t("finance.import.preview.columns.row")}</th><th>{t("finance.import.preview.columns.date")}</th><th>{t("finance.import.preview.columns.merchant")}</th><th>{t("finance.import.preview.columns.account")}</th><th>{t("finance.import.preview.columns.category")}</th><th>{t("finance.import.preview.columns.status")}</th><th>{t("finance.import.preview.columns.amount")}</th></tr></thead>
                   <tbody>
                     {previewRows.slice(0, 50).map((item, index) => {
                       const row = readRecord(item);
                       const valid = row.valid !== false && !row.error;
                       const validationMessage = Array.isArray(row.validationErrors)
-                        ? row.validationErrors.map((message) => stringFrom(message)).filter(Boolean).join(" · ")
-                        : stringFrom(row.message ?? row.error);
+                        ? row.validationErrors.map((message) => translateImportError(translator, message)).join(" · ")
+                        : row.message || row.error
+                          ? translateImportError(translator, row.message ?? row.error)
+                          : "";
                       const postedAmountMinor = numberFrom(row.amountMinor);
                       const originalAmountMinor = numberFrom(row.originalAmountMinor);
                       const originalCurrency = stringFrom(row.originalCurrency);
@@ -352,15 +371,16 @@ export default function ImportTransactionsPage() {
                             <span className={ui.tablePrimary}>{stringFrom(row.merchant ?? row.description, "—")}</span>
                             {validationMessage ? <span className={`${ui.tableSecondary} ${valid ? "" : ui.negative}`}>{validationMessage}</span> : null}
                           </td>
-                          <td>{stringFrom(row.accountName, "Default")}</td>
-                          <td>{stringFrom(row.categoryName, "Uncategorised")}</td>
-                          <td><Pill tone={row.duplicate ? "warning" : valid ? "positive" : "negative"}>{row.duplicate ? "duplicate" : valid ? "valid" : "error"}</Pill></td>
+                          <td>{stringFrom(row.accountName, t("finance.import.preview.defaultAccount"))}</td>
+                          <td>{stringFrom(row.categoryName, t("finance.import.preview.uncategorised"))}</td>
+                          <td><Pill tone={row.duplicate ? "warning" : valid ? "positive" : "negative"}>{row.duplicate ? t("finance.import.preview.duplicate") : valid ? t("finance.import.preview.validStatus") : t("finance.import.preview.errorStatus")}</Pill></td>
                           <td className={`${ui.amount} ${postedAmountMinor >= 0 ? ui.positive : ui.negative}`}>
                             {formatMoney(postedAmountMinor, accountCurrency)}
                             {originalAmountMinor > 0 && originalCurrency ? (
                               <small className={ui.tableSecondary}>
-                                Original {formatMoney(originalSignedAmount, originalCurrency)}
-                                {effectiveRate ? ` · 1 ${originalCurrency} = ${effectiveRate} ${accountCurrency}` : ""}
+                                {effectiveRate
+                                  ? t("finance.import.preview.originalAmountWithRate", { amount: formatMoney(originalSignedAmount, originalCurrency), originalCurrency, rate: effectiveRate, accountCurrency })
+                                  : t("finance.import.preview.originalAmount", { amount: formatMoney(originalSignedAmount, originalCurrency) })}
                               </small>
                             ) : null}
                           </td>
@@ -372,20 +392,20 @@ export default function ImportTransactionsPage() {
               </Section>
               {invalidPreviewRows.length + previewErrors.length ? (
                 <div className={`${ui.inlineNotice} ${ui.inlineNoticeDanger}`}>
-                  <span><strong>{invalidPreviewRows.length + previewErrors.length} rows cannot be imported.</strong> Correct the source CSV or continue to import valid rows only. Invalid rows are always skipped.</span>
+                  <span>{t("finance.import.preview.invalidRows", { count: invalidPreviewRows.length + previewErrors.length })}</span>
                 </div>
               ) : null}
               <div className={`${ui.formGrid} ${ui.formOffset}`}>
-                <Field label="Possible duplicate handling" hint="Duplicate candidates use account, date, signed amount and normalized merchant.">
+                <Field label={t("finance.import.preview.duplicateHandling")} hint={t("finance.import.preview.duplicateHint")}>
                   <Select value={duplicateHandling} onValueChange={(value) => setDuplicateHandling(value)}>
-                    <option value="skip">Skip possible duplicates (recommended)</option>
-                    <option value="import">Import them anyway</option>
+                    <option value="skip">{t("finance.import.preview.skipDuplicates")}</option>
+                    <option value="import">{t("finance.import.preview.importDuplicates")}</option>
                   </Select>
                 </Field>
               </div>
               <div className={ui.formActions}>
-                <Button variant="ghost" onClick={() => setStep(2)}>Back to mapping</Button>
-                <Button disabled={working || !previewRows.length} onClick={() => void commitImport()}>{working ? "Importing…" : "Import valid transactions"}</Button>
+                <Button variant="ghost" onClick={() => setStep(2)}>{t("finance.import.actions.backToMapping")}</Button>
+                <Button disabled={working || !previewRows.length} onClick={() => void commitImport()}>{working ? t("finance.import.actions.importing") : t("finance.import.actions.importValid")}</Button>
               </div>
             </div>
           ) : null}
@@ -393,9 +413,9 @@ export default function ImportTransactionsPage() {
           {step === 4 ? (
             <div className={`${ui.dropZone} ${ui.staticDropZone}`}>
               <Check size={32} />
-              <strong>Import complete</strong>
-              <small>{success ?? "The valid rows are now actual transactions and account balances have been reconciled."}</small>
-              <Button variant="secondary" icon={<RefreshCw size={15} />} onClick={resetImport}>Import another file</Button>
+              <strong>{t("finance.import.result.completeTitle")}</strong>
+              <small>{success ?? t("finance.import.result.completeDescription")}</small>
+              <Button variant="secondary" icon={<RefreshCw size={15} />} onClick={resetImport}>{t("finance.import.actions.importAnother")}</Button>
             </div>
           ) : null}
         </div>

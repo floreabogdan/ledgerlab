@@ -6,6 +6,7 @@ data/
 playwright-report/
 test-results/
 coverage/
+src/i18n/generated/
 .env*
 !.env.example
 *.tsbuildinfo

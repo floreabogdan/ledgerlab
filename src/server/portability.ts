@@ -3,7 +3,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Papa from "papaparse";
 
-import { HttpError } from "@/lib/api-response";
+import { resolveSupportedLanguage } from "@/i18n/language";
+import { HttpError, type ApiErrorDescriptor, type ApiErrorParameters } from "@/lib/api-response";
 import { DEFAULT_CURRENCY, isSupportedCurrency } from "@/lib/currencies";
 import { assertValidTransferPair, type LedgerTransaction } from "@/lib/domain/balances";
 import { currencyMinorToInput, currencyMinorUnitDigits } from "@/lib/domain/currency";
@@ -23,6 +24,24 @@ import {
 import { getUserRegionalSettings } from "@/server/user-settings";
 
 type CsvRecord = Record<string, string>;
+export type ImportValidationError = Pick<ApiErrorDescriptor, "code" | "params">;
+
+function importError(code: string, params?: ApiErrorParameters): ImportValidationError {
+  return params ? { code, params } : { code };
+}
+
+function backupError(
+  status: number,
+  code: string,
+  message: string,
+  params?: ApiErrorParameters,
+) {
+  return new HttpError(status, {
+    code: `BACKUP_${code}`,
+    message,
+    params,
+  });
+}
 
 const MAX_BACKUP_ENVELOPE_BYTES = 100 * 1024 * 1024;
 const MAX_IMPORT_CSV_BYTES = 20 * 1024 * 1024;
@@ -135,7 +154,11 @@ export interface ImportPreviewInput {
 
 export function previewImport(userId: string, input: ImportPreviewInput) {
   if (Buffer.byteLength(input.csv, "utf8") > MAX_IMPORT_CSV_BYTES) {
-    throw new HttpError(413, "CSV files must be smaller than 20 MB");
+    throw new HttpError(413, {
+      code: "IMPORT_CSV_TOO_LARGE",
+      message: "CSV files must be smaller than 20 MB",
+      params: { maxMegabytes: 20 },
+    });
   }
   const account = input.accountId
     ? one<{ id: string; currency: string }>(
@@ -143,7 +166,12 @@ export function previewImport(userId: string, input: ImportPreviewInput) {
       [input.accountId, userId],
     )
     : null;
-  if (input.accountId && !account) throw new HttpError(422, "Choose an active destination account");
+  if (input.accountId && !account) {
+    throw new HttpError(422, {
+      code: "IMPORT_DESTINATION_ACCOUNT_REQUIRED",
+      message: "Choose an active destination account",
+    });
+  }
   const accountCurrency = account?.currency ?? getUserRegionalSettings(userId).currency;
   const parsed = Papa.parse<CsvRecord>(input.csv, {
     header: input.hasHeader !== false,
@@ -168,19 +196,23 @@ export function previewImport(userId: string, input: ImportPreviewInput) {
     originalCurrency: input.mapping?.originalCurrency ?? guessColumn(headers, [/original[ _]currency$/, /foreign[ _]currency$/, /transaction[ _]currency$/, /^currency$/]),
     exchangeRate: input.mapping?.exchangeRate ?? guessColumn(headers, [/^exchange[ _]rate$/, /^fx[ _]rate$/, /^conversion[ _]rate$/, /^curs$/]),
   };
-  const errors: Array<{ row: number; message: string }> = parsed.errors.map((error) => ({
+  const errors: Array<{ row: number } & ImportValidationError> = parsed.errors.map((error) => ({
     row: (error.row ?? 0) + rowOffset,
-    message: error.message,
+    ...importError("IMPORT_CSV_PARSE_ERROR", { parserCode: error.code }),
   }));
   if (parsed.data.length > 10_000) {
-    throw new HttpError(422, "One import is limited to 10,000 rows. Split the CSV into smaller files before importing");
+    throw new HttpError(422, {
+      code: "IMPORT_ROW_LIMIT_EXCEEDED",
+      message: "One import is limited to 10,000 rows. Split the CSV into smaller files before importing",
+      params: { maxRows: 10_000 },
+    });
   }
   if (!mapping.date || !mapping.amount) {
     return {
       headers,
       mapping,
       rows: [],
-      errors: [{ row: 1, message: "Map both a date and amount column before importing." }, ...errors],
+      errors: [{ row: 1, ...importError("IMPORT_MAPPING_REQUIRED") }, ...errors],
       validCount: 0,
       invalidCount: parsed.data.length,
       duplicateCount: 0,
@@ -203,31 +235,39 @@ export function previewImport(userId: string, input: ImportPreviewInput) {
     const rowNumber = index + rowOffset;
     const validationErrors = errors
       .filter((error) => error.row === rowNumber)
-      .map((error) => `CSV parse error: ${error.message}`);
+      .map(({ code, params }) => importError(code, params));
     if (!date) {
       validationErrors.push(dateFormat === "auto" && isAmbiguousNumericDate(rawDate)
-        ? "Ambiguous date; choose DD/MM/YYYY or MM/DD/YYYY before importing"
-        : "Invalid date");
+        ? importError("IMPORT_AMBIGUOUS_DATE")
+        : importError("IMPORT_INVALID_DATE"));
     }
-    if (amountMinor === null) validationErrors.push("Invalid or zero amount");
+    if (amountMinor === null) validationErrors.push(importError("IMPORT_INVALID_AMOUNT"));
     const hasOriginalCurrency = Boolean(originalCurrencyValue);
     const hasOriginalAmount = Boolean(originalAmountValue);
-    if (hasOriginalCurrency !== hasOriginalAmount) validationErrors.push("Original amount and original currency must both be provided");
-    if (hasOriginalCurrency && !isSupportedCurrency(originalCurrencyValue)) validationErrors.push("Choose a supported ISO 4217 original currency");
+    if (hasOriginalCurrency !== hasOriginalAmount) {
+      validationErrors.push(importError("IMPORT_ORIGINAL_PAIR_REQUIRED"));
+    }
+    if (hasOriginalCurrency && !isSupportedCurrency(originalCurrencyValue)) {
+      validationErrors.push(importError("IMPORT_UNSUPPORTED_ORIGINAL_CURRENCY", {
+        currency: originalCurrencyValue,
+      }));
+    }
     const parsedOriginalAmount = hasOriginalAmount && isSupportedCurrency(originalCurrencyValue)
       ? parseMinor(originalAmountValue, originalCurrencyValue, decimalSeparator)
       : null;
-    if (hasOriginalAmount && parsedOriginalAmount === null) validationErrors.push("Invalid original amount");
+    if (hasOriginalAmount && parsedOriginalAmount === null) {
+      validationErrors.push(importError("IMPORT_INVALID_ORIGINAL_AMOUNT"));
+    }
 
     let originalAmountMinor: number | null = null;
     let originalCurrency: string | null = null;
     let fxRateScaled: number | null = null;
     if (amountMinor !== null && parsedOriginalAmount !== null && isSupportedCurrency(originalCurrencyValue)) {
       if (Math.sign(amountMinor) !== Math.sign(parsedOriginalAmount)) {
-        validationErrors.push("Posted and original amounts must have the same direction");
+        validationErrors.push(importError("IMPORT_AMOUNT_DIRECTION_MISMATCH"));
       } else if (originalCurrencyValue === accountCurrency) {
         if (Math.abs(amountMinor) !== Math.abs(parsedOriginalAmount)) {
-          validationErrors.push("Same-currency posted and original amounts must match");
+          validationErrors.push(importError("IMPORT_SAME_CURRENCY_AMOUNT_MISMATCH"));
         }
       } else {
         originalAmountMinor = Math.abs(parsedOriginalAmount);
@@ -245,7 +285,7 @@ export function previewImport(userId: string, input: ImportPreviewInput) {
           currencyMinorUnitDigits(accountCurrency),
         ));
         if (derivedPostedAmount !== Math.abs(amountMinor)) {
-          validationErrors.push("The original and posted amounts cannot reconcile at eight-decimal FX precision");
+          validationErrors.push(importError("IMPORT_FX_PRECISION_MISMATCH"));
         }
         if (exchangeRateValue) {
           try {
@@ -257,15 +297,15 @@ export function previewImport(userId: string, input: ImportPreviewInput) {
               currencyMinorUnitDigits(accountCurrency),
             ));
             if (Math.abs(suppliedPostedAmount - Math.abs(amountMinor)) > 1) {
-              validationErrors.push("The mapped exchange rate does not reconcile with the posted amount");
+              validationErrors.push(importError("IMPORT_EXCHANGE_RATE_MISMATCH"));
             }
           } catch {
-            validationErrors.push("Invalid exchange rate");
+            validationErrors.push(importError("IMPORT_INVALID_EXCHANGE_RATE"));
           }
         }
       }
     } else if (exchangeRateValue && !hasOriginalAmount) {
-      validationErrors.push("An exchange rate requires an original amount and currency");
+      validationErrors.push(importError("IMPORT_FX_ORIGINAL_REQUIRED"));
     }
     let duplicate = false;
     if (date && amountMinor !== null && input.accountId) {
@@ -331,12 +371,23 @@ export function commitImport(
   userId: string,
   input: { accountId: string; rows: CommitRow[]; duplicateStrategy?: "skip" | "import"; fileName?: string; mapping?: Record<string, string> },
 ) {
-  if (!input.rows.length || input.rows.length > 10_000) throw new HttpError(422, "Choose between 1 and 10,000 rows to import");
+  if (!input.rows.length || input.rows.length > 10_000) {
+    throw new HttpError(422, {
+      code: "IMPORT_ROW_COUNT_INVALID",
+      message: "Choose between 1 and 10,000 rows to import",
+      params: { minRows: 1, maxRows: 10_000 },
+    });
+  }
   const account = one<{ id: string; currency: string }>(
     "SELECT id, currency FROM accounts WHERE id = ? AND user_id = ? AND archived_at IS NULL",
     [input.accountId, userId],
   );
-  if (!account) throw new HttpError(422, "Choose an active destination account");
+  if (!account) {
+    throw new HttpError(422, {
+      code: "IMPORT_DESTINATION_ACCOUNT_REQUIRED",
+      message: "Choose an active destination account",
+    });
+  }
   const batchId = randomUUID();
 
   let imported = 0;
@@ -362,34 +413,34 @@ export function commitImport(
       let status: "invalid" | "duplicate" | "imported" | "skipped" = "imported";
       let transactionId: string | null = null;
       let duplicateOfTransactionId: string | null = null;
-      const validationErrors: string[] = [];
+      const validationErrors: ImportValidationError[] = [];
       if (parseDate(row.date) !== row.date || !Number.isSafeInteger(row.amountMinor) || row.amountMinor === 0) {
         status = "invalid";
-        validationErrors.push("Invalid date or amount");
+        validationErrors.push(importError("IMPORT_INVALID_DATE_OR_AMOUNT"));
       }
       if (row.categoryId && !one(
         "SELECT id FROM categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
         [row.categoryId, userId],
       )) {
         status = "invalid";
-        validationErrors.push("Choose an active category that belongs to this profile");
+        validationErrors.push(importError("IMPORT_CATEGORY_UNAVAILABLE"));
       }
       const hasOriginalAmount = row.originalAmountMinor !== undefined && row.originalAmountMinor !== null;
       const hasOriginalCurrency = Boolean(row.originalCurrency?.trim());
       const hasAnyFx = row.fxRateScaled != null || row.fxRateSource != null || row.fxRateDate != null;
       if (hasOriginalAmount !== hasOriginalCurrency) {
         status = "invalid";
-        validationErrors.push("Original amount and original currency must both be provided");
+        validationErrors.push(importError("IMPORT_ORIGINAL_PAIR_REQUIRED"));
       } else if (hasOriginalAmount && hasOriginalCurrency) {
         const originalAmountMinor = row.originalAmountMinor as number;
         const originalCurrency = row.originalCurrency!.trim().toUpperCase();
         if (!Number.isSafeInteger(originalAmountMinor) || originalAmountMinor <= 0 || !/^[A-Z]{3}$/.test(originalCurrency)) {
           status = "invalid";
-          validationErrors.push("Invalid original amount or currency");
+          validationErrors.push(importError("IMPORT_INVALID_ORIGINAL_DATA"));
         } else if (originalCurrency === account.currency) {
           if (originalAmountMinor !== Math.abs(row.amountMinor) || hasAnyFx) {
             status = "invalid";
-            validationErrors.push("Same-currency original and posted amounts must match without an FX rate");
+            validationErrors.push(importError("IMPORT_SAME_CURRENCY_FX_FORBIDDEN"));
           }
         } else if (
           row.fxRateSource !== "manual" ||
@@ -399,7 +450,7 @@ export function commitImport(
           parseDate(row.fxRateDate) !== row.fxRateDate
         ) {
           status = "invalid";
-          validationErrors.push("Foreign-currency rows require a positive manual FX rate and valid rate date");
+          validationErrors.push(importError("IMPORT_FOREIGN_FX_REQUIRED"));
         } else {
           const converted = convertMinorAtRate(
             originalAmountMinor,
@@ -409,12 +460,12 @@ export function commitImport(
           );
           if (converted !== Math.abs(row.amountMinor)) {
             status = "invalid";
-            validationErrors.push("The original amount and FX rate do not reconcile to the posted amount");
+            validationErrors.push(importError("IMPORT_FX_RECONCILIATION_FAILED"));
           }
         }
       } else if (hasAnyFx) {
         status = "invalid";
-        validationErrors.push("FX fields require an original amount and currency");
+        validationErrors.push(importError("IMPORT_FX_ORIGINAL_REQUIRED"));
       }
 
       if (status === "invalid") {
@@ -528,10 +579,12 @@ type RestoredTransaction = LedgerTransaction & {
 type RestoredQuote = { rateDate: string; rateScaled: number };
 
 function canonicalRestoredCurrency(value: unknown, label: string) {
-  if (typeof value !== "string") throw new HttpError(422, `The backup contains a missing ${label} currency`);
+  if (typeof value !== "string") {
+    throw backupError(422, "CURRENCY_MISSING", `The backup contains a missing ${label} currency`);
+  }
   const normalized = value.trim().toUpperCase();
   if (value !== normalized || !isSupportedCurrency(normalized)) {
-    throw new HttpError(422, `The backup contains an unsupported or non-canonical ${label} currency`);
+    throw backupError(422, "CURRENCY_INVALID", `The backup contains an unsupported or non-canonical ${label} currency`);
   }
   return normalized;
 }
@@ -587,38 +640,38 @@ function validateRestoredFxProvenance(
   accountCurrency: string,
 ) {
   if (!Number.isSafeInteger(row.fxRateScaled) || (row.fxRateScaled ?? 0) <= 0) {
-    throw new HttpError(422, `Transaction ${row.id} has an invalid FX rate`);
+    throw backupError(422, "TRANSACTION_FX_RATE_INVALID", `Transaction ${row.id} has an invalid FX rate`);
   }
   if (row.fxRateSource !== "bnr" && row.fxRateSource !== "manual") {
-    throw new HttpError(422, `Transaction ${row.id} has an invalid FX source`);
+    throw backupError(422, "TRANSACTION_FX_SOURCE_INVALID", `Transaction ${row.id} has an invalid FX source`);
   }
   if (!validRestoredDate(row.fxRateDate)) {
-    throw new HttpError(422, `Transaction ${row.id} has an invalid FX rate date`);
+    throw backupError(422, "TRANSACTION_FX_DATE_INVALID", `Transaction ${row.id} has an invalid FX rate date`);
   }
   const hasReferenceRate = row.referenceFxRateScaled !== null && row.referenceFxRateScaled !== undefined;
   const hasReferenceDate = row.referenceFxRateDate !== null && row.referenceFxRateDate !== undefined;
   if (hasReferenceRate !== hasReferenceDate) {
-    throw new HttpError(422, `Transaction ${row.id} has an incomplete reference FX quote`);
+    throw backupError(422, "TRANSACTION_REFERENCE_FX_INCOMPLETE", `Transaction ${row.id} has an incomplete reference FX quote`);
   }
   if (hasReferenceRate && (
     !Number.isSafeInteger(row.referenceFxRateScaled) || (row.referenceFxRateScaled ?? 0) <= 0
     || !validRestoredDate(row.referenceFxRateDate)
   )) {
-    throw new HttpError(422, `Transaction ${row.id} has an invalid reference FX quote`);
+    throw backupError(422, "TRANSACTION_REFERENCE_FX_INVALID", `Transaction ${row.id} has an invalid reference FX quote`);
   }
   if (row.fxRateSource === "bnr" && hasReferenceRate) {
-    throw new HttpError(422, `Transaction ${row.id} stores a duplicate reference quote for a BNR rate`);
+    throw backupError(422, "TRANSACTION_REFERENCE_FX_DUPLICATE", `Transaction ${row.id} stores a duplicate reference quote for a BNR rate`);
   }
 
   if (row.fxRateSource === "bnr") {
     const quote = restoredBnrQuote(row.occurredAt, originalCurrency, accountCurrency);
     if (!quote || quote.rateScaled !== row.fxRateScaled || quote.rateDate !== row.fxRateDate) {
-      throw new HttpError(422, `Transaction ${row.id} does not match its persisted official BNR quote`);
+      throw backupError(422, "TRANSACTION_BNR_QUOTE_MISMATCH", `Transaction ${row.id} does not match its persisted official BNR quote`);
     }
   } else if (hasReferenceRate) {
     const quote = restoredBnrQuote(row.occurredAt, originalCurrency, accountCurrency);
     if (!quote || quote.rateScaled !== row.referenceFxRateScaled || quote.rateDate !== row.referenceFxRateDate) {
-      throw new HttpError(422, `Transaction ${row.id} does not match its persisted reference BNR quote`);
+      throw backupError(422, "TRANSACTION_REFERENCE_QUOTE_MISMATCH", `Transaction ${row.id} does not match its persisted reference BNR quote`);
     }
   }
 }
@@ -632,23 +685,27 @@ function validateRestoredNonTransferFx(row: RestoredTransaction) {
     || row.referenceFxRateScaled !== null && row.referenceFxRateScaled !== undefined
     || row.referenceFxRateDate !== null && row.referenceFxRateDate !== undefined;
   if (hasOriginalAmount !== hasOriginalCurrency) {
-    throw new HttpError(422, `Transaction ${row.id} must store original amount and currency together`);
+    throw backupError(422, "TRANSACTION_ORIGINAL_PAIR_REQUIRED", `Transaction ${row.id} must store original amount and currency together`);
   }
   if (!hasOriginalAmount) {
-    if (hasAnyFx) throw new HttpError(422, `Transaction ${row.id} has FX fields without original money`);
+    if (hasAnyFx) {
+      throw backupError(422, "TRANSACTION_FX_WITHOUT_ORIGINAL", `Transaction ${row.id} has FX fields without original money`);
+    }
     return;
   }
   if (!Number.isSafeInteger(row.originalAmountMinor) || (row.originalAmountMinor ?? 0) <= 0) {
-    throw new HttpError(422, `Transaction ${row.id} has an invalid original amount`);
+    throw backupError(422, "TRANSACTION_ORIGINAL_AMOUNT_INVALID", `Transaction ${row.id} has an invalid original amount`);
   }
   const originalCurrency = canonicalRestoredCurrency(row.originalCurrency, "transaction original");
   if (originalCurrency === row.accountCurrency) {
     if (row.originalAmountMinor !== Math.abs(row.amountMinor) || hasAnyFx) {
-      throw new HttpError(422, `Transaction ${row.id} has invalid same-currency original-money fields`);
+      throw backupError(422, "TRANSACTION_SAME_CURRENCY_FX_INVALID", `Transaction ${row.id} has invalid same-currency original-money fields`);
     }
     return;
   }
-  if (!hasAnyFx) throw new HttpError(422, `Transaction ${row.id} is missing its foreign-currency FX metadata`);
+  if (!hasAnyFx) {
+    throw backupError(422, "TRANSACTION_FX_METADATA_MISSING", `Transaction ${row.id} is missing its foreign-currency FX metadata`);
+  }
   validateRestoredFxProvenance(row, originalCurrency, row.accountCurrency);
   const converted = convertMinorAtRate(
     row.originalAmountMinor as number,
@@ -657,7 +714,7 @@ function validateRestoredNonTransferFx(row: RestoredTransaction) {
     currencyMinorUnitDigits(row.accountCurrency),
   );
   if (converted !== Math.abs(row.amountMinor)) {
-    throw new HttpError(422, `Transaction ${row.id} original amount and FX rate do not reconcile to its account posting`);
+    throw backupError(422, "TRANSACTION_FX_RECONCILIATION_FAILED", `Transaction ${row.id} original amount and FX rate do not reconcile to its account posting`);
   }
 }
 
@@ -694,24 +751,24 @@ function validateRestoredMonetaryInvariants(userId: string) {
     row.currency = canonicalRestoredCurrency(row.currency, "transaction");
     row.accountCurrency = canonicalRestoredCurrency(row.accountCurrency, "account");
     if (row.currency !== row.accountCurrency) {
-      throw new HttpError(422, `Transaction ${row.id} currency does not match its account ledger`);
+      throw backupError(422, "TRANSACTION_CURRENCY_MISMATCH", `Transaction ${row.id} currency does not match its account ledger`);
     }
     if (!Number.isSafeInteger(row.amountMinor) || row.amountMinor === 0) {
-      throw new HttpError(422, `Transaction ${row.id} has an invalid account amount`);
+      throw backupError(422, "TRANSACTION_AMOUNT_INVALID", `Transaction ${row.id} has an invalid account amount`);
     }
     if (!validRestoredDate(row.occurredAt)) {
-      throw new HttpError(422, `Transaction ${row.id} has an invalid transaction date`);
+      throw backupError(422, "TRANSACTION_DATE_INVALID", `Transaction ${row.id} has an invalid transaction date`);
     }
     if (row.kind === "transfer") {
       if (!row.transferGroupId || !row.transferPeerId) {
-        throw new HttpError(422, `Transfer ${row.id} is missing its group or peer link`);
+        throw backupError(422, "TRANSFER_LINK_MISSING", `Transfer ${row.id} is missing its group or peer link`);
       }
       const group = transferGroups.get(row.transferGroupId) ?? [];
       group.push(row);
       transferGroups.set(row.transferGroupId, group);
     } else {
       if (row.transferGroupId || row.transferPeerId) {
-        throw new HttpError(422, `Non-transfer transaction ${row.id} carries transfer links`);
+        throw backupError(422, "TRANSACTION_TRANSFER_LINK_INVALID", `Non-transfer transaction ${row.id} carries transfer links`);
       }
       validateRestoredNonTransferFx(row);
     }
@@ -721,7 +778,7 @@ function validateRestoredMonetaryInvariants(userId: string) {
     try {
       assertValidTransferPair(pair);
     } catch {
-      throw new HttpError(422, `Transfer group ${groupId} does not reconcile`);
+      throw backupError(422, "TRANSFER_RECONCILIATION_FAILED", `Transfer group ${groupId} does not reconcile`);
     }
     const source = pair.find((row) => row.amountMinor < 0) as RestoredTransaction;
     const destination = pair.find((row) => row.amountMinor > 0) as RestoredTransaction;
@@ -730,7 +787,7 @@ function validateRestoredMonetaryInvariants(userId: string) {
       || source.occurredAt !== destination.occurredAt || source.status !== destination.status
       || source.voidedAt !== destination.voidedAt
     ) {
-      throw new HttpError(422, `Transfer group ${groupId} has inconsistent peer state`);
+      throw backupError(422, "TRANSFER_PEER_STATE_INVALID", `Transfer group ${groupId} has inconsistent peer state`);
     }
     if (source.currency !== destination.currency) {
       canonicalRestoredCurrency(destination.originalCurrency, "transfer original");
@@ -836,7 +893,9 @@ export function exportData(userId: string, format: "csv" | "json") {
       fxRateScale: 100_000_000,
       rowCounts: Object.fromEntries(Object.entries(data).map(([table, rows]) => [table, rows.length])),
       profile: one(
-        "SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone FROM users WHERE id = ?",
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = ?`,
         [userId],
       ),
       data,
@@ -848,10 +907,10 @@ export function exportData(userId: string, format: "csv" | "json") {
 
 export function createBackup(userId: string) {
   const user = one<{ email: string }>("SELECT email FROM users WHERE id = ?", [userId]);
-  if (!user) throw new HttpError(404, "User not found");
+  if (!user) throw backupError(404, "USER_NOT_FOUND", "User not found");
   const userCount = one<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count ?? 0;
   if (userCount !== 1) {
-    throw new HttpError(403, "Full database backups are available only when this local LedgerLab database has one owner. Use JSON/CSV export for a user-scoped copy");
+    throw backupError(403, "SOLE_OWNER_REQUIRED", "Full database backups are available only when this local LedgerLab database has one owner. Use JSON/CSV export for a user-scoped copy");
   }
   const buffer = database().serialize();
   const backup = {
@@ -863,19 +922,25 @@ export function createBackup(userId: string) {
     attachments: collectAttachmentBackupFiles(userId),
   };
   if (Buffer.byteLength(JSON.stringify(backup), "utf8") > MAX_BACKUP_ENVELOPE_BYTES) {
-    throw new HttpError(413, "The complete backup exceeds 100 MB. Remove large receipt files before creating this backup");
+    throw backupError(413, "TOO_LARGE", "The complete backup exceeds 100 MB. Remove large receipt files before creating this backup", {
+      maxMegabytes: 100,
+    });
   }
   return backup;
 }
 
 export function restoreBackup(userId: string, input: { backup: string; confirmation: string }) {
-  if (input.confirmation !== "RESTORE") throw new HttpError(422, "Type RESTORE to confirm replacement");
+  if (input.confirmation !== "RESTORE") {
+    throw backupError(422, "RESTORE_CONFIRMATION_REQUIRED", "Type RESTORE to confirm replacement");
+  }
   if (Buffer.byteLength(input.backup, "utf8") > MAX_BACKUP_ENVELOPE_BYTES) {
-    throw new HttpError(413, "Backup files must be smaller than 100 MB");
+    throw backupError(413, "RESTORE_FILE_TOO_LARGE", "Backup files must be smaller than 100 MB", {
+      maxMegabytes: 100,
+    });
   }
   const userCount = one<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count ?? 0;
   if (userCount !== 1 || !one("SELECT id FROM users WHERE id = ?", [userId])) {
-    throw new HttpError(403, "Full database restore is available only to the sole owner of this local database");
+    throw backupError(403, "RESTORE_SOLE_OWNER_REQUIRED", "Full database restore is available only to the sole owner of this local database");
   }
   let payload: {
     format?: string;
@@ -890,21 +955,21 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
     try {
       payload = JSON.parse(input.backup) as typeof payload;
     } catch {
-      throw new HttpError(422, "This is not a valid LedgerLab backup");
+      throw backupError(422, "INVALID", "This is not a valid LedgerLab backup");
     }
   }
   if (payload.format !== "ledgerlab-sqlite-v1" || !payload.database) {
-    throw new HttpError(422, "Unsupported backup format");
+    throw backupError(422, "FORMAT_UNSUPPORTED", "Unsupported backup format");
   }
   if (!payload.checksum || !/^[0-9a-f]{64}$/i.test(payload.checksum)) {
-    throw new HttpError(422, "The backup is missing a valid SHA-256 checksum");
+    throw backupError(422, "CHECKSUM_MISSING", "The backup is missing a valid SHA-256 checksum");
   }
   const buffer = Buffer.from(payload.database, "base64");
   if (buffer.length < SQLITE_HEADER.length || !buffer.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)) {
-    throw new HttpError(422, "The backup does not contain a SQLite database");
+    throw backupError(422, "DATABASE_MISSING", "The backup does not contain a SQLite database");
   }
   if (createHash("sha256").update(buffer).digest("hex") !== payload.checksum.toLowerCase()) {
-    throw new HttpError(422, "Backup checksum validation failed");
+    throw backupError(422, "CHECKSUM_INVALID", "Backup checksum validation failed");
   }
   const currentUser = one<{ email: string }>("SELECT email FROM users WHERE id = ?", [userId]);
   const restoreDirectory = path.join(process.cwd(), "data", "restore-staging");
@@ -954,27 +1019,37 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
   try {
     connection.prepare("ATTACH DATABASE ? AS restoredb").run(restoreFile);
     const integrity = connection.prepare("PRAGMA restoredb.integrity_check").pluck().get();
-    if (integrity !== "ok") throw new HttpError(422, "The backup database did not pass its integrity check");
+    if (integrity !== "ok") {
+      throw backupError(422, "DATABASE_INTEGRITY_FAILED", "The backup database did not pass its integrity check");
+    }
     const available = new Set(
       (connection.prepare("SELECT name FROM restoredb.sqlite_master WHERE type = 'table'").pluck().all() as string[]),
     );
-    if (requiredTables.some((table) => !available.has(table))) throw new HttpError(422, "The backup is missing required LedgerLab tables");
+    if (requiredTables.some((table) => !available.has(table))) {
+      throw backupError(422, "TABLES_MISSING", "The backup is missing required LedgerLab tables");
+    }
     const sourceIntegrityViolations = connection.prepare("PRAGMA restoredb.foreign_key_check").all() as unknown[];
-    if (sourceIntegrityViolations.length) throw new HttpError(422, "The backup contains broken relationships");
+    if (sourceIntegrityViolations.length) {
+      throw backupError(422, "RELATIONSHIPS_INVALID", "The backup contains broken relationships");
+    }
     const sourceOwnerCount = connection.prepare("SELECT COUNT(*) AS count FROM restoredb.users").get() as { count: number };
     if (sourceOwnerCount.count !== 1) {
-      throw new HttpError(422, "A full restore must contain exactly one local owner");
+      throw backupError(422, "OWNER_COUNT_INVALID", "A full restore must contain exactly one local owner");
     }
     const expectedEmail = currentUser?.email.trim().toLowerCase();
+    const sourceHasUiLanguage = restoreHasColumn("users", "ui_language");
     const sourceOwner = expectedEmail
       ? connection.prepare(
-          "SELECT id, default_currency AS defaultCurrency FROM restoredb.users WHERE normalized_email = ?",
-        ).get(expectedEmail) as { id: string; defaultCurrency: string } | undefined
+          `SELECT id, default_currency AS defaultCurrency,
+                  ${sourceHasUiLanguage ? "ui_language" : "NULL"} AS uiLanguage
+             FROM restoredb.users WHERE normalized_email = ?`,
+        ).get(expectedEmail) as { id: string; defaultCurrency: string; uiLanguage: unknown } | undefined
       : null;
     if (!sourceOwner) {
-      throw new HttpError(409, "This backup belongs to a different local owner. The current database was not changed");
+      throw backupError(409, "OWNER_MISMATCH", "This backup belongs to a different local owner. The current database was not changed");
     }
     const reportingCurrency = canonicalRestoredCurrency(sourceOwner.defaultCurrency, "reporting");
+    const restoredUiLanguage = resolveSupportedLanguage(sourceOwner.uiLanguage);
     const originalCurrencyCheck = restoreHasColumn("transactions", "original_currency")
       ? `OR (t.original_currency IS NOT NULL AND (
               length(trim(t.original_currency)) <> 3 OR upper(trim(t.original_currency)) GLOB '*[^A-Z]*'
@@ -1008,8 +1083,9 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       sourceOwner.id,
     ) as { count: number };
     if (currencyViolations.count) {
-      throw new HttpError(
+      throw backupError(
         422,
+        "CURRENCY_LEDGER_MISMATCH",
         "The backup contains an invalid currency or a transaction whose currency does not match its account ledger",
       );
     }
@@ -1019,7 +1095,13 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
         `SELECT COUNT(*) AS count FROM restoredb.${quoteIdentifier(table)}
           WHERE length(trim(currency)) <> 3 OR upper(trim(currency)) GLOB '*[^A-Z]*'`,
       ).get() as { count: number };
-      if (invalid.count) throw new HttpError(422, `The backup contains an invalid ${table === "budgets" ? "budget" : "monthly-plan"} currency`);
+      if (invalid.count) {
+        throw backupError(
+          422,
+          table === "budgets" ? "BUDGET_CURRENCY_INVALID" : "MONTH_PLAN_CURRENCY_INVALID",
+          `The backup contains an invalid ${table === "budgets" ? "budget" : "monthly-plan"} currency`,
+        );
+      }
     }
     validateRestoredMonetaryInvariants(sourceOwner.id);
 
@@ -1037,7 +1119,9 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       for (const table of deletionOrder) connection.exec(`DELETE FROM main.${table}`);
       for (const table of tables) {
         if (!available.has(table)) continue;
-        const columns = sharedTableColumns(table);
+        const columns = sharedTableColumns(table).filter(
+          (column) => table !== "users" || column !== "ui_language",
+        );
         if (!columns.length) continue;
         const columnList = columns.map(quoteIdentifier).join(", ");
         connection.exec(
@@ -1051,8 +1135,12 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       if (!restoreHasColumn("month_plans", "currency")) {
         connection.prepare("UPDATE main.month_plans SET currency = ? WHERE user_id = ?").run(reportingCurrency, sourceOwner.id);
       }
+      connection.prepare("UPDATE main.users SET ui_language = ? WHERE id = ?")
+        .run(restoredUiLanguage, sourceOwner.id);
       const violations = connection.pragma("foreign_key_check") as unknown[];
-      if (violations.length) throw new HttpError(422, "The restored backup contains broken relationships");
+      if (violations.length) {
+        throw backupError(422, "RESTORED_RELATIONSHIPS_INVALID", "The restored backup contains broken relationships");
+      }
     }).immediate();
     connection.pragma("foreign_keys = ON");
   } finally {
@@ -1071,8 +1159,10 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
   const restoredOwner = currentUser
     ? one<{ id: string }>("SELECT id FROM users WHERE normalized_email = ?", [currentUser.email.trim().toLowerCase()])
     : null;
-  if (!restoredOwner) throw new HttpError(409, "Backup restored, but your previous account is not present. Sign in using credentials stored in the backup.");
-  return { success: true, message: "Database restored. Sign in again to refresh your session." };
+  if (!restoredOwner) {
+    throw backupError(409, "ACCOUNT_MISSING_AFTER_RESTORE", "Backup restored, but your previous account is not present. Sign in using credentials stored in the backup.");
+  }
+  return { success: true, code: "BACKUP_RESTORE_SUCCEEDED" as const };
 }
 
 export function importFingerprintPreview(accountId: string, date: string, amountMinor: number, description: string) {

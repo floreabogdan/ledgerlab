@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import type BetterSqlite3 from "better-sqlite3";
 
 import { ensureDatabase, sqlite } from "@/db";
-import { HttpError } from "@/lib/api-response";
+import { HttpError, type ApiErrorParameters } from "@/lib/api-response";
+import type { MessageKey } from "@/i18n/generated";
+import type { Translator } from "@/i18n/runtime";
 import { isSupportedCurrency, normalizeCurrencyCode } from "@/lib/currencies";
 import {
   convertMinorAtRate,
@@ -53,32 +55,82 @@ export function audit(
     );
 }
 
-const DEFAULT_CATEGORIES = [
-  ["Salary", "income", null, null, "#24735c"],
-  ["Other income", "income", null, null, "#3d8b73"],
-  ["Housing", "expense", "fixed", "essential", "#7656a5"],
-  ["Utilities", "expense", "fixed", "essential", "#4f6f8f"],
-  ["Groceries", "expense", "variable", "essential", "#d0803f"],
-  ["Transport", "expense", "variable", "essential", "#3f7f91"],
-  ["Health", "expense", "variable", "essential", "#b45364"],
-  ["Education", "expense", "variable", "essential", "#5369a5"],
-  ["Dining", "expense", "variable", "discretionary", "#d05f54"],
-  ["Shopping", "expense", "variable", "discretionary", "#a85f91"],
-  ["Entertainment", "expense", "variable", "discretionary", "#85724a"],
-  ["Travel", "expense", "variable", "discretionary", "#487c74"],
-] as const;
+type DefaultCategoryNameKey =
+  | "finance.defaultCategories.salary"
+  | "finance.defaultCategories.otherIncome"
+  | "finance.defaultCategories.housing"
+  | "finance.defaultCategories.utilities"
+  | "finance.defaultCategories.groceries"
+  | "finance.defaultCategories.transport"
+  | "finance.defaultCategories.health"
+  | "finance.defaultCategories.education"
+  | "finance.defaultCategories.dining"
+  | "finance.defaultCategories.shopping"
+  | "finance.defaultCategories.entertainment"
+  | "finance.defaultCategories.travel";
 
-export function createDefaultCategories(userId: string) {
+const DEFAULT_CATEGORY_TEMPLATES = [
+  { nameKey: "finance.defaultCategories.salary", kind: "income", nature: null, priority: null, color: "#24735c" },
+  { nameKey: "finance.defaultCategories.otherIncome", kind: "income", nature: null, priority: null, color: "#3d8b73" },
+  { nameKey: "finance.defaultCategories.housing", kind: "expense", nature: "fixed", priority: "essential", color: "#7656a5" },
+  { nameKey: "finance.defaultCategories.utilities", kind: "expense", nature: "fixed", priority: "essential", color: "#4f6f8f" },
+  { nameKey: "finance.defaultCategories.groceries", kind: "expense", nature: "variable", priority: "essential", color: "#d0803f" },
+  { nameKey: "finance.defaultCategories.transport", kind: "expense", nature: "variable", priority: "essential", color: "#3f7f91" },
+  { nameKey: "finance.defaultCategories.health", kind: "expense", nature: "variable", priority: "essential", color: "#b45364" },
+  { nameKey: "finance.defaultCategories.education", kind: "expense", nature: "variable", priority: "essential", color: "#5369a5" },
+  { nameKey: "finance.defaultCategories.dining", kind: "expense", nature: "variable", priority: "discretionary", color: "#d05f54" },
+  { nameKey: "finance.defaultCategories.shopping", kind: "expense", nature: "variable", priority: "discretionary", color: "#a85f91" },
+  { nameKey: "finance.defaultCategories.entertainment", kind: "expense", nature: "variable", priority: "discretionary", color: "#85724a" },
+  { nameKey: "finance.defaultCategories.travel", kind: "expense", nature: "variable", priority: "discretionary", color: "#487c74" },
+] as const satisfies ReadonlyArray<{
+  nameKey: DefaultCategoryNameKey & MessageKey;
+  kind: "income" | "expense";
+  nature: "fixed" | "variable" | null;
+  priority: "essential" | "discretionary" | null;
+  color: string;
+}>;
+
+export function createDefaultCategories(userId: string, translator: Translator) {
   const statement = database().prepare(
     `INSERT OR IGNORE INTO categories
       (id, user_id, name, kind, spending_nature, spending_priority, color, display_order)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   database().transaction(() => {
-    DEFAULT_CATEGORIES.forEach(([name, kind, nature, priority, color], index) => {
-      statement.run(randomUUID(), userId, name, kind, nature, priority, color, index);
+    DEFAULT_CATEGORY_TEMPLATES.forEach((template, index) => {
+      statement.run(
+        randomUUID(),
+        userId,
+        translator.translate(template.nameKey),
+        template.kind,
+        template.nature,
+        template.priority,
+        template.color,
+        index,
+      );
     });
   })();
+}
+
+type CoreDomainErrorCode =
+  | `ACCOUNT_${string}`
+  | `CATEGORY_${string}`
+  | `TAG_${string}`
+  | `MERCHANT_${string}`
+  | `TRANSACTION_${string}`;
+
+function coreDomainError(
+  status: number,
+  code: CoreDomainErrorCode,
+  message: string,
+  options: { params?: ApiErrorParameters; details?: unknown } = {},
+) {
+  return new HttpError(status, {
+    code,
+    message,
+    params: options.params,
+    details: options.details,
+  });
 }
 
 interface AccountRow {
@@ -135,10 +187,12 @@ interface AccountInput {
 export function createAccount(userId: string, input: AccountInput) {
   const regionalSettings = getUserCalendarContext(userId);
   if (input.openingDate > regionalSettings.today) {
-    throw new HttpError(422, "Account opening date cannot be in the future");
+    throw coreDomainError(422, "ACCOUNT_OPENING_DATE_FUTURE", "Account opening date cannot be in the future");
   }
   const currency = normalizeCurrencyCode(input.currency ?? regionalSettings.currency);
-  if (!isSupportedCurrency(currency)) throw new HttpError(422, "Choose a supported ISO 4217 currency");
+  if (!isSupportedCurrency(currency)) {
+    throw coreDomainError(422, "ACCOUNT_CURRENCY_UNSUPPORTED", "Choose a supported ISO 4217 currency");
+  }
   const id = randomUUID();
   const order = one<{ nextOrder: number }>(
     "SELECT COALESCE(MAX(display_order), -1) + 1 AS nextOrder FROM accounts WHERE user_id = ?",
@@ -169,7 +223,7 @@ export function createAccount(userId: string, input: AccountInput) {
   } catch (error) {
     const message = String(error);
     if (message.includes("accounts_user_name_unique") || message.includes("accounts.user_id, accounts.name")) {
-      throw new HttpError(409, "An account with this name already exists");
+      throw coreDomainError(409, "ACCOUNT_NAME_CONFLICT", "An account with this name already exists");
     }
     throw error;
   }
@@ -179,19 +233,31 @@ export function createAccount(userId: string, input: AccountInput) {
 
 export function updateAccount(userId: string, accountId: string, input: Record<string, unknown>) {
   const previous = one<Record<string, unknown>>("SELECT * FROM accounts WHERE id = ? AND user_id = ?", [accountId, userId]);
-  if (!previous) throw new HttpError(404, "Account not found");
+  if (!previous) throw coreDomainError(404, "ACCOUNT_NOT_FOUND", "Account not found");
   if (input.currency !== undefined) {
-    if (typeof input.currency !== "string") throw new HttpError(422, "Account currency must be an ISO 4217 code");
+    if (typeof input.currency !== "string") {
+      throw coreDomainError(422, "ACCOUNT_CURRENCY_TYPE_INVALID", "Account currency must be an ISO 4217 code");
+    }
     const currency = normalizeCurrencyCode(input.currency);
-    if (!isSupportedCurrency(currency)) throw new HttpError(422, "Choose a supported ISO 4217 currency");
+    if (!isSupportedCurrency(currency)) {
+      throw coreDomainError(422, "ACCOUNT_CURRENCY_UNSUPPORTED", "Choose a supported ISO 4217 currency");
+    }
     if (currency !== normalizeCurrencyCode(String(previous.currency ?? ""))) {
-      throw new HttpError(409, "An account currency cannot be changed after creation; create a new account and transfer the balance instead");
+      throw coreDomainError(
+        409,
+        "ACCOUNT_CURRENCY_IMMUTABLE",
+        "An account currency cannot be changed after creation; create a new account and transfer the balance instead",
+      );
     }
     input = { ...input, currency };
   }
   if (input.openingDate !== undefined) {
-    if (typeof input.openingDate !== "string") throw new HttpError(422, "Account opening date must be a date");
-    if (input.openingDate > getUserCalendarContext(userId).today) throw new HttpError(422, "Account opening date cannot be in the future");
+    if (typeof input.openingDate !== "string") {
+      throw coreDomainError(422, "ACCOUNT_OPENING_DATE_TYPE_INVALID", "Account opening date must be a date");
+    }
+    if (input.openingDate > getUserCalendarContext(userId).today) {
+      throw coreDomainError(422, "ACCOUNT_OPENING_DATE_FUTURE", "Account opening date cannot be in the future");
+    }
   }
 
   const mapping: Record<string, string> = {
@@ -343,30 +409,34 @@ function storedCategory(userId: string, categoryId: string) {
 function normalizeCategoryName(name: string) {
   const normalized = name.trim().replace(/\s+/g, " ");
   if (!normalized || normalized.length > 80) {
-    throw new HttpError(422, "Category name must be between 1 and 80 characters");
+    throw coreDomainError(422, "CATEGORY_NAME_INVALID", "Category name must be between 1 and 80 characters");
   }
   return normalized;
 }
 
 function assertCategoryKind(kind: string): asserts kind is CategoryKind {
   if (!(CATEGORY_KINDS as readonly string[]).includes(kind)) {
-    throw new HttpError(422, "Choose an income, expense, or income-and-expense category type");
+    throw coreDomainError(
+      422,
+      "CATEGORY_KIND_INVALID",
+      "Choose an income, expense, or income-and-expense category type",
+    );
   }
 }
 
 function assertCategoryAttributes(input: CategoryInput | CategoryUpdateInput) {
   if (input.kind !== undefined) assertCategoryKind(input.kind);
   if (input.classification !== undefined && !["fixed", "variable", "essential", "discretionary"].includes(input.classification)) {
-    throw new HttpError(422, "Choose a valid category classification");
+    throw coreDomainError(422, "CATEGORY_CLASSIFICATION_INVALID", "Choose a valid category classification");
   }
   if (input.spendingNature !== undefined && input.spendingNature !== null && !["fixed", "variable"].includes(input.spendingNature)) {
-    throw new HttpError(422, "Choose fixed or variable spending");
+    throw coreDomainError(422, "CATEGORY_SPENDING_NATURE_INVALID", "Choose fixed or variable spending");
   }
   if (input.spendingPriority !== undefined && input.spendingPriority !== null && !["essential", "discretionary"].includes(input.spendingPriority)) {
-    throw new HttpError(422, "Choose essential or discretionary spending");
+    throw coreDomainError(422, "CATEGORY_SPENDING_PRIORITY_INVALID", "Choose essential or discretionary spending");
   }
   if (input.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(input.color)) {
-    throw new HttpError(422, "Category colour must be a six-digit hex value");
+    throw coreDomainError(422, "CATEGORY_COLOR_INVALID", "Category colour must be a six-digit hex value");
   }
 }
 
@@ -391,8 +461,10 @@ function categoryDepth(userId: string, categoryId: string) {
      SELECT MAX(depth) AS depth, MAX(cycle) AS cycle FROM ancestors`,
     [categoryId, userId, userId],
   );
-  if (!result) throw new HttpError(422, "Parent category not found");
-  if (result.cycle || result.depth > MAX_CATEGORY_DEPTH) throw new HttpError(422, "The category hierarchy is invalid");
+  if (!result) throw coreDomainError(422, "CATEGORY_PARENT_NOT_FOUND", "Parent category not found");
+  if (result.cycle || result.depth > MAX_CATEGORY_DEPTH) {
+    throw coreDomainError(422, "CATEGORY_HIERARCHY_INVALID", "The category hierarchy is invalid");
+  }
   return result.depth;
 }
 
@@ -413,8 +485,10 @@ function categorySubtreeHeight(userId: string, categoryId: string) {
      SELECT MAX(depth) AS height, MAX(cycle) AS cycle FROM descendants`,
     [categoryId, userId, userId],
   );
-  if (!result) throw new HttpError(404, "Category not found");
-  if (result.cycle || result.height > MAX_CATEGORY_DEPTH) throw new HttpError(422, "The category hierarchy is invalid");
+  if (!result) throw coreDomainError(404, "CATEGORY_NOT_FOUND", "Category not found");
+  if (result.cycle || result.height > MAX_CATEGORY_DEPTH) {
+    throw coreDomainError(422, "CATEGORY_HIERARCHY_INVALID", "The category hierarchy is invalid");
+  }
   return result.height;
 }
 
@@ -427,15 +501,30 @@ function assertCategoryParent(
   allowArchivedParent = false,
 ) {
   if (!parentId) {
-    if (subtreeHeight > MAX_CATEGORY_DEPTH) throw new HttpError(422, "Category nesting is too deep");
+    if (subtreeHeight > MAX_CATEGORY_DEPTH) {
+      throw coreDomainError(422, "CATEGORY_NESTING_TOO_DEEP", "Category nesting is too deep");
+    }
     return;
   }
-  if (parentId === movingCategoryId) throw new HttpError(422, "A category cannot be its own parent");
+  if (parentId === movingCategoryId) {
+    throw coreDomainError(422, "CATEGORY_SELF_PARENT_FORBIDDEN", "A category cannot be its own parent");
+  }
   const parent = storedCategory(userId, parentId);
-  if (!parent) throw new HttpError(422, "Parent category not found");
-  if (parent.archivedAt && !allowArchivedParent) throw new HttpError(422, "Restore the parent category before nesting under it");
+  if (!parent) throw coreDomainError(422, "CATEGORY_PARENT_NOT_FOUND", "Parent category not found");
+  if (parent.archivedAt && !allowArchivedParent) {
+    throw coreDomainError(
+      422,
+      "CATEGORY_PARENT_RESTORE_REQUIRED",
+      "Restore the parent category before nesting under it",
+    );
+  }
   if (!parentAllowsKind(parent.kind, childKind)) {
-    throw new HttpError(422, `A ${childKind} category cannot be nested under a ${parent.kind} category`);
+    throw coreDomainError(
+      422,
+      "CATEGORY_PARENT_KIND_INCOMPATIBLE",
+      `A ${childKind} category cannot be nested under a ${parent.kind} category`,
+      { params: { childKind, parentKind: parent.kind } },
+    );
   }
   if (movingCategoryId) {
     const descendant = one<{ id: string }>(
@@ -449,11 +538,22 @@ function assertCategoryParent(
        SELECT id FROM descendants WHERE id = ? LIMIT 1`,
       [movingCategoryId, userId, userId, parentId],
     );
-    if (descendant) throw new HttpError(422, "A category cannot be moved inside one of its descendants");
+    if (descendant) {
+      throw coreDomainError(
+        422,
+        "CATEGORY_DESCENDANT_PARENT_FORBIDDEN",
+        "A category cannot be moved inside one of its descendants",
+      );
+    }
   }
   const resultingDepth = categoryDepth(userId, parentId) + 1 + subtreeHeight;
   if (resultingDepth > MAX_CATEGORY_DEPTH) {
-    throw new HttpError(422, `Categories can be nested up to ${MAX_CATEGORY_DEPTH + 1} levels deep`);
+    throw coreDomainError(
+      422,
+      "CATEGORY_DEPTH_LIMIT_EXCEEDED",
+      `Categories can be nested up to ${MAX_CATEGORY_DEPTH + 1} levels deep`,
+      { params: { maxLevels: MAX_CATEGORY_DEPTH + 1 } },
+    );
   }
 }
 
@@ -465,7 +565,9 @@ function assertUniqueCategoryName(userId: string, name: string, parentId: string
         ${exceptId ? "AND id <> ?" : ""}`,
     exceptId ? [userId, name, parentId, parentId, exceptId] : [userId, name, parentId, parentId],
   );
-  if (duplicate) throw new HttpError(409, "A category with this name already exists at that level");
+  if (duplicate) {
+    throw coreDomainError(409, "CATEGORY_NAME_CONFLICT", "A category with this name already exists at that level");
+  }
 }
 
 export function createCategory(userId: string, input: CategoryInput) {
@@ -493,7 +595,7 @@ export function createCategory(userId: string, input: CategoryInput) {
 
 export function updateCategory(userId: string, categoryId: string, input: CategoryUpdateInput) {
   const previous = storedCategory(userId, categoryId);
-  if (!previous) throw new HttpError(404, "Category not found");
+  if (!previous) throw coreDomainError(404, "CATEGORY_NOT_FOUND", "Category not found");
   assertCategoryAttributes(input);
 
   const name = input.name === undefined ? previous.name : normalizeCategoryName(input.name);
@@ -524,7 +626,11 @@ export function updateCategory(userId: string, categoryId: string, input: Catego
     [userId, categoryId, userId, kind, kind],
   );
   if (incompatibleChild) {
-    throw new HttpError(422, "Change or move the incompatible subcategories before changing this category type");
+    throw coreDomainError(
+      422,
+      "CATEGORY_KIND_CHANGE_BLOCKED",
+      "Change or move the incompatible subcategories before changing this category type",
+    );
   }
 
   const nature = input.spendingNature !== undefined
@@ -551,7 +657,7 @@ export function updateCategory(userId: string, categoryId: string, input: Catego
 
 export function setCategoryArchived(userId: string, categoryId: string, archived: boolean) {
   const previous = storedCategory(userId, categoryId);
-  if (!previous) throw new HttpError(404, "Category not found");
+  if (!previous) throw coreDomainError(404, "CATEGORY_NOT_FOUND", "Category not found");
   if (archived) {
     const activeDescendant = one<{ id: string }>(
       `WITH RECURSIVE descendants(id, lineage) AS (
@@ -565,7 +671,13 @@ export function setCategoryArchived(userId: string, categoryId: string, archived
         WHERE c.archived_at IS NULL LIMIT 1`,
       [userId, categoryId, userId],
     );
-    if (activeDescendant) throw new HttpError(422, "Archive or move the active subcategories before archiving their parent");
+    if (activeDescendant) {
+      throw coreDomainError(
+        422,
+        "CATEGORY_ARCHIVE_CHILDREN_FIRST",
+        "Archive or move the active subcategories before archiving their parent",
+      );
+    }
   }
   if (!archived && previous.parentId) {
     const unavailableAncestor = one<{ id: string }>(
@@ -590,7 +702,9 @@ export function setCategoryArchived(userId: string, categoryId: string, archived
        LIMIT 1`,
       [previous.parentId, userId, userId, userId],
     );
-    if (unavailableAncestor) throw new HttpError(422, "Restore the parent categories first");
+    if (unavailableAncestor) {
+      throw coreDomainError(422, "CATEGORY_RESTORE_PARENTS_FIRST", "Restore the parent categories first");
+    }
   }
   const archivedAt = archived ? new Date().toISOString() : null;
   database().prepare("UPDATE categories SET archived_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
@@ -623,8 +737,12 @@ export function listTags(userId: string, includeArchived = false): ManagedTagRow
 
 function cleanTagName(value: string) {
   const name = value.trim().replace(/\s+/g, " ");
-  if (!name || name.length > 40) throw new HttpError(422, "Tag name must be between 1 and 40 characters");
-  if (name.includes(",")) throw new HttpError(422, "Tag names cannot contain commas because commas separate tags");
+  if (!name || name.length > 40) {
+    throw coreDomainError(422, "TAG_NAME_INVALID", "Tag name must be between 1 and 40 characters");
+  }
+  if (name.includes(",")) {
+    throw coreDomainError(422, "TAG_COMMA_FORBIDDEN", "Tag names cannot contain commas because commas separate tags");
+  }
   return name;
 }
 
@@ -635,7 +753,14 @@ function assertTagNameAvailable(userId: string, name: string, exceptId?: string)
     exceptId ? [userId, name, exceptId] : [userId, name],
   );
   if (duplicate) {
-    throw new HttpError(409, duplicate.archivedAt ? "An archived tag already uses this name; restore it instead" : "This tag already exists");
+    if (duplicate.archivedAt) {
+      throw coreDomainError(
+        409,
+        "TAG_ARCHIVED_NAME_CONFLICT",
+        "An archived tag already uses this name; restore it instead",
+      );
+    }
+    throw coreDomainError(409, "TAG_NAME_CONFLICT", "This tag already exists");
   }
 }
 
@@ -654,7 +779,7 @@ export function updateTag(userId: string, tagId: string, input: { name: string; 
     "SELECT id, name, color, archived_at AS archivedAt, 0 AS usageCount FROM tags WHERE id = ? AND user_id = ?",
     [tagId, userId],
   );
-  if (!previous) throw new HttpError(404, "Tag not found");
+  if (!previous) throw coreDomainError(404, "TAG_NOT_FOUND", "Tag not found");
   const name = cleanTagName(input.name);
   assertTagNameAvailable(userId, name, tagId);
   database().prepare("UPDATE tags SET name = ?, color = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
@@ -668,7 +793,7 @@ export function setTagArchived(userId: string, tagId: string, archived: boolean)
     "SELECT id, name, color, archived_at AS archivedAt, 0 AS usageCount FROM tags WHERE id = ? AND user_id = ?",
     [tagId, userId],
   );
-  if (!previous) throw new HttpError(404, "Tag not found");
+  if (!previous) throw coreDomainError(404, "TAG_NOT_FOUND", "Tag not found");
   const archivedAt = archived ? new Date().toISOString() : null;
   database().prepare("UPDATE tags SET archived_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
     .run(archivedAt, tagId, userId);
@@ -712,15 +837,19 @@ export function updateMerchant(
       WHERE m.id = ? AND m.user_id = ?`,
     [merchantId, userId],
   );
-  if (!previous) throw new HttpError(404, "Merchant not found");
+  if (!previous) throw coreDomainError(404, "MERCHANT_NOT_FOUND", "Merchant not found");
   const name = (input.name ?? previous.name).trim().replace(/\s+/g, " ");
-  if (!name || name.length > 120) throw new HttpError(422, "Merchant name must be between 1 and 120 characters");
+  if (!name || name.length > 120) {
+    throw coreDomainError(422, "MERCHANT_NAME_INVALID", "Merchant name must be between 1 and 120 characters");
+  }
   const normalizedName = normalizeMerchant(name);
   const duplicate = one<{ id: string }>(
     "SELECT id FROM merchants WHERE user_id = ? AND normalized_name = ? AND id <> ?",
     [userId, normalizedName, merchantId],
   );
-  if (duplicate) throw new HttpError(409, "Another merchant already uses this name");
+  if (duplicate) {
+    throw coreDomainError(409, "MERCHANT_NAME_CONFLICT", "Another merchant already uses this name");
+  }
   const defaultCategoryId = input.defaultCategoryId === undefined ? previous.defaultCategoryId : input.defaultCategoryId;
   if (defaultCategoryId) {
     assertOwnedCategory(userId, defaultCategoryId, false, "expense");
@@ -737,7 +866,7 @@ export function setMerchantArchived(userId: string, merchantId: string, archived
     "SELECT id, name, default_category_id AS defaultCategoryId, NULL AS defaultCategoryName, archived_at AS archivedAt, 0 AS transactionCount FROM merchants WHERE id = ? AND user_id = ?",
     [merchantId, userId],
   );
-  if (!previous) throw new HttpError(404, "Merchant not found");
+  if (!previous) throw coreDomainError(404, "MERCHANT_NOT_FOUND", "Merchant not found");
   const archivedAt = archived ? new Date().toISOString() : null;
   database().prepare("UPDATE merchants SET archived_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
     .run(archivedAt, merchantId, userId);
@@ -752,13 +881,21 @@ function normalizeMerchant(value: string) {
 function ensureMerchant(userId: string, name?: string | null): string | null {
   if (!name?.trim()) return null;
   const clean = name.trim().replace(/\s+/g, " ");
-  if (clean.length > 120) throw new HttpError(422, "Merchant name must be 120 characters or fewer");
+  if (clean.length > 120) {
+    throw coreDomainError(422, "MERCHANT_NAME_TOO_LONG", "Merchant name must be 120 characters or fewer");
+  }
   const normalized = normalizeMerchant(clean);
   const existing = one<{ id: string; archivedAt: string | null }>(
     "SELECT id, archived_at AS archivedAt FROM merchants WHERE user_id = ? AND normalized_name = ?",
     [userId, normalized],
   );
-  if (existing?.archivedAt) throw new HttpError(422, "This merchant is archived. Restore it before using it on a new entry");
+  if (existing?.archivedAt) {
+    throw coreDomainError(
+      422,
+      "MERCHANT_ARCHIVED",
+      "This merchant is archived. Restore it before using it on a new entry",
+    );
+  }
   if (existing) return existing.id;
   const id = randomUUID();
   database()
@@ -773,7 +910,9 @@ function ensureTag(userId: string, name: string): string {
     "SELECT id, archived_at AS archivedAt FROM tags WHERE user_id = ? AND name = ? COLLATE NOCASE",
     [userId, clean],
   );
-  if (existing?.archivedAt) throw new HttpError(422, `The tag “${clean}” is archived. Restore it before using it`);
+  if (existing?.archivedAt) {
+    throw coreDomainError(422, "TAG_ARCHIVED", `The tag “${clean}” is archived. Restore it before using it`);
+  }
   if (existing) return existing.id;
   const id = randomUUID();
   database().prepare("INSERT INTO tags (id, user_id, name) VALUES (?, ?, ?)").run(id, userId, clean);
@@ -791,7 +930,7 @@ function assertOwnedAccount(userId: string, accountId: string) {
     "SELECT id, currency, type FROM accounts WHERE id = ? AND user_id = ? AND archived_at IS NULL",
     [accountId, userId],
   );
-  if (!account) throw new HttpError(422, "Choose an active account");
+  if (!account) throw coreDomainError(422, "TRANSACTION_ACCOUNT_INVALID", "Choose an active account");
   return account;
 }
 
@@ -805,9 +944,20 @@ function assertOwnedCategory(
     `SELECT id, kind FROM categories WHERE id = ? AND user_id = ? ${allowArchived ? "" : "AND archived_at IS NULL"}`,
     [categoryId, userId],
   );
-  if (!category) throw new HttpError(422, "Choose an active category that belongs to your profile");
+  if (!category) {
+    throw coreDomainError(
+      422,
+      "TRANSACTION_CATEGORY_INVALID",
+      "Choose an active category that belongs to your profile",
+    );
+  }
   if (intendedKind && category.kind !== "both" && category.kind !== intendedKind) {
-    throw new HttpError(422, `Choose an ${intendedKind} category for this transaction`);
+    throw coreDomainError(
+      422,
+      "TRANSACTION_CATEGORY_KIND_INVALID",
+      `Choose an ${intendedKind} category for this transaction`,
+      { params: { kind: intendedKind } },
+    );
   }
   return category;
 }
@@ -817,7 +967,13 @@ function assertOwnedMerchant(userId: string, merchantId: string, allowArchived =
     `SELECT id FROM merchants WHERE id = ? AND user_id = ? ${allowArchived ? "" : "AND archived_at IS NULL"}`,
     [merchantId, userId],
   );
-  if (!merchant) throw new HttpError(422, "Choose a merchant that belongs to your profile");
+  if (!merchant) {
+    throw coreDomainError(
+      422,
+      "TRANSACTION_MERCHANT_INVALID",
+      "Choose a merchant that belongs to your profile",
+    );
+  }
   return merchant.id;
 }
 
@@ -828,7 +984,13 @@ function assertOwnedPlannedOccurrence(userId: string, occurrenceId: string) {
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(422, "Choose a planned-payment occurrence that belongs to your profile");
+  if (!occurrence) {
+    throw coreDomainError(
+      422,
+      "TRANSACTION_PLANNED_OCCURRENCE_INVALID",
+      "Choose a planned-payment occurrence that belongs to your profile",
+    );
+  }
 }
 
 export interface TransactionInput {
@@ -870,27 +1032,47 @@ function createTransactionInternal(
   options: TransactionPostingOptions,
 ) {
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new HttpError(422, "Transaction amount must be a positive integer in minor units");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_AMOUNT_INVALID",
+      "Transaction amount must be a positive integer in minor units",
+    );
   }
   const status = input.status ?? "cleared";
   const source = assertOwnedAccount(userId, input.accountId);
   const destination = input.kind === "transfer" && input.transferAccountId
     ? assertOwnedAccount(userId, input.transferAccountId)
     : null;
-  if (input.kind === "transfer" && !destination) throw new HttpError(422, "Choose a destination account");
-  if (destination?.id === source.id) throw new HttpError(422, "Transfer accounts must be different");
+  if (input.kind === "transfer" && !destination) {
+    throw coreDomainError(422, "TRANSACTION_DESTINATION_ACCOUNT_REQUIRED", "Choose a destination account");
+  }
+  if (destination?.id === source.id) {
+    throw coreDomainError(422, "TRANSACTION_TRANSFER_ACCOUNTS_SAME", "Transfer accounts must be different");
+  }
   if (
     input.kind === "transfer"
     && !options.allowLiabilityTransfer
     && [source.type, destination?.type].some((type) => type === "loan" || type === "credit_card")
   ) {
-    throw new HttpError(422, "Use the dedicated loan or credit-card workflow for liability transfers");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_LIABILITY_TRANSFER_WORKFLOW_REQUIRED",
+      "Use the dedicated loan or credit-card workflow for liability transfers",
+    );
   }
   if (input.kind === "adjustment" && (source.type === "loan" || source.type === "credit_card")) {
-    throw new HttpError(422, "Use the dedicated loan or credit-card workflow to reconcile a liability balance");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_LIABILITY_ADJUSTMENT_WORKFLOW_REQUIRED",
+      "Use the dedicated loan or credit-card workflow to reconcile a liability balance",
+    );
   }
   if (source.type === "loan" && input.kind !== "transfer" && input.kind !== "adjustment") {
-    throw new HttpError(422, "Use the loan payment workflow so principal, interest, and fees are classified correctly");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_LOAN_PAYMENT_WORKFLOW_REQUIRED",
+      "Use the loan payment workflow so principal, interest, and fees are classified correctly",
+    );
   }
   const intendedCategoryKind = input.kind === "refund"
     ? "expense"
@@ -898,7 +1080,11 @@ function createTransactionInternal(
       ? input.adjustmentSign === -1 ? "expense" : "income"
       : input.kind === "income" || input.kind === "expense" ? input.kind : undefined;
   if (input.kind === "transfer" && input.categoryId) {
-    throw new HttpError(422, "Transfers cannot be assigned to income or expense categories");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_TRANSFER_CATEGORY_FORBIDDEN",
+      "Transfers cannot be assigned to income or expense categories",
+    );
   }
   if (input.categoryId) {
     assertOwnedCategory(userId, input.categoryId, options.allowArchivedMetadata, intendedCategoryKind);
@@ -907,18 +1093,30 @@ function createTransactionInternal(
     let splitTotal = 0n;
     for (const split of input.splits) {
       if (!Number.isSafeInteger(split.amountMinor) || split.amountMinor === 0) {
-        throw new HttpError(422, "Every split amount must be a non-zero integer in minor units");
+        throw coreDomainError(
+          422,
+          "TRANSACTION_SPLIT_AMOUNT_INVALID",
+          "Every split amount must be a non-zero integer in minor units",
+        );
       }
       assertOwnedCategory(userId, split.categoryId, options.allowArchivedMetadata, intendedCategoryKind);
       splitTotal += BigInt(Math.abs(split.amountMinor));
     }
     if (splitTotal !== BigInt(input.amountMinor)) {
-      throw new HttpError(422, "Split amounts must add up to the transaction amount");
+      throw coreDomainError(
+        422,
+        "TRANSACTION_SPLIT_TOTAL_MISMATCH",
+        "Split amounts must add up to the transaction amount",
+      );
     }
   }
   if (input.plannedOccurrenceId) assertOwnedPlannedOccurrence(userId, input.plannedOccurrenceId);
   if (input.date.slice(0, 10) > getUserCalendarContext(userId).today) {
-    throw new HttpError(422, "Transactions cannot be dated in the future; use Planned Payments for future cash movements");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_DATE_FUTURE",
+      "Transactions cannot be dated in the future; use Planned Payments for future cash movements",
+    );
   }
   const transferFx = destination
     ? validateTransferFxForPosting(
@@ -951,7 +1149,9 @@ function createTransactionInternal(
     [userId, duplicateFingerprint],
   );
   if (duplicate && !input.duplicateConfirmed) {
-    throw new HttpError(409, "This looks like a duplicate transaction", { duplicateId: duplicate.id });
+    throw coreDomainError(409, "TRANSACTION_DUPLICATE", "This looks like a duplicate transaction", {
+      details: { duplicateId: duplicate.id },
+    });
   }
 
   const primaryId = randomUUID();
@@ -1113,13 +1313,21 @@ export interface TransactionFilters {
 function transactionFilter(userId: string, filters: TransactionFilters) {
   const hasAmountFilter = filters.minMinor !== undefined || filters.maxMinor !== undefined;
   if (hasAmountFilter && !filters.accountId) {
-    throw new HttpError(422, "Choose one account before filtering by amount; native account currencies cannot be compared directly");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_AMOUNT_FILTER_ACCOUNT_REQUIRED",
+      "Choose one account before filtering by amount; native account currencies cannot be compared directly",
+    );
   }
   if (hasAmountFilter && !one<{ id: string }>(
     "SELECT id FROM accounts WHERE id = ? AND user_id = ?",
     [filters.accountId as string, userId],
   )) {
-    throw new HttpError(422, "Choose an account that belongs to your profile before filtering by amount");
+    throw coreDomainError(
+      422,
+      "TRANSACTION_AMOUNT_FILTER_ACCOUNT_INVALID",
+      "Choose an account that belongs to your profile before filtering by amount",
+    );
   }
   const where = ["t.user_id = ?"];
   const params: SqlValue[] = [userId];
@@ -1366,12 +1574,20 @@ function voidTransactionInternal(userId: string, transactionId: string, allowWor
       WHERE t.id = ? AND t.user_id = ? AND t.voided_at IS NULL`,
     [transactionId, userId],
   );
-  if (!transaction) throw new HttpError(404, "Transaction not found");
+  if (!transaction) throw coreDomainError(404, "TRANSACTION_NOT_FOUND", "Transaction not found");
   if (!allowWorkflowLinked && (transaction.plannedOccurrenceId || transaction.plannedLink)) {
-    throw new HttpError(409, "Use planned-payment undo so the occurrence and actual transaction stay reconciled");
+    throw coreDomainError(
+      409,
+      "TRANSACTION_PLANNED_UNDO_REQUIRED",
+      "Use planned-payment undo so the occurrence and actual transaction stay reconciled",
+    );
   }
   if (!allowWorkflowLinked && transaction.liabilityLink) {
-    throw new HttpError(409, "Use liability-payment undo so the debt ledger and transaction stay reconciled");
+    throw coreDomainError(
+      409,
+      "TRANSACTION_LIABILITY_UNDO_REQUIRED",
+      "Use liability-payment undo so the debt ledger and transaction stay reconciled",
+    );
   }
   return database().transaction(() => {
     const now = new Date().toISOString();
@@ -1401,10 +1617,16 @@ export function clearPendingTransaction(userId: string, transactionId: string) {
        FROM transactions WHERE id = ? AND user_id = ? AND voided_at IS NULL`,
     [transactionId, userId],
   );
-  if (!transaction) throw new HttpError(404, "Transaction not found");
-  if (transaction.status !== "pending") throw new HttpError(409, "Only pending transactions can be cleared");
+  if (!transaction) throw coreDomainError(404, "TRANSACTION_NOT_FOUND", "Transaction not found");
+  if (transaction.status !== "pending") {
+    throw coreDomainError(409, "TRANSACTION_PENDING_REQUIRED", "Only pending transactions can be cleared");
+  }
   if (transaction.occurredAt.slice(0, 10) > getUserCalendarContext(userId).today) {
-    throw new HttpError(409, "A pending transaction cannot be cleared before its transaction date");
+    throw coreDomainError(
+      409,
+      "TRANSACTION_CLEAR_DATE_FUTURE",
+      "A pending transaction cannot be cleared before its transaction date",
+    );
   }
   return database().transaction(() => {
     const rows = transaction.transferGroupId
@@ -1414,7 +1636,11 @@ export function clearPendingTransaction(userId: string, transactionId: string) {
         )
       : [{ id: transaction.id }];
     if (transaction.transferGroupId && rows.length !== 2) {
-      throw new HttpError(409, "This transfer is incomplete and cannot be cleared safely");
+      throw coreDomainError(
+        409,
+        "TRANSACTION_TRANSFER_INCOMPLETE",
+        "This transfer is incomplete and cannot be cleared safely",
+      );
     }
     const ids = rows.map((row) => row.id);
     const placeholders = ids.map(() => "?").join(", ");
@@ -1510,7 +1736,12 @@ export function materializePlannedOccurrences(userId: string, throughDate: strin
       ) {
         insert.run(randomUUID(), rule.paymentId, cursor, rule.amountMinor);
         const next = addRecurrence(cursor, rule.frequency, rule.interval, desiredDay);
-        if (next <= cursor) throw new HttpError(422, "Recurring payment rules must advance to a later date");
+        if (next <= cursor) {
+          throw new HttpError(422, {
+            code: "PLANNING_RECURRENCE_DID_NOT_ADVANCE",
+            message: "Recurring payment rules must advance to a later date",
+          });
+        }
         cursor = next;
         count += 1;
         generatedThisRun += 1;
@@ -1543,13 +1774,21 @@ interface PlannedInput {
 
 export function createPlannedPayment(userId: string, input: PlannedInput) {
   if (input.status && !["planned", "scheduled"].includes(input.status)) {
-    throw new HttpError(422, "New planned payments must start as planned or scheduled");
+    throw new HttpError(422, {
+      code: "PLANNING_INITIAL_STATUS_INVALID",
+      message: "New planned payments must start as planned or scheduled",
+    });
   }
   const account = input.accountId ? assertOwnedAccount(userId, input.accountId) : undefined;
   if (input.categoryId) assertOwnedCategory(userId, input.categoryId, false, input.type ?? "expense");
   const regionalSettings = getUserRegionalSettings(userId);
   const currency = normalizeCurrencyCode(input.currency ?? account?.currency ?? regionalSettings.currency);
-  if (!isSupportedCurrency(currency)) throw new HttpError(422, "Choose a supported ISO 4217 planned-payment currency");
+  if (!isSupportedCurrency(currency)) {
+    throw new HttpError(422, {
+      code: "PLANNING_CURRENCY_INVALID",
+      message: "Choose a supported ISO 4217 planned-payment currency",
+    });
+  }
   const paymentId = randomUUID();
   const occurrenceId = randomUUID();
   const result = database().transaction(() => {
@@ -1707,11 +1946,19 @@ function plannedOccurrencePaymentCurrencies(userId: string, occurrenceId: string
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(404, "Planned payment not found");
+  if (!occurrence) {
+    throw new HttpError(404, {
+      code: "PLANNING_OCCURRENCE_NOT_FOUND",
+      message: "Planned payment not found",
+    });
+  }
   const account = assertOwnedAccount(userId, accountId);
   const plannedCurrency = normalizeCurrencyCode(occurrence.currency);
   if (!isSupportedCurrency(plannedCurrency)) {
-    throw new HttpError(422, "The planned payment has an unsupported currency");
+    throw new HttpError(422, {
+      code: "PLANNING_STORED_CURRENCY_UNSUPPORTED",
+      message: "The planned payment has an unsupported currency",
+    });
   }
   return {
     plannedCurrency,
@@ -1731,11 +1978,21 @@ export async function preparePlannedOccurrencePayment(
 ): Promise<PlannedOccurrencePaymentInput & { appliedAmountMinor: number }> {
   const context = plannedOccurrencePaymentCurrencies(userId, occurrenceId, input.accountId);
   if (context.plannedCurrency !== context.accountCurrency && input.appliedAmountMinor == null) {
-    throw new HttpError(422, `Enter the amount applied in ${context.plannedCurrency} as well as the account amount in ${context.accountCurrency}`);
+    throw new HttpError(422, {
+      code: "PLANNING_CROSS_CURRENCY_AMOUNTS_REQUIRED",
+      message: `Enter the amount applied in ${context.plannedCurrency} as well as the account amount in ${context.accountCurrency}`,
+      params: {
+        plannedCurrency: context.plannedCurrency,
+        accountCurrency: context.accountCurrency,
+      },
+    });
   }
   const appliedAmountMinor = input.appliedAmountMinor ?? input.amountMinor;
   if (!Number.isSafeInteger(appliedAmountMinor) || appliedAmountMinor <= 0) {
-    throw new HttpError(422, "Applied planned amount must be a positive integer in minor units");
+    throw new HttpError(422, {
+      code: "PLANNING_APPLIED_AMOUNT_INVALID",
+      message: "Applied planned amount must be a positive integer in minor units",
+    });
   }
   const preparedFx = await prepareTransactionFx(
     userId,
@@ -1786,35 +2043,71 @@ export function payPlannedOccurrence(
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(404, "Planned payment not found");
-  if (!occurrence.active || occurrence.archivedAt) {
-    throw new HttpError(409, "Restore this planned payment before recording an actual payment");
+  if (!occurrence) {
+    throw new HttpError(404, {
+      code: "PLANNING_OCCURRENCE_NOT_FOUND",
+      message: "Planned payment not found",
+    });
   }
-  if (occurrence.status === "paid") throw new HttpError(409, "This planned payment is already paid. Undo it before recording a replacement");
+  if (!occurrence.active || occurrence.archivedAt) {
+    throw new HttpError(409, {
+      code: "PLANNING_PAYMENT_RESTORE_REQUIRED",
+      message: "Restore this planned payment before recording an actual payment",
+    });
+  }
+  if (occurrence.status === "paid") {
+    throw new HttpError(409, {
+      code: "PLANNING_OCCURRENCE_ALREADY_PAID",
+      message: "This planned payment is already paid. Undo it before recording a replacement",
+    });
+  }
   if (["skipped", "cancelled"].includes(occurrence.status)) {
-    throw new HttpError(409, `A ${occurrence.status} payment cannot be paid until it is restored`);
+    throw new HttpError(409, {
+      code: "PLANNING_OCCURRENCE_STATUS_RESTORE_REQUIRED",
+      message: `A ${occurrence.status} payment cannot be paid until it is restored`,
+      params: { status: occurrence.status },
+    });
   }
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new HttpError(422, "Account amount must be a positive integer in minor units");
+    throw new HttpError(422, {
+      code: "PLANNING_ACCOUNT_AMOUNT_INVALID",
+      message: "Account amount must be a positive integer in minor units",
+    });
   }
   const account = assertOwnedAccount(userId, input.accountId);
   const accountCurrency = normalizeCurrencyCode(account.currency);
   const plannedCurrency = normalizeCurrencyCode(occurrence.currency);
   if (!isSupportedCurrency(plannedCurrency)) {
-    throw new HttpError(422, "The planned payment has an unsupported currency");
+    throw new HttpError(422, {
+      code: "PLANNING_STORED_CURRENCY_UNSUPPORTED",
+      message: "The planned payment has an unsupported currency",
+    });
   }
   const appliedAmountMinor = input.appliedAmountMinor ?? input.amountMinor;
   if (!Number.isSafeInteger(appliedAmountMinor) || appliedAmountMinor <= 0) {
-    throw new HttpError(422, "Applied planned amount must be a positive integer in minor units");
+    throw new HttpError(422, {
+      code: "PLANNING_APPLIED_AMOUNT_INVALID",
+      message: "Applied planned amount must be a positive integer in minor units",
+    });
   }
   if (accountCurrency !== plannedCurrency && input.appliedAmountMinor == null) {
-    throw new HttpError(422, `Enter the amount applied in ${plannedCurrency} as well as the account amount in ${accountCurrency}`);
+    throw new HttpError(422, {
+      code: "PLANNING_CROSS_CURRENCY_AMOUNTS_REQUIRED",
+      message: `Enter the amount applied in ${plannedCurrency} as well as the account amount in ${accountCurrency}`,
+      params: { plannedCurrency, accountCurrency },
+    });
   }
   if (input.originalAmountMinor != null && input.originalAmountMinor !== appliedAmountMinor) {
-    throw new HttpError(422, "The prepared original amount does not match the amount applied to the planned payment");
+    throw new HttpError(422, {
+      code: "PLANNING_PREPARED_AMOUNT_MISMATCH",
+      message: "The prepared original amount does not match the amount applied to the planned payment",
+    });
   }
   if (input.originalCurrency && normalizeCurrencyCode(input.originalCurrency) !== plannedCurrency) {
-    throw new HttpError(422, "The prepared original currency does not match the planned payment currency");
+    throw new HttpError(422, {
+      code: "PLANNING_PREPARED_CURRENCY_MISMATCH",
+      message: "The prepared original currency does not match the planned payment currency",
+    });
   }
 
   return database().transaction(() => {
@@ -1832,7 +2125,7 @@ export function payPlannedOccurrence(
       date: input.date,
       categoryId: occurrence.categoryId,
       merchant: occurrence.merchant,
-      note: input.note ?? `Paid from plan: ${occurrence.title}`,
+      note: input.note ?? occurrence.title,
       duplicateConfirmed: true,
       plannedOccurrenceId: occurrence.id,
     }, occurrence.merchantId);
@@ -1843,7 +2136,10 @@ export function payPlannedOccurrence(
       .run(occurrence.id, transaction.id, appliedAmountMinor);
     const cumulativeValue = BigInt(occurrence.paidAmountMinor) + BigInt(appliedAmountMinor);
     if (cumulativeValue > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new HttpError(422, "Cumulative planned payments exceed the safe integer range");
+      throw new HttpError(422, {
+        code: "PLANNING_CUMULATIVE_AMOUNT_TOO_LARGE",
+        message: "Cumulative planned payments exceed the safe integer range",
+      });
     }
     const cumulative = Number(cumulativeValue);
     const status = cumulative < occurrence.expectedAmountMinor ? "scheduled" : "paid";
@@ -1884,9 +2180,17 @@ export function skipPlannedOccurrence(userId: string, occurrenceId: string, reas
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(404, "Planned payment not found");
+  if (!occurrence) {
+    throw new HttpError(404, {
+      code: "PLANNING_OCCURRENCE_NOT_FOUND",
+      message: "Planned payment not found",
+    });
+  }
   if (occurrence.paidAmountMinor > 0 || occurrence.linkedPayments > 0) {
-    throw new HttpError(409, "Undo recorded payments before skipping this occurrence");
+    throw new HttpError(409, {
+      code: "PLANNING_PAYMENTS_UNDO_REQUIRED_BEFORE_SKIP",
+      message: "Undo recorded payments before skipping this occurrence",
+    });
   }
   database()
     .prepare("UPDATE planned_payment_occurrences SET status = 'skipped', skipped_at = ?, notes = COALESCE(?, notes), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -1903,12 +2207,30 @@ export function cancelPlannedOccurrence(userId: string, occurrenceId: string, re
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(404, "Planned payment not found");
-  if (occurrence.paidAmountMinor > 0 || occurrence.linkedPayments > 0 || occurrence.status === "paid") {
-    throw new HttpError(409, "Undo recorded payments before cancelling this occurrence");
+  if (!occurrence) {
+    throw new HttpError(404, {
+      code: "PLANNING_OCCURRENCE_NOT_FOUND",
+      message: "Planned payment not found",
+    });
   }
-  if (occurrence.status === "cancelled") throw new HttpError(409, "This occurrence is already cancelled");
-  if (occurrence.status === "skipped") throw new HttpError(409, "Undo the skipped occurrence before cancelling it");
+  if (occurrence.paidAmountMinor > 0 || occurrence.linkedPayments > 0 || occurrence.status === "paid") {
+    throw new HttpError(409, {
+      code: "PLANNING_PAYMENTS_UNDO_REQUIRED_BEFORE_CANCEL",
+      message: "Undo recorded payments before cancelling this occurrence",
+    });
+  }
+  if (occurrence.status === "cancelled") {
+    throw new HttpError(409, {
+      code: "PLANNING_OCCURRENCE_ALREADY_CANCELLED",
+      message: "This occurrence is already cancelled",
+    });
+  }
+  if (occurrence.status === "skipped") {
+    throw new HttpError(409, {
+      code: "PLANNING_SKIP_UNDO_REQUIRED_BEFORE_CANCEL",
+      message: "Undo the skipped occurrence before cancelling it",
+    });
+  }
   database().prepare(
     `UPDATE planned_payment_occurrences
         SET status = 'cancelled', cancelled_at = ?, notes = COALESCE(?, notes), updated_at = CURRENT_TIMESTAMP
@@ -1925,7 +2247,12 @@ export function undoPlannedOccurrence(userId: string, occurrenceId: string) {
       WHERE o.id = ? AND p.user_id = ?`,
     [occurrenceId, userId],
   );
-  if (!occurrence) throw new HttpError(404, "Planned payment not found");
+  if (!occurrence) {
+    throw new HttpError(404, {
+      code: "PLANNING_OCCURRENCE_NOT_FOUND",
+      message: "Planned payment not found",
+    });
+  }
   return database().transaction(() => {
     const links = all<{ transactionId: string }>(
       "SELECT transaction_id AS transactionId FROM planned_payment_transactions WHERE occurrence_id = ?",
@@ -1956,7 +2283,12 @@ export function archivePlannedPayment(userId: string, plannedPaymentId: string, 
   const result = database()
     .prepare("UPDATE planned_payments SET archived_at = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
     .run(archived ? new Date().toISOString() : null, archived ? 0 : 1, plannedPaymentId, userId);
-  if (!result.changes) throw new HttpError(404, "Planned payment not found");
+  if (!result.changes) {
+    throw new HttpError(404, {
+      code: "PLANNING_PAYMENT_NOT_FOUND",
+      message: "Planned payment not found",
+    });
+  }
   audit(userId, "planned_payment", plannedPaymentId, archived ? "archive" : "restore");
   return { success: true };
 }

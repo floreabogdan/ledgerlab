@@ -1,0 +1,58 @@
+metadata:
+  loginTitle: Sign in
+  registerTitle: Create account
+layout:
+  homeAria: LedgerLab home
+  footnote: Local workspace · multi-currency · your regional settings
+  aboutAria: About LedgerLab
+  eyebrow: A clearer monthly picture
+  headline: Actual money, future obligations, one calm workspace.
+  description: Track what happened, prepare what comes next, and keep projections clearly separated from real balances.
+  previewAria: Empty workspace preview
+  preview:
+    cashLabel: Cash available
+    cashValue: $0.00
+    dueLabel: Due soon
+    paymentCount: "{count, plural, =0 {No payments} one {# payment} other {# payments}}"
+    forecastLabel: Month forecast
+    notPlanned: Not planned
+login:
+  title: Welcome back
+  subtitle: Sign in to continue to your personal finance dashboard.
+  submit: Sign in
+  switchPrompt: New to LedgerLab?
+  switchAction: Create an account
+register:
+  title: Create your workspace
+  subtitle: Start with an empty, private ledger. You can add optional demo data later.
+  submit: Create workspace
+  switchPrompt: Already have an account?
+  switchAction: Sign in
+registration:
+  checking: Checking whether this installation accepts new accounts…
+  closed: Registration is closed for this installation. Ask its administrator for access, or sign in with an existing account.
+  unavailable: Registration status could not be checked. Reload the page to try again.
+fields:
+  displayName: Name
+  email: Email address
+  workspaceCurrency: Workspace currency
+  password: Password
+  confirmPassword: Confirm password
+placeholders:
+  displayName: Your name
+  email: you@example.com
+  password: Enter your password
+  confirmPassword: Repeat your password
+workspaceCurrencyHelp: "Used for balances, budgets, and reports. Dates will use {timeZone}."
+passwordHelp: Use at least 10 characters.
+password:
+  show: Show
+  hide: Hide
+validation:
+  nameMinimum: "Enter at least {count} characters."
+  currencyUnsupported: Choose a supported currency.
+  emailInvalid: Enter a valid email address.
+  passwordMinimum: "Password must contain at least {count} characters."
+  passwordsMismatch: Passwords do not match.
+errors:
+  requestFailed: We could not complete that request. Please try again.

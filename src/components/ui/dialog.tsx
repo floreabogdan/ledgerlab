@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { IconButton } from "./button";
+import { useTranslations } from "@/i18n/client";
 
 const focusableSelector = [
   "button:not([disabled]):not([hidden])",
@@ -57,8 +58,9 @@ export function Dialog({
   children,
   footer,
   size = "md",
-  closeLabel = "Close dialog",
+  closeLabel,
 }: DialogProps) {
+  const t = useTranslations();
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -148,7 +150,7 @@ export function Dialog({
             <h2 className="dialog-title" id={titleId}>{title}</h2>
             {description && <p className="dialog-description" id={descriptionId}>{description}</p>}
           </div>
-          <IconButton label={closeLabel} size="sm" onClick={() => onOpenChange(false)}>
+          <IconButton label={closeLabel ?? t("common.controls.dialogClose")} size="sm" onClick={() => onOpenChange(false)}>
             <X size={17} aria-hidden="true" />
           </IconButton>
         </header>
