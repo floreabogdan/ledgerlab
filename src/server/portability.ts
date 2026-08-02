@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Papa from "papaparse";
 
+import { resolveSupportedLanguage } from "@/i18n/language";
 import { HttpError } from "@/lib/api-response";
 import { DEFAULT_CURRENCY, isSupportedCurrency } from "@/lib/currencies";
 import { assertValidTransferPair, type LedgerTransaction } from "@/lib/domain/balances";
@@ -836,7 +837,9 @@ export function exportData(userId: string, format: "csv" | "json") {
       fxRateScale: 100_000_000,
       rowCounts: Object.fromEntries(Object.entries(data).map(([table, rows]) => [table, rows.length])),
       profile: one(
-        "SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone FROM users WHERE id = ?",
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = ?`,
         [userId],
       ),
       data,
@@ -966,15 +969,19 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       throw new HttpError(422, "A full restore must contain exactly one local owner");
     }
     const expectedEmail = currentUser?.email.trim().toLowerCase();
+    const sourceHasUiLanguage = restoreHasColumn("users", "ui_language");
     const sourceOwner = expectedEmail
       ? connection.prepare(
-          "SELECT id, default_currency AS defaultCurrency FROM restoredb.users WHERE normalized_email = ?",
-        ).get(expectedEmail) as { id: string; defaultCurrency: string } | undefined
+          `SELECT id, default_currency AS defaultCurrency,
+                  ${sourceHasUiLanguage ? "ui_language" : "NULL"} AS uiLanguage
+             FROM restoredb.users WHERE normalized_email = ?`,
+        ).get(expectedEmail) as { id: string; defaultCurrency: string; uiLanguage: unknown } | undefined
       : null;
     if (!sourceOwner) {
       throw new HttpError(409, "This backup belongs to a different local owner. The current database was not changed");
     }
     const reportingCurrency = canonicalRestoredCurrency(sourceOwner.defaultCurrency, "reporting");
+    const restoredUiLanguage = resolveSupportedLanguage(sourceOwner.uiLanguage);
     const originalCurrencyCheck = restoreHasColumn("transactions", "original_currency")
       ? `OR (t.original_currency IS NOT NULL AND (
               length(trim(t.original_currency)) <> 3 OR upper(trim(t.original_currency)) GLOB '*[^A-Z]*'
@@ -1037,7 +1044,9 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       for (const table of deletionOrder) connection.exec(`DELETE FROM main.${table}`);
       for (const table of tables) {
         if (!available.has(table)) continue;
-        const columns = sharedTableColumns(table);
+        const columns = sharedTableColumns(table).filter(
+          (column) => table !== "users" || column !== "ui_language",
+        );
         if (!columns.length) continue;
         const columnList = columns.map(quoteIdentifier).join(", ");
         connection.exec(
@@ -1051,6 +1060,8 @@ export function restoreBackup(userId: string, input: { backup: string; confirmat
       if (!restoreHasColumn("month_plans", "currency")) {
         connection.prepare("UPDATE main.month_plans SET currency = ? WHERE user_id = ?").run(reportingCurrency, sourceOwner.id);
       }
+      connection.prepare("UPDATE main.users SET ui_language = ? WHERE id = ?")
+        .run(restoredUiLanguage, sourceOwner.id);
       const violations = connection.pragma("foreign_key_check") as unknown[];
       if (violations.length) throw new HttpError(422, "The restored backup contains broken relationships");
     }).immediate();

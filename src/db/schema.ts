@@ -40,6 +40,7 @@ export const users = sqliteTable(
     normalizedEmail: text("normalized_email").notNull(),
     passwordHash: text("password_hash").notNull(),
     displayName: text("display_name").notNull(),
+    uiLanguage: text("ui_language").notNull().default("en"),
     defaultCurrency: text("default_currency").notNull().default(DEFAULT_CURRENCY),
     locale: text("locale").notNull().default(DEFAULT_LOCALE),
     timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),

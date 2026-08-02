@@ -1,8 +1,10 @@
 "use client";
 
 import { Bell, KeyRound, Save, UserRound } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CurrencyCombobox } from "@/components/ui/currency-combobox";
+import { defaultLanguage, languageManifests } from "@/i18n/generated";
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, DEFAULT_TIME_ZONE } from "@/lib/currencies";
 
 import {
@@ -26,6 +28,8 @@ import ui from "../_components/pages.module.css";
 
 type Row = Record<string, unknown>;
 type ProfileTab = "profile" | "reminders" | "security";
+type SaveOptions = { refreshLanguage?: boolean };
+type SaveSettings = (body: Row, success: string, options?: SaveOptions) => Promise<void>;
 
 const tabs: Array<{ id: ProfileTab; label: string; icon: React.ReactNode }> = [
   { id: "profile", label: "Profile & preferences", icon: <UserRound size={16} /> },
@@ -67,7 +71,15 @@ const TIME_ZONE_SUGGESTIONS = TIME_ZONES.map((zone) => ({
     : zone.replaceAll("_", " ").replace("/", " · "),
 }));
 
+function supportedUiLanguage(value: unknown) {
+  const candidate = stringFrom(value, defaultLanguage);
+  return languageManifests.some((manifest) => manifest.tag === candidate)
+    ? candidate
+    : defaultLanguage;
+}
+
 export default function ProfileSettingsPage() {
+  const router = useRouter();
   const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>(
     "/api/settings",
     {},
@@ -77,7 +89,7 @@ export default function ProfileSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  async function performAction(body: Row, success: string) {
+  async function performAction(body: Row, success: string, options?: SaveOptions) {
     setActionError(null);
     setMessage(null);
     try {
@@ -88,6 +100,7 @@ export default function ProfileSettingsPage() {
       if (body.action === "preferences") window.dispatchEvent(new Event("ledgerlab:settings-updated"));
       setMessage(success);
       await reload();
+      if (options?.refreshLanguage) router.refresh();
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "Could not save this setting");
     }
@@ -161,7 +174,7 @@ function ProfilePreferences({
   onSave,
 }: {
   initial: Row;
-  onSave: (body: Row, success: string) => Promise<void>;
+  onSave: SaveSettings;
 }) {
   const preferences = readRecord(initial.preferences ?? initial);
   const user = readRecord(initial.user);
@@ -169,6 +182,7 @@ function ProfilePreferences({
   const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const [locale, setLocale] = useState(DEFAULT_LOCALE);
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
+  const [uiLanguage, setUiLanguage] = useState<string>(defaultLanguage);
   const [compactTables, setCompactTables] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -178,23 +192,27 @@ function ProfilePreferences({
       setCurrency(stringFrom(user.defaultCurrency ?? preferences.currency, DEFAULT_CURRENCY).toUpperCase());
       setLocale(stringFrom(user.locale ?? preferences.locale, DEFAULT_LOCALE));
       setTimeZone(stringFrom(user.timeZone ?? preferences.timeZone, DEFAULT_TIME_ZONE));
+      setUiLanguage(supportedUiLanguage(user.uiLanguage));
       setCompactTables(preferences.compactTables !== false);
     });
-  }, [initial, preferences.compactTables, preferences.currency, preferences.displayName, preferences.locale, preferences.timeZone, user.defaultCurrency, user.displayName, user.locale, user.name, user.timeZone]);
+  }, [initial, preferences.compactTables, preferences.currency, preferences.displayName, preferences.locale, preferences.timeZone, user.defaultCurrency, user.displayName, user.locale, user.name, user.timeZone, user.uiLanguage]);
 
   async function save() {
     setSaving(true);
     try {
+      const languageChanged = uiLanguage !== supportedUiLanguage(user.uiLanguage);
       await onSave(
         {
           action: "preferences",
           displayName: name.trim(),
+          uiLanguage,
           locale,
           currency,
           timeZone,
           compactTables,
         },
         "Profile preferences saved.",
+        { refreshLanguage: languageChanged },
       );
     } finally {
       setSaving(false);
@@ -202,7 +220,7 @@ function ProfilePreferences({
   }
 
   return (
-    <Section title="Profile & preferences" description="Identity, reporting currency, regional formatting and table density">
+    <Section title="Profile & preferences" description="Identity, interface language, reporting currency, regional formatting and table density">
       <div className={ui.settingsContent}>
         <div className={ui.settingsGroup}>
           <h3>Profile</h3>
@@ -225,7 +243,7 @@ function ProfilePreferences({
             >
               <CurrencyCombobox id="profile-currency" value={currency} locale={locale} onChange={setCurrency} />
             </Field>
-            <Field htmlFor="profile-locale" label="Locale" hint="Controls number and date presentation; it does not translate interface text yet.">
+            <Field htmlFor="profile-locale" label="Formatting locale" hint="Controls how dates, numbers, and currencies are formatted. It does not change the interface language.">
               <SuggestionInput
                 id="profile-locale"
                 value={locale}
@@ -251,6 +269,20 @@ function ProfilePreferences({
         </div>
         <div className={ui.settingsGroup}>
           <h3>Interface</h3>
+          <div className={ui.formGrid}>
+            <Field
+              className={ui.formSpan}
+              htmlFor="profile-ui-language"
+              label="Interface language"
+              hint="Changes the words, labels, and messages shown by LedgerLab. Formatting locale remains a separate setting for dates, numbers, and currencies."
+            >
+              <Select id="profile-ui-language" value={uiLanguage} onValueChange={setUiLanguage}>
+                {languageManifests.map((manifest) => (
+                  <option value={manifest.tag} key={manifest.tag}>{manifest.nativeName}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
           <Toggle
             checked={compactTables}
             onChange={setCompactTables}
@@ -273,7 +305,7 @@ function ReminderSettings({
   onSave,
 }: {
   initial: Row;
-  onSave: (body: Row, success: string) => Promise<void>;
+  onSave: SaveSettings;
 }) {
   const reminders = readRecord(initial.reminders);
   const [dueSoon, setDueSoon] = useState(true);
@@ -334,7 +366,7 @@ function SecuritySettings({
   onSave,
 }: {
   user: Row;
-  onSave: (body: Row, success: string) => Promise<void>;
+  onSave: SaveSettings;
 }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");

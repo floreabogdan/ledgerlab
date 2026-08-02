@@ -4,6 +4,8 @@ import { db as appDb, ensureDatabase } from "@/db";
 import { users } from "@/db/schema";
 import {
   AuthError,
+  SESSION_COOKIE_NAME,
+  type SafeUser,
   authenticateUser,
   createSession,
   createUser,
@@ -11,10 +13,14 @@ import {
   readSessionToken,
   revokeSession,
   serializeExpiredSessionCookie,
-  serializeSessionCookie,
   validateSessionToken,
   verifyPassword,
 } from "@/lib/auth";
+import {
+  resolveConfiguredUiLanguage,
+  UI_LANGUAGE_COOKIE_NAME,
+  UI_LANGUAGE_COOKIE_OPTIONS,
+} from "@/i18n/language";
 import { HttpError, jsonError, readJson } from "@/lib/api-response";
 import { clearRateLimit, consumeRateLimit, opaqueRateLimitKey } from "@/lib/rate-limit";
 import {
@@ -236,9 +242,21 @@ function clientMetadata(request: NextRequest) {
   };
 }
 
-function authResponse(user: object, token: string, expiresAt: Date, request: NextRequest, status = 200) {
+function authResponse(user: SafeUser, token: string, expiresAt: Date, request: NextRequest, status = 200) {
   const response = NextResponse.json({ user }, { status });
-  response.headers.set("Set-Cookie", serializeSessionCookie(token, expiresAt, requestProtocol(request) === "https:"));
+  const secure = requestProtocol(request) === "https:";
+  response.cookies.set(SESSION_COOKIE_NAME, token, {
+    expires: expiresAt,
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secure,
+  });
+  response.cookies.set(
+    UI_LANGUAGE_COOKIE_NAME,
+    resolveConfiguredUiLanguage(user.uiLanguage),
+    { ...UI_LANGUAGE_COOKIE_OPTIONS, secure },
+  );
   return response;
 }
 
@@ -265,6 +283,7 @@ async function authRoute(request: NextRequest, segments: string[]) {
         currency: input.currency,
         locale: input.locale,
         timeZone: input.timeZone,
+        uiLanguage: input.uiLanguage,
       }, appDb, { requireEmptyDatabase: registration.mode === "first-user" });
       createDefaultCategories(user.id);
       const session = createSession(user.id, clientMetadata(request));
@@ -1034,24 +1053,35 @@ async function postRoute(request: NextRequest, segments: string[]) {
         currency: body.currency ?? user.defaultCurrency,
         locale: body.locale ?? user.locale,
         timeZone: body.timeZone ?? user.timeZone,
+        uiLanguage: body.uiLanguage ?? user.uiLanguage,
         compactTables: body.compactTables ?? true,
       });
       database().transaction(() => {
-        database().prepare("UPDATE users SET display_name = ?, locale = ?, default_currency = ?, time_zone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-          .run(settings.displayName, settings.locale, settings.currency, settings.timeZone, user.id);
+        database().prepare("UPDATE users SET display_name = ?, locale = ?, default_currency = ?, time_zone = ?, ui_language = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(settings.displayName, settings.locale, settings.currency, settings.timeZone, settings.uiLanguage, user.id);
         database().prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'user_settings', ?, 'preferences', ?)")
           .run(crypto.randomUUID(), user.id, user.id, JSON.stringify(settings));
       })();
-      return NextResponse.json({
+      const response = NextResponse.json({
         user: {
           ...user,
           displayName: settings.displayName,
           defaultCurrency: settings.currency,
           locale: settings.locale,
           timeZone: settings.timeZone,
+          uiLanguage: settings.uiLanguage,
         },
         preferences: settings,
       });
+      response.cookies.set(
+        UI_LANGUAGE_COOKIE_NAME,
+        settings.uiLanguage,
+        {
+          ...UI_LANGUAGE_COOKIE_OPTIONS,
+          secure: requestProtocol(request) === "https:",
+        },
+      );
+      return response;
     }
     if (action === "reminders") {
       const reminders = reminderSettingsInput.parse(body);

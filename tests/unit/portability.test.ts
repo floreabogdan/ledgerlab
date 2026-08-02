@@ -4,6 +4,8 @@ import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SUPPORTED_UI_LANGUAGE_TAGS } from "@/i18n/language";
+
 type DatabaseModule = typeof import("@/db");
 type CoreModule = typeof import("@/server/core");
 type PortabilityModule = typeof import("@/server/portability");
@@ -213,6 +215,11 @@ describe("portable exports", () => {
 
   it("includes every user-owned relationship table and detailed CSV columns", () => {
     db.sqlite.prepare(
+      `UPDATE users
+          SET ui_language = 'en', locale = 'ro-RO', time_zone = 'Europe/Bucharest'
+        WHERE id = 'current-owner'`,
+    ).run();
+    db.sqlite.prepare(
       "INSERT INTO balance_snapshots (id, account_id, snapshot_date, balance_minor) VALUES ('snapshot', 'current-account', '2025-02-01', 99000)",
     ).run();
     db.sqlite.prepare(
@@ -236,6 +243,7 @@ describe("portable exports", () => {
 
     const json = JSON.parse(portability.exportData("current-owner", "json").body) as {
       data: Record<string, unknown[]>;
+      profile: { defaultCurrency: string; locale: string; timeZone: string; uiLanguage: string };
       rowCounts: Record<string, number>;
     };
     const expectedTables = [
@@ -257,6 +265,12 @@ describe("portable exports", () => {
       attachments: 1,
     });
     expect(json.data.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ id: transaction.id })]));
+    expect(json.profile).toEqual({
+      defaultCurrency: "RON",
+      locale: "ro-RO",
+      timeZone: "Europe/Bucharest",
+      uiLanguage: "en",
+    });
 
     const csv = portability.exportData("current-owner", "csv").body;
     expect(csv).toContain("reference_fx_rate,reference_fx_rate_scaled");
@@ -281,6 +295,11 @@ describe("full backup restore safety", () => {
       }
       insertOwner(legacy, "legacy-owner");
       legacy.prepare(
+        `UPDATE users
+            SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest'
+          WHERE id = 'legacy-owner'`,
+      ).run();
+      legacy.prepare(
         `INSERT INTO accounts
           (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES ('legacy-account', 'legacy-owner', 'Legacy account', 'current', 'RON', 42000, '2024-01-01')`,
@@ -295,9 +314,81 @@ describe("full backup restore safety", () => {
       expect(result.success).toBe(true);
       expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["legacy-account"]);
       expect(db.sqlite.prepare("SELECT COUNT(*) FROM fx_rate_observations").pluck().get()).toBe(0);
+      expect(db.sqlite.prepare(
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = 'legacy-owner'`,
+      ).get()).toEqual({
+        defaultCurrency: "EUR",
+        locale: "ro-RO",
+        timeZone: "Europe/Bucharest",
+        uiLanguage: "en",
+      });
       expect([...afterFiles].filter((file) => !beforeFiles.has(file))).toEqual([]);
     } finally {
       legacy.close();
+    }
+  });
+
+  it("round-trips a supported UI language without coupling regional preferences", () => {
+    const uiLanguage = SUPPORTED_UI_LANGUAGE_TAGS.at(-1) ?? "en";
+    db.sqlite.prepare(
+      `UPDATE users
+          SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest',
+              ui_language = ?
+        WHERE id = 'current-owner'`,
+    ).run(uiLanguage);
+    const backup = JSON.stringify(portability.createBackup("current-owner"));
+
+    db.sqlite.prepare(
+      `UPDATE users
+          SET default_currency = 'USD', locale = 'en-US', time_zone = 'UTC', ui_language = 'en'
+        WHERE id = 'current-owner'`,
+    ).run();
+
+    expect(portability.restoreBackup("current-owner", {
+      backup,
+      confirmation: "RESTORE",
+    })).toMatchObject({ success: true });
+    expect(db.sqlite.prepare(
+      `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+              ui_language AS uiLanguage
+         FROM users WHERE normalized_email = ?`,
+    ).get(ownerEmail)).toEqual({
+      defaultCurrency: "EUR",
+      locale: "ro-RO",
+      timeZone: "Europe/Bucharest",
+      uiLanguage,
+    });
+  });
+
+  it("normalizes an unsupported restored UI language without changing regional preferences", () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertOwner(source.sqlite, "backup-owner");
+      source.sqlite.prepare(
+        `UPDATE users
+            SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest',
+                ui_language = 'zz-ZZ'
+          WHERE id = 'backup-owner'`,
+      ).run();
+
+      expect(portability.restoreBackup("current-owner", {
+        backup: backupEnvelope(source.sqlite),
+        confirmation: "RESTORE",
+      })).toMatchObject({ success: true });
+      expect(db.sqlite.prepare(
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = 'backup-owner'`,
+      ).get()).toEqual({
+        defaultCurrency: "EUR",
+        locale: "ro-RO",
+        timeZone: "Europe/Bucharest",
+        uiLanguage: "en",
+      });
+    } finally {
+      source.sqlite.close();
     }
   });
 

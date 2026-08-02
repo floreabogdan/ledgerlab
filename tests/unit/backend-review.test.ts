@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+import { UI_LANGUAGE_COOKIE_NAME } from "@/i18n/language";
+
 type DatabaseModule = typeof import("@/db");
 type AuthModule = typeof import("@/lib/auth");
 type CoreModule = typeof import("@/server/core");
@@ -160,18 +162,30 @@ describe("production backend integrity boundaries", () => {
           currency: "EUR",
           locale: "fr-FR",
           timeZone: "Europe/Paris",
+          uiLanguage: "en",
         }),
       }),
       { params: Promise.resolve({ path: ["auth", "register"] }) },
     );
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
-      user: { defaultCurrency: "EUR", locale: "fr-FR", timeZone: "Europe/Paris" },
+      user: {
+        defaultCurrency: "EUR",
+        locale: "fr-FR",
+        timeZone: "Europe/Paris",
+        uiLanguage: "en",
+      },
     });
+    expect(response.headers.get("set-cookie")).toContain(UI_LANGUAGE_COOKIE_NAME);
     const stored = db.sqlite.prepare(
-      "SELECT id, default_currency AS currency, locale, time_zone AS timeZone FROM users WHERE normalized_email = ?",
-    ).get("international@example.test") as { id: string; currency: string; locale: string; timeZone: string };
-    expect(stored).toMatchObject({ currency: "EUR", locale: "fr-FR", timeZone: "Europe/Paris" });
+      "SELECT id, default_currency AS currency, locale, time_zone AS timeZone, ui_language AS uiLanguage FROM users WHERE normalized_email = ?",
+    ).get("international@example.test") as { id: string; currency: string; locale: string; timeZone: string; uiLanguage: string };
+    expect(stored).toMatchObject({
+      currency: "EUR",
+      locale: "fr-FR",
+      timeZone: "Europe/Paris",
+      uiLanguage: "en",
+    });
 
     const planned = core.createPlannedPayment(stored.id, {
       name: "Localized recurring payment",
@@ -786,6 +800,24 @@ describe("production backend integrity boundaries", () => {
     expect(auth.validateSessionToken(session.token, db.db, issuedAt)).toBeNull();
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM sessions WHERE id = ?").get(session.sessionId))
       .toEqual({ count: 0 });
+  });
+
+  it("preserves the interface-language cookie on sign-out", async () => {
+    const session = auth.createSession("owner", {}, db.db);
+    const response = await route.POST(
+      new NextRequest("http://localhost:3000/api/auth/logout", {
+        method: "POST",
+        headers: {
+          cookie: `${auth.SESSION_COOKIE_NAME}=${session.token}; ${UI_LANGUAGE_COOKIE_NAME}=en`,
+          origin: "http://localhost:3000",
+        },
+      }),
+      { params: Promise.resolve({ path: ["auth", "logout"] }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain(`${auth.SESSION_COOKIE_NAME}=`);
+    expect(response.headers.get("set-cookie")).not.toContain(`${UI_LANGUAGE_COOKIE_NAME}=`);
   });
 
   it("changes reporting currency without relabeling accountless planned payments or budgets", async () => {

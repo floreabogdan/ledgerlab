@@ -12,6 +12,7 @@ import {
   DEFAULT_TIME_ZONE,
   isSupportedCurrency,
 } from "@/lib/currencies";
+import { useTranslator } from "@/i18n/client";
 
 type AuthMode = "login" | "register";
 type RegistrationState = "checking" | "available" | "closed" | "error";
@@ -25,6 +26,7 @@ interface FormErrors {
 }
 
 export function AuthForm({ mode }: { mode: AuthMode }) {
+  const { language: uiLanguage } = useTranslator();
   const registering = mode === "register";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -111,7 +113,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify(registering
-          ? { name: name.trim(), email: email.trim(), password, currency, locale, timeZone }
+          ? { name: name.trim(), email: email.trim(), password, currency, locale, timeZone, uiLanguage }
           : { email: email.trim(), password }),
       });
       const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
