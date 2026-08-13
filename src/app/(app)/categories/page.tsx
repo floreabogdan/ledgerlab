@@ -2,6 +2,7 @@
 
 import { Archive, CornerDownRight, FolderTree, Pencil, RotateCcw } from "lucide-react";
 import { useState } from "react";
+import { useTranslations, useTranslator } from "@/i18n/client";
 import {
   AddButton,
   Button,
@@ -32,6 +33,7 @@ import styles from "./categories.module.css";
 type Category = Record<string, unknown>;
 type CategoryEntry = Category | "new" | null;
 type CategoryKind = "income" | "expense" | "both";
+type Translate = ReturnType<typeof useTranslations>;
 
 function isArchived(category: Category) {
   return Boolean(readRecord(category).archivedAt ?? readRecord(category).isArchived);
@@ -43,16 +45,16 @@ function categoryDepth(category: Category) {
   return Number.isSafeInteger(depth) && depth >= 0 ? depth : row.parentId ? 1 : 0;
 }
 
-function categoryPath(category: Category) {
+function categoryPath(category: Category, t: Translate) {
   const row = readRecord(category);
   return stringFrom(row.path, stringFrom(row.parentName)
-    ? `${stringFrom(row.parentName)} › ${stringFrom(row.name, "Category")}`
-    : stringFrom(row.name, "Category"));
+    ? `${stringFrom(row.parentName)} › ${stringFrom(row.name, t("entities.shared.fallback.category"))}`
+    : stringFrom(row.name, t("entities.shared.fallback.category")));
 }
 
-function parentPath(category: Category) {
-  const path = categoryPath(category).split(" › ");
-  return path.length > 1 ? path.slice(0, -1).join(" › ") : "Top level";
+function parentPath(category: Category, t: Translate) {
+  const path = categoryPath(category, t).split(" › ");
+  return path.length > 1 ? path.slice(0, -1).join(" › ") : t("entities.categories.hierarchy.topLevel");
 }
 
 function ancestorIds(category: Category) {
@@ -64,7 +66,27 @@ function kindsAreCompatible(parentKind: string, childKind: string) {
   return parentKind === "both" || parentKind === childKind;
 }
 
+function categoryKindLabel(value: string, t: Translate) {
+  if (value === "income") return t("entities.categories.kind.income");
+  if (value === "both") return t("entities.categories.kind.both");
+  return t("entities.categories.kind.expense");
+}
+
+function spendingNatureLabel(value: string, t: Translate) {
+  return value === "fixed"
+    ? t("entities.categories.spendingNature.fixed")
+    : t("entities.categories.spendingNature.variable");
+}
+
+function spendingPriorityLabel(value: string, t: Translate) {
+  return value === "essential"
+    ? t("entities.categories.spendingPriority.essential")
+    : t("entities.categories.spendingPriority.discretionary");
+}
+
 export default function CategoriesPage() {
+  const t = useTranslations();
+  const translator = useTranslator();
   const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>("/api/categories?archived=all", {});
   const categories = readList<Category>(raw, "categories");
   const [showArchived, setShowArchived] = useState(false);
@@ -88,12 +110,12 @@ export default function CategoriesPage() {
       await requestJson("/api/categories", {
         method: "POST",
         body: JSON.stringify({ action: archive ? "archive" : "restore", id: readRecord(category).id }),
-      });
+      }, translator);
       setPendingArchive(null);
-      setMessage(archive ? "Category archived. Historical transactions and reports were preserved." : "Category restored.");
+      setMessage(archive ? t("entities.categories.feedback.archived") : t("entities.categories.feedback.restored"));
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not update the category");
+      setActionError(caught instanceof Error ? caught.message : t("entities.categories.feedback.updateFailed"));
     } finally {
       setSaving(false);
     }
@@ -102,29 +124,29 @@ export default function CategoriesPage() {
   return (
     <Page>
       <ViewHeader
-        eyebrow="Organisation"
-        title="Categories"
-        description="Build a clear income and spending hierarchy for entry, budgets and reporting. Archiving never rewrites history."
-        actions={<AddButton onClick={() => setEditing("new")}>Add category</AddButton>}
+        eyebrow={t("entities.shared.eyebrow")}
+        title={t("entities.categories.header.title")}
+        description={t("entities.categories.header.description")}
+        actions={<AddButton onClick={() => setEditing("new")}>{t("entities.categories.actions.add")}</AddButton>}
       />
 
       <div className={ui.metricGrid}>
-        <Metric label="Active categories" value={active.length} detail="Available for new entries" tone="accent" />
-        <Metric label="Top-level groups" value={parentCount} detail="Hierarchy roots" />
-        <Metric label="Nested categories" value={subcategoryCount} detail="Across every depth" />
-        <Metric label="Archived" value={archived.length} detail="History retained" />
+        <Metric label={t("entities.categories.metrics.active.label")} value={active.length} detail={t("entities.categories.metrics.active.detail")} tone="accent" />
+        <Metric label={t("entities.categories.metrics.roots.label")} value={parentCount} detail={t("entities.categories.metrics.roots.detail")} />
+        <Metric label={t("entities.categories.metrics.nested.label")} value={subcategoryCount} detail={t("entities.categories.metrics.nested.detail")} />
+        <Metric label={t("entities.categories.metrics.archived.label")} value={archived.length} detail={t("entities.categories.metrics.archived.detail")} />
       </div>
 
       <FormMessage error={actionError} success={message} />
       <Section
-        title="Category hierarchy"
-        description="Indentation shows parentage; fixed/variable and essential/discretionary classifications feed planning and statistics."
+        title={t("entities.categories.section.title")}
+        description={t("entities.categories.section.description")}
         action={
           <Toggle
             checked={showArchived}
             onChange={setShowArchived}
-            label="Show archived"
-            description="Include categories unavailable for new entries."
+            label={t("entities.categories.toggle.label")}
+            description={t("entities.categories.toggle.description")}
           />
         }
       >
@@ -133,19 +155,19 @@ export default function CategoriesPage() {
           error={error}
           onRetry={reload}
           empty={!visible.length}
-          emptyTitle={showArchived ? "No categories yet" : "No active categories"}
-          emptyDescription="Add a top-level category or nest one beneath any compatible category."
-          action={<AddButton onClick={() => setEditing("new")}>Add category</AddButton>}
+          emptyTitle={showArchived ? t("entities.categories.empty.allTitle") : t("entities.categories.empty.activeTitle")}
+          emptyDescription={t("entities.categories.empty.description")}
+          action={<AddButton onClick={() => setEditing("new")}>{t("entities.categories.actions.add")}</AddButton>}
         >
-          <ResponsiveTable label="Category hierarchy">
+          <ResponsiveTable label={t("entities.categories.table.label")}>
             <thead>
               <tr>
-                <th>Category</th>
-                <th>Type</th>
-                <th>Spending pattern</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th><span className="sr-only">Actions</span></th>
+                <th>{t("entities.categories.table.category")}</th>
+                <th>{t("entities.categories.table.type")}</th>
+                <th>{t("entities.categories.table.spendingPattern")}</th>
+                <th>{t("entities.categories.table.priority")}</th>
+                <th>{t("entities.categories.table.status")}</th>
+                <th><span className="sr-only">{t("entities.shared.table.actions")}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -171,29 +193,33 @@ export default function CategoriesPage() {
                               className={ui.categoryDot}
                               style={{ "--category-color": stringFrom(category.color, "#2563eb") } as React.CSSProperties}
                             />
-                            {stringFrom(category.name, "Unnamed category")}
+                            {stringFrom(category.name, t("entities.shared.fallback.unnamedCategory"))}
                           </span>
                           <span className={ui.tableSecondary}>
-                            {depth ? `Under ${parentPath(item)}` : directChildren ? `${directChildren} direct subcategor${directChildren === 1 ? "y" : "ies"}` : "Top level"}
+                            {depth
+                              ? t("entities.categories.hierarchy.under", { parent: parentPath(item, t) })
+                              : directChildren
+                                ? t("entities.categories.hierarchy.directSubcategories", { count: directChildren })
+                                : t("entities.categories.hierarchy.topLevel")}
                           </span>
                         </span>
                       </div>
                     </td>
-                    <td><Pill tone={stringFrom(category.kind) === "income" ? "positive" : "neutral"}>{stringFrom(category.kind, "expense")}</Pill></td>
-                    <td><Pill tone={stringFrom(category.spendingNature ?? category.spendingType) === "fixed" ? "info" : "neutral"}>{stringFrom(category.spendingNature ?? category.spendingType, "variable")}</Pill></td>
-                    <td className={ui.capitalize}>{stringFrom(category.spendingPriority, category.essential === true ? "essential" : "discretionary")}</td>
-                    <td><Pill tone={archivedCategory ? "neutral" : "info"}>{archivedCategory ? "archived" : "active"}</Pill></td>
+                    <td><Pill tone={stringFrom(category.kind) === "income" ? "positive" : "neutral"}>{categoryKindLabel(stringFrom(category.kind, "expense"), t)}</Pill></td>
+                    <td><Pill tone={stringFrom(category.spendingNature ?? category.spendingType) === "fixed" ? "info" : "neutral"}>{spendingNatureLabel(stringFrom(category.spendingNature ?? category.spendingType, "variable"), t)}</Pill></td>
+                    <td>{spendingPriorityLabel(stringFrom(category.spendingPriority, category.essential === true ? "essential" : "discretionary"), t)}</td>
+                    <td><Pill tone={archivedCategory ? "neutral" : "info"}>{archivedCategory ? t("entities.shared.status.archived") : t("entities.shared.status.active")}</Pill></td>
                     <td>
                       <div className={styles.actions}>
-                        <IconButton label={`Edit ${stringFrom(category.name, "category")}`} onClick={() => setEditing(item)}>
+                        <IconButton label={t("entities.categories.actions.editNamed", { name: stringFrom(category.name, t("entities.shared.fallback.category")) })} onClick={() => setEditing(item)}>
                           <Pencil size={15} />
                         </IconButton>
                         {archivedCategory ? (
-                          <IconButton label={`Restore ${stringFrom(category.name, "category")}`} onClick={() => void changeArchiveState(item, false)}>
+                          <IconButton label={t("entities.categories.actions.restoreNamed", { name: stringFrom(category.name, t("entities.shared.fallback.category")) })} onClick={() => void changeArchiveState(item, false)}>
                             <RotateCcw size={15} />
                           </IconButton>
                         ) : (
-                          <IconButton label={`Archive ${stringFrom(category.name, "category")}`} onClick={() => setPendingArchive(item)}>
+                          <IconButton label={t("entities.categories.actions.archiveNamed", { name: stringFrom(category.name, t("entities.shared.fallback.category")) })} onClick={() => setPendingArchive(item)}>
                             <Archive size={15} />
                           </IconButton>
                         )}
@@ -213,7 +239,7 @@ export default function CategoriesPage() {
         onClose={() => setEditing(null)}
         categories={categories}
         onSaved={async (updated) => {
-          setMessage(updated ? "Category updated." : "Category created.");
+          setMessage(updated ? t("entities.categories.feedback.updated") : t("entities.categories.feedback.created"));
           setActionError(null);
           await reload();
         }}
@@ -222,20 +248,20 @@ export default function CategoriesPage() {
       <Modal
         open={Boolean(pendingArchive)}
         onClose={() => setPendingArchive(null)}
-        title="Archive category?"
-        description="It will no longer be offered for new transactions or budgets. Existing history remains unchanged."
+        title={t("entities.categories.archive.title")}
+        description={t("entities.categories.archive.description")}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPendingArchive(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setPendingArchive(null)}>{t("common.actions.cancel")}</Button>
             <Button variant="danger" disabled={saving} onClick={() => pendingArchive && void changeArchiveState(pendingArchive, true)}>
-              {saving ? "Archiving…" : "Archive category"}
+              {saving ? t("entities.categories.actions.archiving") : t("entities.categories.archive.confirm")}
             </Button>
           </>
         }
       >
         <div className={ui.inlineNotice}>
           <FolderTree size={17} aria-hidden="true" />
-          <span><strong>{stringFrom(readRecord(pendingArchive).name, "This category")}</strong> will remain attached to every historical transaction. Active descendants must be moved or archived first.</span>
+          <span>{t("entities.categories.archive.notice", { name: stringFrom(readRecord(pendingArchive).name, t("entities.shared.fallback.thisCategory")) })}</span>
         </div>
       </Modal>
     </Page>
@@ -253,6 +279,8 @@ function CategoryForm({
   categories: Category[];
   onSaved: (updated: boolean) => Promise<void>;
 }) {
+  const t = useTranslations();
+  const translator = useTranslator();
   const record = entry === "new" || !entry ? {} : readRecord(entry);
   const categoryId = stringFrom(record.id);
   const editing = Boolean(categoryId);
@@ -273,7 +301,7 @@ function CategoryForm({
   });
   const hasChildren = Boolean(record.hasChildren) || categories.some((category) => stringFrom(readRecord(category).parentId) === categoryId);
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
-    if (!name.trim()) throw new Error("Enter a category name.");
+    if (!name.trim()) throw new Error(t("entities.categories.form.nameRequired"));
     await requestJson("/api/categories", {
       method: "POST",
       body: JSON.stringify({
@@ -286,7 +314,7 @@ function CategoryForm({
         spendingPriority,
         color,
       }),
-    });
+    }, translator);
     onClose();
     await onSaved(editing);
   });
@@ -300,53 +328,53 @@ function CategoryForm({
     <Modal
       open={Boolean(entry)}
       onClose={close}
-      title={editing ? "Edit category" : "Add category"}
-      description={editing ? `Update ${categoryPath(record)} without changing historical assignments.` : "Create a top-level category or nest it beneath a compatible parent."}
+      title={editing ? t("entities.categories.form.editTitle") : t("entities.categories.form.addTitle")}
+      description={editing ? t("entities.categories.form.editDescription", { path: categoryPath(record, t) }) : t("entities.categories.form.addDescription")}
       footer={
         <>
-          <Button variant="ghost" onClick={close}>Cancel</Button>
-          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Saving…" : editing ? "Save changes" : "Create category"}</Button>
+          <Button variant="ghost" onClick={close}>{t("common.actions.cancel")}</Button>
+          <Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("entities.categories.actions.saving") : editing ? t("entities.categories.actions.saveChanges") : t("entities.categories.actions.create")}</Button>
         </>
       }
     >
       <form className={ui.formGrid} onSubmit={(event) => void submit(event)}>
-        <Field label="Name" className={ui.formSpan}>
-          <Input autoFocus value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="e.g. Home maintenance" />
+        <Field label={t("entities.categories.form.name")} className={ui.formSpan}>
+          <Input autoFocus value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder={t("entities.categories.form.namePlaceholder")} />
         </Field>
-        <Field label="Parent category" hint="Choose any active parent with a compatible type, or leave this at top level.">
-          <Select searchable value={parentId} onValueChange={setParentId} searchPlaceholder="Search the hierarchy">
-            <option value="">None — top level</option>
+        <Field label={t("entities.categories.form.parent")} hint={t("entities.categories.form.parentHint")}>
+          <Select searchable value={parentId} onValueChange={setParentId} searchPlaceholder={t("entities.categories.form.parentSearchPlaceholder")}>
+            <option value="">{t("entities.categories.form.noParent")}</option>
             {parentOptions.map((item, index) => {
               const category = readRecord(item);
-              return <option value={stringFrom(category.id)} key={stringFrom(category.id, String(index))}>{categoryPath(item)}</option>;
+              return <option value={stringFrom(category.id)} key={stringFrom(category.id, String(index))}>{categoryPath(item, t)}</option>;
             })}
           </Select>
         </Field>
-        <Field label="Category type" hint={hasChildren ? "The server will preserve type compatibility across descendants." : undefined}>
+        <Field label={t("entities.categories.form.categoryType")} hint={hasChildren ? t("entities.categories.form.categoryTypeChildrenHint") : undefined}>
           <Select value={kind} onValueChange={(value) => {
             const nextKind = value as CategoryKind;
             setKind(nextKind);
             const parent = categories.find((category) => stringFrom(readRecord(category).id) === parentId);
             if (parent && !kindsAreCompatible(stringFrom(readRecord(parent).kind, "expense"), nextKind)) setParentId("");
           }}>
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-            <option value="both">Income and expense</option>
+            <option value="expense">{t("entities.categories.kind.expense")}</option>
+            <option value="income">{t("entities.categories.kind.income")}</option>
+            <option value="both">{t("entities.categories.kind.both")}</option>
           </Select>
         </Field>
-        <Field label="Spending pattern">
+        <Field label={t("entities.categories.form.spendingPattern")}>
           <Select value={spendingNature} onValueChange={setSpendingNature}>
-            <option value="variable">Variable</option>
-            <option value="fixed">Fixed</option>
+            <option value="variable">{t("entities.categories.spendingNature.variable")}</option>
+            <option value="fixed">{t("entities.categories.spendingNature.fixed")}</option>
           </Select>
         </Field>
-        <Field label="Priority">
+        <Field label={t("entities.categories.form.priority")}>
           <Select value={spendingPriority} onValueChange={setSpendingPriority}>
-            <option value="discretionary">Discretionary</option>
-            <option value="essential">Essential</option>
+            <option value="discretionary">{t("entities.categories.spendingPriority.discretionary")}</option>
+            <option value="essential">{t("entities.categories.spendingPriority.essential")}</option>
           </Select>
         </Field>
-        <Field htmlFor="category-colour" label="Colour" className={ui.formSpan}>
+        <Field htmlFor="category-colour" label={t("entities.categories.form.colour")} className={ui.formSpan}>
           <input id="category-colour" className={ui.colorInput} type="color" value={color} onChange={(event) => setColor(event.target.value)} />
         </Field>
         <button type="submit" hidden />

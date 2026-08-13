@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpError } from "@/lib/api-response";
+import { HttpError, type ApiErrorParameters } from "@/lib/api-response";
 import { monthKeyInput } from "@/lib/validation";
 import {
   all,
@@ -21,6 +21,25 @@ import {
 } from "@/server/reporting-currency";
 import { getUserCalendarContext, getUserRegionalSettings } from "@/server/user-settings";
 
+type InsightsErrorCode =
+  | `INSIGHTS_${string}`
+  | `BUDGET_${string}`
+  | `PLANNING_${string}`;
+
+function insightsError(
+  status: number,
+  code: InsightsErrorCode,
+  message: string,
+  options: { params?: ApiErrorParameters; details?: unknown } = {},
+) {
+  return new HttpError(status, {
+    code,
+    message,
+    params: options.params,
+    details: options.details,
+  });
+}
+
 function nextMonth(month: string, amount = 1) {
   const [year, value] = month.split("-").map(Number);
   const date = new Date(Date.UTC(year, value - 1 + amount, 1));
@@ -29,7 +48,11 @@ function nextMonth(month: string, amount = 1) {
 
 function requireMonthKey(value: string, label = "month") {
   const parsed = monthKeyInput.safeParse(value);
-  if (!parsed.success) throw new HttpError(422, `Choose a valid ${label} in YYYY-MM format`);
+  if (!parsed.success) {
+    throw insightsError(422, "INSIGHTS_MONTH_INVALID", `Choose a valid ${label} in YYYY-MM format`, {
+      details: { label, value, issues: parsed.error.issues },
+    });
+  }
   return parsed.data;
 }
 
@@ -63,7 +86,9 @@ function normalizeInsightRange(range?: InsightDateRange, currentMonth?: string):
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
   };
   if (!isCalendarDate(range.from) || !isCalendarDate(range.to) || range.from > range.to) {
-    throw new HttpError(422, "Choose a valid date range");
+    throw insightsError(422, "INSIGHTS_DATE_RANGE_INVALID", "Choose a valid date range", {
+      details: { range },
+    });
   }
   return range;
 }
@@ -300,7 +325,7 @@ export function accountsPayload(userId: string, range?: InsightDateRange) {
     reportingBasis: {
       currency: defaultCurrency,
       balanceDate: reportingDate,
-      rule: "Account balances stay native; reporting balances use the latest persisted BNR rate on or before the as-of date.",
+      conversion: "persisted_bnr_on_or_before",
     },
     accounts: enrichLiabilityAccounts(userId, listAccounts(userId, true)).map((account) => {
       const reporting = toReportingValue(
@@ -415,7 +440,15 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
   const convertLiability = (item: ReturnType<typeof listLiabilityObligations>[number]) => {
     const nativeCurrency = accountCurrencyById.get(item.liabilityAccountId)
       ?? (item.accountId ? accountCurrencyById.get(item.accountId) : undefined);
-    if (!nativeCurrency) throw new HttpError(422, `Cannot determine the currency for ${item.title}`);
+    if (!nativeCurrency) {
+      throw insightsError(422, "INSIGHTS_LIABILITY_CURRENCY_UNAVAILABLE", `Cannot determine the currency for ${item.title}`, {
+        details: {
+          accountId: item.accountId,
+          liabilityAccountId: item.liabilityAccountId,
+          title: item.title,
+        },
+      });
+    }
     const convert = (amountMinor: number) => toReportingMinor(
       { amountMinor, currency: nativeCurrency, date: item.dueDate },
       currency,
@@ -464,28 +497,32 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
     lowest = Math.min(lowest, running);
   }
 
-  const warnings: Array<{ id: string; title: string; description: string; severity: "info" | "warning" | "danger" }> = [];
+  const warnings: Array<{
+    id: string;
+    code: "DASHBOARD_OVERDUE" | "DASHBOARD_BUDGET_EXCEEDED" | "DASHBOARD_CASH_BELOW_ZERO" | "DASHBOARD_SPENDING_INCREASED";
+    params?: Record<string, string | number | boolean | null>;
+    severity: "info" | "warning" | "danger";
+  }> = [];
   if (overdue.length) {
     warnings.push({
       id: "overdue",
-      title: `${overdue.length} overdue ${overdue.length === 1 ? "payment" : "payments"}`,
-      description: "Review these expected obligations; planned items do not change actual balances until paid.",
+      code: "DASHBOARD_OVERDUE",
+      params: { count: overdue.length },
       severity: "danger",
     });
   }
   if (budgetWarningsEnabled && budget > 0 && actual.spendingMinor > budget) {
     warnings.push({
       id: "budget",
-      title: "Budget allocation exceeded",
-      description: `Actual spending in the selected range is ${Math.round(((actual.spendingMinor - budget) / budget) * 100)}% above the included monthly budget allocations.`,
+      code: "DASHBOARD_BUDGET_EXCEEDED",
+      params: { percentage: Math.round(((actual.spendingMinor - budget) / budget) * 100) },
       severity: "warning",
     });
   }
   if (lowest < 0) {
     warnings.push({
       id: "cash-point",
-      title: "Projected cash drops below zero",
-      description: "The next-month estimate has a negative low point. Check dates and assigned accounts.",
+      code: "DASHBOARD_CASH_BELOW_ZERO",
       severity: "warning",
     });
   }
@@ -494,8 +531,8 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
   if (previous.spendingMinor > 0 && actual.spendingMinor > previous.spendingMinor * 1.3) {
     warnings.push({
       id: "spend-change",
-      title: "Spending is up from the prior period",
-      description: `Actual spending is ${Math.round((actual.spendingMinor / previous.spendingMinor - 1) * 100)}% higher than the preceding equal-length range. Compare context before drawing conclusions.`,
+      code: "DASHBOARD_SPENDING_INCREASED",
+      params: { percentage: Math.round((actual.spendingMinor / previous.spendingMinor - 1) * 100) },
       severity: "info",
     });
   }
@@ -506,7 +543,7 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
       actualFlows: "transaction_date",
       currentBalances: calendar.today,
       plannedAmounts: "due_date",
-      source: "BNR persisted reference rates",
+      source: "bnr",
     },
     period: range,
     totalCashMinor,
@@ -585,9 +622,9 @@ export function listBudgets(userId: string, month?: string) {
     currency: reportingCurrency,
     month,
     reportingBasis: {
-      budgetDenomination: "stored per budget",
+      budgetDenomination: "stored_budget_currency",
       actualFlows: "transaction_date",
-      source: "BNR persisted reference rates",
+      source: "bnr",
     },
     budgets: budgets.map((item) => ({
       ...item,
@@ -612,10 +649,16 @@ export function saveBudget(
 ) {
   const input = { ...rawInput, month: requireMonthKey(rawInput.month, "budget month") };
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new HttpError(422, "Budget amount must be a positive integer in minor units");
+    throw insightsError(422, "BUDGET_AMOUNT_INVALID", "Budget amount must be a positive integer in minor units", {
+      details: { amountMinor: input.amountMinor },
+    });
   }
   const category = one("SELECT id FROM categories WHERE id = ? AND user_id = ? AND archived_at IS NULL", [input.categoryId, userId]);
-  if (!category) throw new HttpError(422, "Choose an active category that belongs to your profile");
+  if (!category) {
+    throw insightsError(422, "BUDGET_CATEGORY_INVALID", "Choose an active category that belongs to your profile", {
+      details: { categoryId: input.categoryId },
+    });
+  }
   const existing = one<{ id: string; currency: string }>(
     "SELECT id, currency FROM budgets WHERE user_id = ? AND month = ? AND category_id = ?",
     [userId, input.month, input.categoryId],
@@ -670,28 +713,19 @@ interface PlanInput {
   }>;
 }
 
-function getOrCreatePlan(userId: string, targetMonth: string, create = false) {
-  let plan = one<Record<string, unknown>>(
+function getOrCreatePlan(userId: string, targetMonth: string) {
+  return one<Record<string, unknown>>(
     `SELECT id, month, currency, name, status, expected_income_minor AS expectedIncomeMinor,
             discretionary_target_minor AS discretionaryTargetMinor, notes
        FROM month_plans WHERE user_id = ? AND month = ?`,
     [userId, targetMonth],
   );
-  if (!plan && create) {
-    const id = randomUUID();
-    const currency = workspaceCurrency(userId);
-    database()
-      .prepare("INSERT INTO month_plans (id, user_id, month, currency, name) VALUES (?, ?, ?, ?, 'Base plan')")
-      .run(id, userId, targetMonth, currency);
-    plan = { id, month: targetMonth, currency, name: "Base plan", status: "draft", expectedIncomeMinor: 0 };
-  }
-  return plan;
 }
 
 export function planningWorkspace(userId: string, targetMonth?: string) {
   const calendar = getUserCalendarContext(userId);
   targetMonth = requireMonthKey(targetMonth ?? nextMonth(calendar.month), "planning month");
-  const plan = getOrCreatePlan(userId, targetMonth, false);
+  const plan = getOrCreatePlan(userId, targetMonth);
   const planId = typeof plan?.id === "string" ? plan.id : null;
   const accounts = listAccounts(userId);
   const occurrences = listPlannedPayments(userId, {
@@ -1059,10 +1093,10 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
       accountOpenings: monthStart,
       plannedAmounts: "due_date",
       planDenomination: typeof plan?.currency === "string" ? plan.currency : reportingCurrency,
-      source: "BNR persisted reference rates",
+      source: "bnr",
     },
     plan: {
-      ...(plan ?? { month: targetMonth, name: "Base plan", status: "draft" }),
+      ...(plan ?? { month: targetMonth, name: null, status: "draft" }),
       nativeCurrency: typeof plan?.currency === "string" ? plan.currency : reportingCurrency,
       nativeExpectedIncomeMinor: typeof plan?.expectedIncomeMinor === "number" ? plan.expectedIncomeMinor : 0,
       nativeDiscretionaryTargetMinor: typeof plan?.discretionaryTargetMinor === "number" ? plan.discretionaryTargetMinor : null,
@@ -1164,13 +1198,15 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
     let sourcePlanId: string | null = null;
     let sourcePlan: Record<string, unknown> | null = null;
     if (input.copyFromMonth) {
-      sourcePlan = getOrCreatePlan(userId, input.copyFromMonth, false) ?? null;
+      sourcePlan = getOrCreatePlan(userId, input.copyFromMonth) ?? null;
       sourcePlanId = typeof sourcePlan?.id === "string" ? sourcePlan.id : null;
     }
     if (["copy", "copy-assumptions"].includes(input.action ?? "") && input.copyFromMonth && !sourcePlanId) {
-      throw new HttpError(404, "The previous month has no saved forecast assumptions to copy");
+      throw insightsError(404, "PLANNING_SOURCE_ASSUMPTIONS_NOT_FOUND", "The previous month has no saved forecast assumptions to copy", {
+        details: { copyFromMonth: input.copyFromMonth },
+      });
     }
-    const existing = getOrCreatePlan(userId, input.month, false);
+    const existing = getOrCreatePlan(userId, input.month);
     const planId = typeof existing?.id === "string" ? existing.id : randomUUID();
     const planCurrency = typeof existing?.currency === "string" ? existing.currency : workspaceCurrency(userId);
     const currentReportingCurrency = workspaceCurrency(userId);
@@ -1221,7 +1257,7 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
             (id, user_id, month, currency, name, expected_income_minor, discretionary_target_minor, copied_from_plan_id, notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(planId, userId, input.month, planCurrency, input.name ?? "Base plan", expectedIncomeMinor ?? 0, discretionaryTargetMinor ?? null, sourcePlanId, input.notes ?? null);
+        .run(planId, userId, input.month, planCurrency, input.name?.trim() || input.month, expectedIncomeMinor ?? 0, discretionaryTargetMinor ?? null, sourcePlanId, input.notes ?? null);
     }
 
     if (input.action === "save-scenario") {
@@ -1235,7 +1271,7 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
       }));
       database()
         .prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'month_plan_scenario', ?, 'save', ?)")
-        .run(randomUUID(), userId, planId, JSON.stringify({ name: input.scenarioName ?? "Working scenario", lines: storedLines }));
+        .run(randomUUID(), userId, planId, JSON.stringify({ name: input.scenarioName?.trim() || input.month, lines: storedLines }));
       return planningWorkspace(userId, input.month);
     }
 
@@ -1256,7 +1292,7 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         [userId, sourcePlanId],
       );
       let copiedScenario: { name: string; lines: Array<Record<string, unknown>> } = {
-        name: "Working scenario",
+        name: input.month,
         lines: [],
       };
       if (sourceScenario?.after) {
@@ -1278,7 +1314,7 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
                 return { ...line, amountMinor, expectedDate: `${input.month}-${String(day).padStart(2, "0")}` };
               })
             : [];
-          copiedScenario = { name: saved.name ?? "Working scenario", lines };
+          copiedScenario = { name: saved.name?.trim() || input.month, lines };
         } catch {
           // A malformed historical scenario copies as an empty scenario and
           // must not block copying opening assumptions.
@@ -1295,17 +1331,33 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
       const normalizedOpenings: Array<{ accountId: string; amountMinor: number }> = [];
       const seenAccountIds = new Set<string>();
       for (const value of input.openingBalances) {
-        if (!value || typeof value !== "object") throw new HttpError(422, "Choose a valid account for every opening assumption");
+        if (!value || typeof value !== "object") {
+          throw insightsError(422, "PLANNING_OPENING_ACCOUNT_REQUIRED", "Choose a valid account for every opening assumption", {
+            details: { value },
+          });
+        }
         const opening = value as Record<string, unknown>;
         const accountId = typeof opening.accountId === "string" ? opening.accountId : "";
-        if (!allowedAccountIds.has(accountId)) throw new HttpError(422, "Choose an account that belongs to your profile");
-        if (seenAccountIds.has(accountId)) throw new HttpError(422, "Each account can have only one opening assumption");
+        if (!allowedAccountIds.has(accountId)) {
+          throw insightsError(422, "PLANNING_OPENING_ACCOUNT_INVALID", "Choose an account that belongs to your profile", {
+            details: { accountId },
+          });
+        }
+        if (seenAccountIds.has(accountId)) {
+          throw insightsError(422, "PLANNING_OPENING_ACCOUNT_DUPLICATE", "Each account can have only one opening assumption", {
+            details: { accountId },
+          });
+        }
         const amountMinor = typeof opening.amountMinor === "number" && Number.isSafeInteger(opening.amountMinor)
           ? opening.amountMinor
           : typeof opening.openingBalanceMinor === "number" && Number.isSafeInteger(opening.openingBalanceMinor)
             ? opening.openingBalanceMinor
             : null;
-        if (amountMinor === null) throw new HttpError(422, "Enter each opening balance in minor units");
+        if (amountMinor === null) {
+          throw insightsError(422, "PLANNING_OPENING_BALANCE_INVALID", "Enter each opening balance in minor units", {
+            details: { accountId, amountMinor: opening.amountMinor, openingBalanceMinor: opening.openingBalanceMinor },
+          });
+        }
         seenAccountIds.add(accountId);
         normalizedOpenings.push({ accountId, amountMinor });
       }
@@ -1696,11 +1748,13 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   }
   const debtMonthly = [...debtMonthlyMap.values()].sort((left, right) => left.month.localeCompare(right.month));
 
-  const suggestions: Array<{ title: string; detail: string; disclaimer: string }> = [];
+  const suggestions: Array<{
+    code: "STATISTICS_CATEGORY_CONCENTRATION" | "STATISTICS_MONTH_END_PACE" | "STATISTICS_BUILD_HISTORY";
+    params?: Record<string, string | number | boolean | null>;
+  }> = [];
   if (byCategory[0] && concentration > 60) suggestions.push({
-    title: `Review ${byCategory[0].name}`,
-    detail: "A large share of actual spending is concentrated in the top categories. Check whether this reflects your priorities.",
-    disclaimer: "Pattern-based observation, not guaranteed financial advice.",
+    code: "STATISTICS_CATEGORY_CONCENTRATION",
+    params: { categoryName: byCategory[0].name },
   });
   if (
     projectionApplicable
@@ -1709,14 +1763,10 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     && projectedMonthEndMinor > projectionObservedSpendingMinor * 1.2
     && Number(today.slice(-2)) < currentMonthDays
   ) suggestions.push({
-    title: "Review the month-end pace",
-    detail: "The straight-line projection is above current month-to-date spending because calendar days remain.",
-    disclaimer: "Projection based on recent pace, not a guarantee or financial advice.",
+    code: "STATISTICS_MONTH_END_PACE",
   });
   if (!suggestions.length) suggestions.push({
-    title: "Keep building your history",
-    detail: "More actual transactions will make comparisons and pattern detection more meaningful.",
-    disclaimer: "Informational observation, not financial advice.",
+    code: "STATISTICS_BUILD_HISTORY",
   });
 
   const categoryPeriodRows = (rangeFrom: string, rangeToExclusive: string) => groupedSpend(
@@ -1773,7 +1823,13 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     forecastMeanAbsoluteErrorMinor,
     forecastMape,
     forecastSampleMonths: forecastRows.length,
-    forecastBias: forecastRows.length ? (forecastBiasValue > 0 ? "Plans tend to overestimate spending" : forecastBiasValue < 0 ? "Plans tend to underestimate spending" : "Broadly neutral") : "Not enough data",
+    forecastBias: forecastRows.length
+      ? forecastBiasValue > 0
+        ? "overestimate"
+        : forecastBiasValue < 0
+          ? "underestimate"
+          : "neutral"
+      : "insufficient_data",
     categoryConcentration: concentration,
     spendingConsistency: consistency,
     mostActiveWeekday: mostActiveWeekday?.name,
@@ -1827,7 +1883,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
       currentBalances: calendar.today,
       historicalBalances: "snapshot_date",
       plannedAmounts: "due_date",
-      source: "BNR persisted reference rates",
+      source: "bnr",
     },
     period: { from: range.from, to: range.to, months: selectedMonths.length },
     summary,
@@ -1881,7 +1937,6 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
       debtServiceToIncomePercent: periodTotals.incomeMinor ? debtServiceMinor / periodTotals.incomeMinor * 100 : null,
       accounts: liabilityAccounts,
       monthly: debtMonthly,
-      informationalOnly: "Debt ratios and generated schedules are informational estimates. Lender statements and contracts remain authoritative.",
     },
     largestExpenses,
     categoryIncreases,
@@ -1906,20 +1961,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     projectionApplicable,
     categoryConcentrationPercent: concentration,
     spendingConsistencyPercent: consistency,
-    suggestions: suggestions.map((item, index) => ({ id: `suggestion-${index}`, ...item, description: item.detail, severity: "info" })),
-    insights: suggestions.map((item, index) => ({ id: `suggestion-${index}`, ...item, description: item.detail, severity: "info" })),
-    explanations: {
-      reportingCurrency: "Native account and transaction amounts are never rewritten. Actual flows use the persisted BNR rate on the transaction date; balance snapshots use the rate on their as-of date. Changing profile currency re-expresses reports dynamically.",
-      savingsRate: "(Actual income − actual spending after refunds) ÷ actual income × 100. Transfers, adjustments and planned payments are excluded.",
-      cashRunway: "Current liquid cash divided by average actual daily spending over observed days in the selected range.",
-      forecastAccuracy: "100 minus mean absolute percentage error across completed, fully selected calendar months with planned spending.",
-      projectedMonthEnd: "Current-month actual daily spending through today multiplied by the number of calendar days in the month. Available only when the selected range includes today.",
-      concentration: "Share of actual spending represented by the three largest categories.",
-      consistency: "100 minus the coefficient of variation of monthly actual spending, floored at zero.",
-      creditUtilization: "Posted credit-card debt divided by configured credit limits. A card overpayment is not treated as debt.",
-      debtService: "Actual cash paid to cards and loans in the selected range. Loan principal is a transfer; only interest and fees count as spending.",
-      debtServiceToIncome: "Actual card and loan cash payments divided by actual income in the selected range. It is an informational cash-flow ratio, not underwriting advice.",
-    },
-    informationalOnly: "Suggestions are transparent review cues, not guaranteed financial advice.",
+    suggestions: suggestions.map((item, index) => ({ id: `suggestion-${index}`, ...item, severity: "info" as const })),
+    insights: suggestions.map((item, index) => ({ id: `suggestion-${index}`, ...item, severity: "info" as const })),
   };
 }

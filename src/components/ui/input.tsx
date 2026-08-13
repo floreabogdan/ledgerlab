@@ -1,5 +1,8 @@
+"use client";
+
 import type { InputHTMLAttributes, ReactNode } from "react";
 import clsx from "clsx";
+import { useTranslations } from "@/i18n/client";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   leading?: ReactNode;
@@ -30,13 +33,14 @@ export interface FieldProps {
 }
 
 export function Field({ label, htmlFor, required, hint, error, action, className, children }: FieldProps) {
+  const t = useTranslations();
   const hintId = htmlFor ? `${htmlFor}-hint` : undefined;
   const errorId = htmlFor ? `${htmlFor}-error` : undefined;
   return (
     <div className={clsx("field", className)}>
       <div className="field-label-row">
         <label className="field-label" htmlFor={htmlFor}>
-          {label} {required && <><span className="field-required" aria-hidden="true">*</span><span className="sr-only"> (required)</span></>}
+          {label} {required && <><span className="field-required" aria-hidden="true">*</span><span className="sr-only"> ({t("common.controls.required")})</span></>}
         </label>
         {action}
       </div>

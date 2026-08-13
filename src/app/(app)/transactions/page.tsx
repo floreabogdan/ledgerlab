@@ -21,6 +21,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDateRange } from "@/components/date-range-context";
 import { CurrencyCombobox } from "@/components/ui/currency-combobox";
+import { useTranslator, useTranslations } from "@/i18n/client";
+import type { Translator } from "@/i18n/runtime";
+import { parseApiError, translateApiError } from "@/lib/api-error";
 import { currencyMinorUnitDigits } from "@/lib/domain/currency";
 import {
   convertCurrencyMinor,
@@ -83,7 +86,6 @@ type FxQuote = {
   fallbackDays: number;
   cacheStatus?: string;
   isStale?: boolean;
-  refreshError?: string | null;
   provider: string;
   sourceUrls: string[];
 };
@@ -148,26 +150,48 @@ function categorySupportsKind(category: Row, kind: "income" | "expense" | null) 
   return categoryKind === kind || categoryKind === "both";
 }
 
-function categoryPathLabel(category: Row) {
+function categoryPathLabel(category: Row, translate: Translator["translate"]) {
   const row = readRecord(category);
   return stringFrom(row.path, stringFrom(row.parentName)
-    ? `${stringFrom(row.parentName)} › ${stringFrom(row.name, "Category")}`
-    : stringFrom(row.name, "Category"));
+    ? `${stringFrom(row.parentName)} › ${stringFrom(row.name, translate("finance.transactions.common.category"))}`
+    : stringFrom(row.name, translate("finance.transactions.common.category")));
 }
 
-async function uploadTransactionReceipt(transactionId: string, file: File) {
+function kindLabel(kind: string, translate: Translator["translate"]) {
+  const keys = {
+    expense: "finance.transactions.kinds.expense",
+    income: "finance.transactions.kinds.income",
+    transfer: "finance.transactions.kinds.transfer",
+    refund: "finance.transactions.kinds.refund",
+    adjustment: "finance.transactions.kinds.adjustment",
+  } as const;
+  return translate(keys[kind as keyof typeof keys] ?? "finance.transactions.kinds.transaction");
+}
+
+function transactionStatusLabel(status: string, translate: Translator["translate"]) {
+  if (status === "pending") return translate("finance.transactions.status.pending");
+  if (status === "void") return translate("finance.transactions.status.void");
+  return translate("finance.transactions.status.cleared");
+}
+
+async function uploadTransactionReceipt(transactionId: string, file: File, translator: Translator) {
   const params = new URLSearchParams({ filename: file.name });
-  const response = await fetch(`/api/transactions/${encodeURIComponent(transactionId)}/attachments?${params.toString()}`, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": file.type || "application/octet-stream",
-    },
-    body: file,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api/transactions/${encodeURIComponent(transactionId)}/attachments?${params.toString()}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+  } catch {
+    throw new Error(translator.translate("finance.transactions.attachments.uploadFallback"));
+  }
   const body = readRecord(await response.json().catch(() => null));
   if (!response.ok) {
-    throw new Error(stringFrom(body.error ?? body.message, `Receipt upload failed (${response.status})`));
+    throw new Error(translateApiError(translator, parseApiError(body)));
   }
 }
 
@@ -181,6 +205,7 @@ function useDebouncedValue<T>(value: T, delayMs = 250) {
 }
 
 export default function TransactionsPage() {
+  const t = useTranslations();
   const { range } = useDateRange();
   const [entryOpen, setEntryOpen] = useState(false);
   const [entrySeed, setEntrySeed] = useState<Row | null>(null);
@@ -246,11 +271,11 @@ export default function TransactionsPage() {
   const minimumInputMinor = minimum.trim() ? moneyInputToMinor(minimum, filterCurrency) : null;
   const maximumInputMinor = maximum.trim() ? moneyInputToMinor(maximum, filterCurrency) : null;
   const amountFilterError = !amountFilterEnabled && (minimum.trim() || maximum.trim())
-    ? "Choose one account before filtering by amount; native account currencies cannot be compared as raw minor units."
+    ? t("finance.transactions.validation.chooseAccountForAmount")
     : minimum.trim() && minimumInputMinor === null
-      ? `Enter a valid minimum amount in ${filterCurrency}; this filter is not applied yet.`
+      ? t("finance.transactions.validation.minimumAmount", { currency: filterCurrency })
       : maximum.trim() && maximumInputMinor === null
-        ? `Enter a valid maximum amount in ${filterCurrency}; this filter is not applied yet.`
+        ? t("finance.transactions.validation.maximumAmount", { currency: filterCurrency })
         : null;
   const hasActiveFilters = Boolean(
     search || accountFilter || categoryFilter || statusFilter || kindFilter || tagFilter
@@ -318,7 +343,7 @@ export default function TransactionsPage() {
       });
       await reload();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not mark this transaction as cleared");
+      setActionError(caught instanceof Error ? caught.message : t("finance.transactions.validation.clearFallback"));
     } finally {
       setClearingId(null);
     }
@@ -327,94 +352,94 @@ export default function TransactionsPage() {
   return (
     <Page>
       <ViewHeader
-        eyebrow="Actual money"
-        title="Transactions"
-        description="Fast entry, transfers, splits and detailed filtering. Transfers are paired and never counted as income or spending."
+        eyebrow={t("finance.transactions.header.eyebrow")}
+        title={t("finance.transactions.title")}
+        description={t("finance.transactions.header.description")}
         actions={
           <>
-            <Link className={`${kit.button} ${kit.button_secondary}`} href="/import"><FileUp size={16} /> Import CSV</Link>
-            <AddButton onClick={() => openEntry()}>Add transaction</AddButton>
+            <Link className={`${kit.button} ${kit.button_secondary}`} href="/import"><FileUp size={16} /> {t("finance.transactions.header.importCsv")}</Link>
+            <AddButton onClick={() => openEntry()}>{t("finance.transactions.header.add")}</AddButton>
           </>
         }
       />
 
       <Section
-        title="Activity ledger"
-        description={`${total.toLocaleString(workspaceLocale())} matching transaction${total === 1 ? "" : "s"} · ${clearedCount.toLocaleString(workspaceLocale())} cleared across the selected filters`}
+        title={t("finance.transactions.ledger.title")}
+        description={t("finance.transactions.ledger.description", { total, cleared: clearedCount })}
         action={
           <div className={ui.toolbarGroup}>
-            <span className={`${ui.small} ${ui.muted}`}>Cleared income <strong className={ui.positive}>{monetaryTotalsAvailable ? formatMoney(actualIncome, workspaceCurrency) : "Unavailable"}</strong></span>
-            <span className={`${ui.small} ${ui.muted}`}>Cleared net spending <strong className={ui.negative}>{monetaryTotalsAvailable ? formatMoney(actualSpending, workspaceCurrency) : "Unavailable"}</strong></span>
+            <span className={`${ui.small} ${ui.muted}`}>{t("finance.transactions.ledger.clearedIncome")} <strong className={ui.positive}>{monetaryTotalsAvailable ? formatMoney(actualIncome, workspaceCurrency) : t("finance.transactions.common.unavailable")}</strong></span>
+            <span className={`${ui.small} ${ui.muted}`}>{t("finance.transactions.ledger.clearedSpending")} <strong className={ui.negative}>{monetaryTotalsAvailable ? formatMoney(actualSpending, workspaceCurrency) : t("finance.transactions.common.unavailable")}</strong></span>
           </div>
         }
       >
         <FilterBar>
-          <SearchField value={search} onChange={(value) => { setSearch(value); setPageIndex(0); }} placeholder="Search merchant, note, category…" />
-          <Select aria-label="Account filter" value={accountFilter} onValueChange={(value) => { setAccountFilter(value); setPageIndex(0); }}>
-            <option value="">All accounts</option>
-            {accounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")}</option>; })}
+          <SearchField value={search} onChange={(value) => { setSearch(value); setPageIndex(0); }} placeholder={t("finance.transactions.filters.search")} />
+          <Select aria-label={t("finance.transactions.filters.accountAria")} value={accountFilter} onValueChange={(value) => { setAccountFilter(value); setPageIndex(0); }}>
+            <option value="">{t("finance.transactions.filters.allAccounts")}</option>
+            {accounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, t("finance.transactions.common.account"))}</option>; })}
           </Select>
-          <Select aria-label="Type filter" value={kindFilter} onValueChange={(value) => { setKindFilter(value); setPageIndex(0); }}>
-            <option value="">All types</option>
-            <option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option><option value="refund">Refund</option><option value="adjustment">Adjustment</option>
+          <Select aria-label={t("finance.transactions.filters.typeAria")} value={kindFilter} onValueChange={(value) => { setKindFilter(value); setPageIndex(0); }}>
+            <option value="">{t("finance.transactions.filters.allTypes")}</option>
+            <option value="expense">{t("finance.transactions.kinds.expense")}</option><option value="income">{t("finance.transactions.kinds.income")}</option><option value="transfer">{t("finance.transactions.kinds.transfer")}</option><option value="refund">{t("finance.transactions.kinds.refund")}</option><option value="adjustment">{t("finance.transactions.kinds.adjustment")}</option>
           </Select>
           <Button variant={showFilters ? "secondary" : "ghost"} icon={<SlidersHorizontal size={15} />} onClick={() => setShowFilters((value) => !value)}>
-            More filters
+            {t("finance.transactions.filters.more")}
           </Button>
-          <Button variant="ghost" icon={<RotateCcw size={14} />} onClick={resetFilters}>Reset</Button>
+          <Button variant="ghost" icon={<RotateCcw size={14} />} onClick={resetFilters}>{t("finance.transactions.filters.reset")}</Button>
         </FilterBar>
         {showFilters ? (
           <FilterBar>
-            <Input aria-label="From date" type="date" min={range.from} max={range.to} value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPageIndex(0); }} />
-            <Input aria-label="To date" type="date" min={range.from} max={range.to} value={toDate} onChange={(event) => { setToDate(event.target.value); setPageIndex(0); }} />
-            <Select aria-label="Category filter" value={categoryFilter} onValueChange={(value) => { setCategoryFilter(value); setPageIndex(0); }}>
-              <option value="">All categories</option>
-              {categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, "Category")}</option>; })}
+            <Input aria-label={t("finance.transactions.filters.fromDate")} type="date" min={range.from} max={range.to} value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPageIndex(0); }} />
+            <Input aria-label={t("finance.transactions.filters.toDate")} type="date" min={range.from} max={range.to} value={toDate} onChange={(event) => { setToDate(event.target.value); setPageIndex(0); }} />
+            <Select aria-label={t("finance.transactions.filters.categoryAria")} value={categoryFilter} onValueChange={(value) => { setCategoryFilter(value); setPageIndex(0); }}>
+              <option value="">{t("finance.transactions.filters.allCategories")}</option>
+              {categories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{stringFrom(category.name, t("finance.transactions.common.category"))}</option>; })}
             </Select>
-            <Select aria-label="Status filter" value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPageIndex(0); }}>
-              <option value="">Any status</option><option value="cleared">Cleared</option><option value="pending">Pending</option><option value="void">Void</option>
+            <Select aria-label={t("finance.transactions.filters.statusAria")} value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPageIndex(0); }}>
+              <option value="">{t("finance.transactions.filters.anyStatus")}</option><option value="cleared">{t("finance.transactions.status.cleared")}</option><option value="pending">{t("finance.transactions.status.pending")}</option><option value="void">{t("finance.transactions.status.void")}</option>
             </Select>
-            <Select aria-label="Tag filter" value={tagFilter} onValueChange={(value) => { setTagFilter(value); setPageIndex(0); }}>
-              <option value="">All tags</option>
+            <Select aria-label={t("finance.transactions.filters.tagAria")} value={tagFilter} onValueChange={(value) => { setTagFilter(value); setPageIndex(0); }}>
+              <option value="">{t("finance.transactions.filters.allTags")}</option>
               {tags.map((item, index) => { const tag = readRecord(item); const name = stringFrom(tag.name, String(item)); return <option value={name} key={stringFrom(tag.id, String(index))}>{name}</option>; })}
             </Select>
             <Input
-              aria-label={amountFilterEnabled ? `Minimum amount (${filterCurrency})` : "Minimum amount (choose an account first)"}
+              aria-label={amountFilterEnabled ? t("finance.transactions.filters.minimumAria", { currency: filterCurrency }) : t("finance.transactions.filters.minimumDisabledAria")}
               aria-invalid={Boolean(minimum.trim() && minimumInputMinor === null)}
               disabled={!amountFilterEnabled}
               inputMode="decimal"
-              placeholder={amountFilterEnabled ? `Min ${filterCurrency}` : "Choose account for amount"}
+              placeholder={amountFilterEnabled ? t("finance.transactions.filters.minimumPlaceholder", { currency: filterCurrency }) : t("finance.transactions.filters.chooseAccountPlaceholder")}
               value={minimum}
               onChange={(event) => { setMinimum(event.target.value); setPageIndex(0); }}
             />
             <Input
-              aria-label={amountFilterEnabled ? `Maximum amount (${filterCurrency})` : "Maximum amount (choose an account first)"}
+              aria-label={amountFilterEnabled ? t("finance.transactions.filters.maximumAria", { currency: filterCurrency }) : t("finance.transactions.filters.maximumDisabledAria")}
               aria-invalid={Boolean(maximum.trim() && maximumInputMinor === null)}
               disabled={!amountFilterEnabled}
               inputMode="decimal"
-              placeholder={amountFilterEnabled ? `Max ${filterCurrency}` : "Choose account for amount"}
+              placeholder={amountFilterEnabled ? t("finance.transactions.filters.maximumPlaceholder", { currency: filterCurrency }) : t("finance.transactions.filters.chooseAccountPlaceholder")}
               value={maximum}
               onChange={(event) => { setMaximum(event.target.value); setPageIndex(0); }}
             />
           </FilterBar>
         ) : null}
-        <FormMessage error={amountFilterError ?? actionError ?? (!monetaryTotalsAvailable ? `Reporting totals are unavailable because one or more ${workspaceCurrency} conversion rates are missing. Native transaction amounts remain accurate.` : null)} />
+        <FormMessage error={amountFilterError ?? actionError ?? (!monetaryTotalsAvailable ? t("finance.transactions.validation.reportingUnavailable", { currency: workspaceCurrency }) : null)} />
 
         <DataState
           loading={loading}
           error={error}
           onRetry={reload}
           empty={!transactions.length}
-          emptyTitle={total ? "No transactions on this page" : hasActiveFilters ? "No matching transactions" : "No transactions yet"}
-          emptyDescription={total ? "Return to an earlier page." : hasActiveFilters ? "Try broadening or resetting the current filters." : "Record an expense, income or transfer. Actual balances update immediately."}
+          emptyTitle={total ? t("finance.transactions.empty.pageTitle") : hasActiveFilters ? t("finance.transactions.empty.filteredTitle") : t("finance.transactions.empty.title")}
+          emptyDescription={total ? t("finance.transactions.empty.pageDescription") : hasActiveFilters ? t("finance.transactions.empty.filteredDescription") : t("finance.transactions.empty.description")}
           action={total
-            ? <Button variant="secondary" onClick={() => setPageIndex(0)}>First page</Button>
+            ? <Button variant="secondary" onClick={() => setPageIndex(0)}>{t("finance.transactions.pagination.first")}</Button>
             : hasActiveFilters
-              ? <Button variant="secondary" icon={<Filter size={15} />} onClick={resetFilters}>Reset filters</Button>
-              : <AddButton onClick={() => openEntry()}>Add transaction</AddButton>}
+              ? <Button variant="secondary" icon={<Filter size={15} />} onClick={resetFilters}>{t("finance.transactions.filters.resetFilters")}</Button>
+              : <AddButton onClick={() => openEntry()}>{t("finance.transactions.header.add")}</AddButton>}
         >
-          <ResponsiveTable label="Transactions">
-            <thead><tr><th>Date</th><th>Merchant / description</th><th>Category</th><th>Account</th><th>Status</th><th>Amount</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <ResponsiveTable label={t("finance.transactions.table.label")}>
+            <thead><tr><th>{t("finance.transactions.table.date")}</th><th>{t("finance.transactions.table.merchant")}</th><th>{t("finance.transactions.table.category")}</th><th>{t("finance.transactions.table.account")}</th><th>{t("finance.transactions.table.status")}</th><th>{t("finance.transactions.table.amount")}</th><th><span className="sr-only">{t("finance.transactions.table.actions")}</span></th></tr></thead>
             <tbody>
               {transactions.map((item, index) => {
                 const row = readRecord(item);
@@ -430,40 +455,44 @@ export default function TransactionsPage() {
                 const originalSignedAmount = amount < 0 ? -originalAmountMinor : originalAmountMinor;
                 const fxSource = stringFrom(row.fxRateSource);
                 const fxDetail = fxSource === "bnr"
-                  ? `BNR reference${row.fxRateDate ? ` · ${formatDate(row.fxRateDate, { day: "2-digit", month: "short", year: undefined })}` : ""}`
+                  ? row.fxRateDate
+                    ? t("finance.transactions.row.bnrReferenceDate", { date: formatDate(row.fxRateDate, { day: "2-digit", month: "short", year: undefined }) })
+                    : t("finance.transactions.row.bnrReference")
                   : fxSource === "manual"
-                    ? `Manual exchange rate${row.referenceFxRateScaled ? " · BNR reference retained" : ""}`
-                    : "Foreign-currency amount";
+                    ? row.referenceFxRateScaled
+                      ? t("finance.transactions.row.manualRateRetained")
+                      : t("finance.transactions.row.manualRate")
+                    : t("finance.transactions.row.foreignAmount");
                 return (
                   <tr key={stringFrom(row.id, String(index))}>
                     <td className={ui.nowrap}>{formatDate(row.date, { day: "2-digit", month: "short", year: "2-digit" })}</td>
                     <td>
-                      <span className={ui.tablePrimary}>{stringFrom(row.merchantName ?? row.merchant ?? row.description, kind.replaceAll("_", " "))}</span>
-                      <span className={ui.tableSecondary}>{stringFrom(row.notes ?? row.note, kind === "transfer" ? "Internal transfer — excluded from totals" : "")}</span>
+                      <span className={ui.tablePrimary}>{stringFrom(row.merchantName ?? row.merchant ?? row.description, kindLabel(kind, t))}</span>
+                      <span className={ui.tableSecondary}>{stringFrom(row.notes ?? row.note, kind === "transfer" ? t("finance.transactions.row.internalTransfer") : "")}</span>
                       {rowTags.length ? <span className={ui.tagList}>{rowTags.map((tag) => <Pill key={tag}>{tag}</Pill>)}</span> : null}
                     </td>
-                    <td><span className={ui.categoryDot} style={{ "--category-color": stringFrom(row.categoryColor, "#2563eb") } as React.CSSProperties} />{stringFrom(row.categoryName ?? row.category, kind === "transfer" ? "Transfer" : "Uncategorised")}{Number(row.splitCount) > 1 ? <small>{Number(row.splitCount)}-way split</small> : null}</td>
-                    <td>{stringFrom(row.accountName ?? row.account, "Account")}{row.toAccountName ? <small>→ {stringFrom(row.toAccountName)}</small> : null}</td>
-                    <td><Pill tone={stringFrom(row.status) === "pending" ? "warning" : stringFrom(row.status) === "void" ? "negative" : "positive"}>{stringFrom(row.status, "cleared")}</Pill></td>
+                    <td><span className={ui.categoryDot} style={{ "--category-color": stringFrom(row.categoryColor, "#2563eb") } as React.CSSProperties} />{stringFrom(row.categoryName ?? row.category, kind === "transfer" ? t("finance.transactions.kinds.transfer") : t("finance.transactions.common.uncategorised"))}{Number(row.splitCount) > 1 ? <small>{t("finance.transactions.row.splitCount", { count: Number(row.splitCount) })}</small> : null}</td>
+                    <td>{stringFrom(row.accountName ?? row.account, t("finance.transactions.common.account"))}{row.toAccountName ? <small>→ {stringFrom(row.toAccountName)}</small> : null}</td>
+                    <td><Pill tone={stringFrom(row.status) === "pending" ? "warning" : stringFrom(row.status) === "void" ? "negative" : "positive"}>{transactionStatusLabel(stringFrom(row.status, "cleared"), t)}</Pill></td>
                     <td className={`${ui.amount} ${amountTone(amount)}`}>
                       {amount > 0 ? "+" : ""}{formatMoney(amount, accountCurrency)}
                       {hasOriginalAmount ? (
                         <small className={ui.fxAmountSecondary}>{originalSignedAmount > 0 ? "+" : ""}{formatMoney(originalSignedAmount, originalCurrency)} · {fxDetail}</small>
                       ) : kind === "transfer" && pairedCurrency && pairedAmountMinor > 0 ? (
-                        <small className={ui.fxAmountSecondary}>Paired posting {formatMoney(pairedAmountMinor, pairedCurrency)}</small>
+                        <small className={ui.fxAmountSecondary}>{t("finance.transactions.row.pairedPosting", { amount: formatMoney(pairedAmountMinor, pairedCurrency) })}</small>
                       ) : null}
                     </td>
                     <td>
                       <div className={ui.paymentActions}>
                         {stringFrom(row.status) === "pending" ? (
-                          <IconButton label="Mark transaction cleared" disabled={Boolean(clearingId)} onClick={() => void clearPending(row)}>
+                          <IconButton label={t("finance.transactions.row.markCleared")} disabled={Boolean(clearingId)} onClick={() => void clearPending(row)}>
                             <CheckCircle2 size={15} />
                           </IconButton>
                         ) : null}
-                        <IconButton label={`Manage receipts${numberFrom(row.attachmentCount) ? ` (${numberFrom(row.attachmentCount)})` : ""}`} onClick={() => setAttachmentTransaction(row)}>
+                        <IconButton label={t("finance.transactions.row.manageReceipts", { count: numberFrom(row.attachmentCount) })} onClick={() => setAttachmentTransaction(row)}>
                           <Paperclip size={15} />
                         </IconButton>
-                        <IconButton label="Duplicate transaction" onClick={() => openEntry(row)}><Copy size={15} /></IconButton>
+                        <IconButton label={t("finance.transactions.row.duplicate")} onClick={() => openEntry(row)}><Copy size={15} /></IconButton>
                       </div>
                     </td>
                   </tr>
@@ -472,13 +501,13 @@ export default function TransactionsPage() {
             </tbody>
           </ResponsiveTable>
           {total > pageSize ? (
-            <div className={ui.pagination} aria-label="Transaction pages">
+            <div className={ui.pagination} aria-label={t("finance.transactions.pagination.aria")}>
               <span>
-                Showing {(pageIndex * pageSize + 1).toLocaleString(workspaceLocale())}–{Math.min((pageIndex + 1) * pageSize, total).toLocaleString(workspaceLocale())} of {total.toLocaleString(workspaceLocale())} · Page {Math.min(pageIndex + 1, pageCount)} of {pageCount}
+                {t("finance.transactions.pagination.summary", { from: pageIndex * pageSize + 1, to: Math.min((pageIndex + 1) * pageSize, total), total, page: Math.min(pageIndex + 1, pageCount), pages: pageCount })}
               </span>
               <div>
-                <Button variant="ghost" disabled={loading || pageIndex === 0} onClick={() => setPageIndex((current) => Math.max(0, current - 1))}>Previous</Button>
-                <Button variant="secondary" disabled={loading || (pageIndex + 1) * pageSize >= total} onClick={() => setPageIndex((current) => current + 1)}>Next</Button>
+                <Button variant="ghost" disabled={loading || pageIndex === 0} onClick={() => setPageIndex((current) => Math.max(0, current - 1))}>{t("finance.transactions.pagination.previous")}</Button>
+                <Button variant="secondary" disabled={loading || (pageIndex + 1) * pageSize >= total} onClick={() => setPageIndex((current) => current + 1)}>{t("finance.transactions.pagination.next")}</Button>
               </div>
             </div>
           ) : null}
@@ -516,6 +545,8 @@ function AttachmentManager({
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const translator = useTranslator();
+  const t = translator.translate;
   const transactionId = stringFrom(transaction.id);
   const attachmentsUrl = `/api/transactions/${encodeURIComponent(transactionId)}/attachments`;
   const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>(attachmentsUrl, {});
@@ -530,18 +561,18 @@ function AttachmentManager({
   async function upload() {
     if (!file || uploading) return;
     if (file.size > 10 * 1024 * 1024) {
-      setActionError("Receipt files must not exceed 10 MB.");
+      setActionError(t("finance.transactions.attachments.tooLarge"));
       return;
     }
     setUploading(true);
     setActionError(null);
     try {
-      await uploadTransactionReceipt(transactionId, file);
+      await uploadTransactionReceipt(transactionId, file, translator);
       setFile(null);
       setInputKey((current) => current + 1);
       await Promise.all([reload(), onChanged()]);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not upload the receipt.");
+      setActionError(caught instanceof Error ? caught.message : t("finance.transactions.attachments.uploadFallback"));
     } finally {
       setUploading(false);
     }
@@ -556,7 +587,7 @@ function AttachmentManager({
       setConfirmDeleteId(null);
       await Promise.all([reload(), onChanged()]);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "Could not delete the receipt.");
+      setActionError(caught instanceof Error ? caught.message : t("finance.transactions.attachments.deleteFallback"));
     } finally {
       setDeletingId(null);
     }
@@ -566,9 +597,9 @@ function AttachmentManager({
     <Modal
       open
       onClose={onClose}
-      title="Receipts"
-      description={`${stringFrom(transaction.merchantName ?? transaction.merchant ?? transaction.description, "Transaction")} · ${formatDate(transaction.date)}`}
-      footer={<Button variant="secondary" onClick={onClose}>Close</Button>}
+      title={t("finance.transactions.attachments.title")}
+      description={t("finance.transactions.attachments.description", { transaction: stringFrom(transaction.merchantName ?? transaction.merchant ?? transaction.description, t("finance.transactions.kinds.transaction")), date: formatDate(transaction.date) })}
+      footer={<Button variant="secondary" onClick={onClose}>{t("common.actions.close")}</Button>}
     >
       <div className={ui.receiptManager}>
         <FormMessage error={actionError} />
@@ -583,18 +614,18 @@ function AttachmentManager({
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
           <label className={`${kit.button} ${kit.button_secondary} ${ui.attachmentPicker}`} htmlFor="existing-transaction-receipt">
-            <Paperclip size={15} aria-hidden="true" /> {file ? "Replace selection" : "Choose receipt"}
+            <Paperclip size={15} aria-hidden="true" /> {file ? t("finance.transactions.attachments.replaceSelection") : t("finance.transactions.attachments.choose")}
           </label>
-          <span id="existing-transaction-receipt-hint">{file ? `${file.name} · ${new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(file.size / 1024)} KB` : "PDF or image · up to 10 MB"}</span>
-          <Button disabled={!file || uploading} onClick={() => void upload()}>{uploading ? "Uploading…" : "Upload"}</Button>
+          <span id="existing-transaction-receipt-hint">{file ? t("finance.transactions.attachments.fileSize", { name: file.name, size: new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(file.size / 1024) }) : t("finance.transactions.attachments.hint")}</span>
+          <Button disabled={!file || uploading} onClick={() => void upload()}>{uploading ? t("finance.transactions.attachments.uploading") : t("finance.transactions.attachments.upload")}</Button>
         </div>
         <DataState
           loading={loading}
           error={error}
           onRetry={reload}
           empty={!attachments.length}
-          emptyTitle="No receipts attached"
-          emptyDescription="Upload a PDF or image to keep it privately with this transaction."
+          emptyTitle={t("finance.transactions.attachments.emptyTitle")}
+          emptyDescription={t("finance.transactions.attachments.emptyDescription")}
         >
           <div className={ui.receiptList}>
             {attachments.map((item, index) => {
@@ -605,11 +636,11 @@ function AttachmentManager({
               return (
                 <div className={ui.receiptItem} key={id}>
                   <span>
-                    <strong>{stringFrom(row.fileName, "Receipt")}</strong>
+                    <strong>{stringFrom(row.fileName, t("finance.transactions.attachments.receiptFallback"))}</strong>
                     <small>
                       {isFile
-                        ? `${stringFrom(row.mimeType, "File")} · ${new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(sizeBytes / 1024)} KB`
-                        : stringFrom(row.externalReference, "Legacy receipt reference")}
+                        ? t("finance.transactions.attachments.fileTypeSize", { type: stringFrom(row.mimeType, t("finance.transactions.attachments.fileFallback")), size: new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(sizeBytes / 1024) })
+                        : stringFrom(row.externalReference, t("finance.transactions.attachments.legacyReference"))}
                     </small>
                   </span>
                   <div className={ui.receiptActions}>
@@ -618,16 +649,16 @@ function AttachmentManager({
                         className={`${kit.button} ${kit.button_ghost}`}
                         href={`/api/attachments/${encodeURIComponent(id)}/download`}
                       >
-                        <Download size={15} aria-hidden="true" /> Download
+                        <Download size={15} aria-hidden="true" /> {t("finance.transactions.attachments.download")}
                       </a>
                     ) : null}
                     {confirmDeleteId === id ? (
                       <>
-                        <Button variant="danger" disabled={deletingId === id} onClick={() => void remove(id)}>{deletingId === id ? "Deleting…" : "Delete"}</Button>
-                        <Button variant="ghost" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                        <Button variant="danger" disabled={deletingId === id} onClick={() => void remove(id)}>{deletingId === id ? t("finance.transactions.attachments.deleting") : t("common.actions.delete")}</Button>
+                        <Button variant="ghost" onClick={() => setConfirmDeleteId(null)}>{t("common.actions.cancel")}</Button>
                       </>
                     ) : (
-                      <IconButton label={`Delete ${stringFrom(row.fileName, "receipt")}`} onClick={() => setConfirmDeleteId(id)}>
+                      <IconButton label={t("finance.transactions.attachments.deleteAria", { name: stringFrom(row.fileName, t("finance.transactions.attachments.receiptLower")) })} onClick={() => setConfirmDeleteId(id)}>
                         <Trash2 size={15} />
                       </IconButton>
                     )}
@@ -659,6 +690,8 @@ function TransactionForm({
   existing: Row[];
   initial: Row | null;
 }) {
+  const translator = useTranslator();
+  const t = translator.translate;
   const initialKind = stringFrom(initial?.kind ?? initial?.type, "expense") as Kind;
   const initialEntryAccounts = transactionEntryAccounts(accounts, initialKind);
   const requestedInitialAccountId = stringFrom(initial?.accountId);
@@ -854,14 +887,21 @@ function TransactionForm({
             signal: controller.signal,
           });
           const body = readRecord(await response.json().catch(() => null));
-          if (!response.ok) throw new Error(stringFrom(body.error ?? body.message, `Reference rate unavailable (${response.status})`));
+          if (!response.ok) {
+            if (active) setFxError(translateApiError(translator, parseApiError(body)));
+            return;
+          }
           const quote = readRecord(body.quote);
-          if (!Number.isSafeInteger(quote.rateScaled) || numberFrom(quote.rateScaled) <= 0) throw new Error("The reference-rate response was invalid.");
+          if (!Number.isSafeInteger(quote.rateScaled) || numberFrom(quote.rateScaled) <= 0) {
+            if (active) setFxError(t("finance.transactions.fx.invalidResponse"));
+            return;
+          }
           if (active) setFxQuote(quote as FxQuote);
         } catch (error) {
           if (!active || controller.signal.aborted) return;
+          void error;
           setFxQuote(null);
-          setFxError(error instanceof Error ? error.message : "No reference rate is available.");
+          setFxError(t("finance.transactions.fx.unavailable"));
         } finally {
           if (active) setFxLoading(false);
         }
@@ -871,7 +911,7 @@ function TransactionForm({
       active = false;
       controller.abort();
     };
-  }, [conversionFromCurrency, conversionToCurrency, date, isCurrencyConversion, kind]);
+  }, [conversionFromCurrency, conversionToCurrency, date, isCurrencyConversion, kind, t, translator]);
 
   const resetCategoryCreator = () => {
     setCategoryCreatorOpen(false);
@@ -885,11 +925,11 @@ function TransactionForm({
   async function createAndSelectCategory() {
     const categoryKind = transactionCategoryKind(kind);
     if (!categoryKind) {
-      setCategoryCreateError("Create categories from an income, expense, or refund entry.");
+      setCategoryCreateError(t("finance.transactions.validation.categoryKind"));
       return;
     }
     if (!newCategoryName.trim()) {
-      setCategoryCreateError("Enter a category name.");
+      setCategoryCreateError(t("finance.transactions.validation.categoryName"));
       return;
     }
     setCreatingCategory(true);
@@ -910,7 +950,7 @@ function TransactionForm({
       });
       const category = readRecord(response.category);
       const id = stringFrom(category.id);
-      if (!id) throw new Error("The category was created, but the response did not include its id.");
+      if (!id) throw new Error(t("finance.transactions.validation.categoryMissingId"));
       setCreatedCategories((current) => [...current.filter((item) => stringFrom(readRecord(item).id) !== id), category]);
       if (useSplits) {
         setSplits((current) => {
@@ -924,7 +964,7 @@ function TransactionForm({
       resetCategoryCreator();
       await onCreated();
     } catch (caught) {
-      setCategoryCreateError(caught instanceof Error ? caught.message : "Could not create the category.");
+      setCategoryCreateError(caught instanceof Error ? caught.message : t("finance.transactions.validation.categoryFallback"));
     } finally {
       setCreatingCategory(false);
     }
@@ -938,11 +978,11 @@ function TransactionForm({
 
   const { submit, submitting, submitError, setSubmitError } = useSubmit(async () => {
     if (attachmentFile && attachmentFile.size > 10 * 1024 * 1024) {
-      throw new Error("Receipt files must not exceed 10 MB.");
+      throw new Error(t("finance.transactions.attachments.tooLarge"));
     }
     if (pendingAttachmentTransactionId) {
-      if (!attachmentFile) throw new Error("Choose a receipt file to retry the upload.");
-      await uploadTransactionReceipt(pendingAttachmentTransactionId, attachmentFile);
+      if (!attachmentFile) throw new Error(t("finance.transactions.validation.chooseReceiptRetry"));
+      await uploadTransactionReceipt(pendingAttachmentTransactionId, attachmentFile, translator);
       setPendingAttachmentTransactionId(null);
       setSessionCount((count) => count + 1);
       await onCreated();
@@ -951,20 +991,20 @@ function TransactionForm({
       return;
     }
     const rawAmount = moneyInputToMinor(amount, isForeignEntry ? normalizedEnteredCurrency : selectedCurrency);
-    if (!selectedAccountId) throw new Error("Choose an account.");
-    if (kind !== "transfer" && !enteredCurrencyValid) throw new Error("Choose a supported ISO 4217 currency.");
-    if (rawAmount === null || rawAmount === 0) throw new Error(`Enter a valid non-zero amount in ${isForeignEntry ? normalizedEnteredCurrency : selectedCurrency}.`);
-    if (kind === "transfer" && (!toAccountId || toAccountId === selectedAccountId)) throw new Error("Choose a different destination account.");
+    if (!selectedAccountId) throw new Error(t("finance.transactions.validation.chooseAccount"));
+    if (kind !== "transfer" && !enteredCurrencyValid) throw new Error(t("finance.transactions.validation.currency"));
+    if (rawAmount === null || rawAmount === 0) throw new Error(t("finance.transactions.validation.nonzeroAmount", { currency: isForeignEntry ? normalizedEnteredCurrency : selectedCurrency }));
+    if (kind === "transfer" && (!toAccountId || toAccountId === selectedAccountId)) throw new Error(t("finance.transactions.validation.destinationAccount"));
     if (isCurrencyConversion) {
-      if (rateMode === "reference" && !referenceRateScaled) throw new Error("Wait for the BNR reference rate or enter the exchange rate manually.");
-      if (!activeRateScaled || activeRateScaled <= 0) throw new Error("Enter a positive exchange rate.");
+      if (rateMode === "reference" && !referenceRateScaled) throw new Error(t("finance.transactions.validation.waitForRate"));
+      if (!activeRateScaled || activeRateScaled <= 0) throw new Error(t("finance.transactions.validation.positiveRate"));
       const convertedAmount = isCrossCurrencyTransfer ? destinationAmountAbsolute : postedAccountAmountAbsolute;
-      if (!convertedAmount || convertedAmount <= 0) throw new Error(`Enter or calculate a positive amount in ${conversionToCurrency}.`);
-      if (!exactAmountReconciles) throw new Error("This exact account amount cannot be represented by the derived eight-decimal exchange rate. Edit the exchange rate instead.");
+      if (!convertedAmount || convertedAmount <= 0) throw new Error(t("finance.transactions.validation.positiveConvertedAmount", { currency: conversionToCurrency }));
+      if (!exactAmountReconciles) throw new Error(t("finance.transactions.validation.fxPrecision"));
     }
     if (useSplits) {
-      if (splits.some((split) => !split.categoryId || moneyInputToMinor(split.amount, selectedCurrency) === null)) throw new Error("Complete every split category and amount.");
-      if (splitTotal !== postedAccountAmountAbsolute) throw new Error(`Split amounts must add up exactly to the posted ${selectedCurrency} amount.`);
+      if (splits.some((split) => !split.categoryId || moneyInputToMinor(split.amount, selectedCurrency) === null)) throw new Error(t("finance.transactions.validation.splitComplete"));
+      if (splitTotal !== postedAccountAmountAbsolute) throw new Error(t("finance.transactions.validation.splitTotal", { currency: selectedCurrency }));
     }
     const originalAbsolute = Math.abs(rawAmount);
     const amountMinor = kind === "adjustment" ? submittedSignedAmount ?? 0 : postedAccountAmountAbsolute ?? 0;
@@ -999,14 +1039,14 @@ function TransactionForm({
       });
       const transactionId = stringFrom(readRecord(created.transaction).id);
       if (attachmentFile) {
-        if (!transactionId) throw new Error("The transaction was saved, but its receipt could not be linked because the server response had no transaction id.");
+        if (!transactionId) throw new Error(t("finance.transactions.validation.receiptMissingTransaction"));
         try {
-          await uploadTransactionReceipt(transactionId, attachmentFile);
+          await uploadTransactionReceipt(transactionId, attachmentFile, translator);
         } catch (error) {
           setPendingAttachmentTransactionId(transactionId);
           await onCreated();
-          const reason = error instanceof Error ? error.message : "Receipt upload failed.";
-          throw new Error(`Transaction saved, but the receipt was not uploaded. ${reason} Choose a valid file and retry; the transaction will not be created again.`);
+          const reason = error instanceof Error ? error.message : t("finance.transactions.attachments.uploadFallback");
+          throw new Error(t("finance.transactions.validation.receiptSavedRetry", { reason }));
         }
       }
     } catch (error) {
@@ -1022,9 +1062,9 @@ function TransactionForm({
   });
 
   const close = () => { setSubmitError(null); setSessionCount(0); resetCategoryCreator(); onClose(); };
-  const selectedAccountName = stringFrom(readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === selectedAccountId)).name, "selected account");
+  const selectedAccountName = stringFrom(readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === selectedAccountId)).name, t("finance.transactions.form.selectedAccount"));
   const conversionTargetAccountName = isCrossCurrencyTransfer
-    ? stringFrom(destinationAccount.name, "destination account")
+    ? stringFrom(destinationAccount.name, t("finance.transactions.form.destinationAccount"))
     : selectedAccountName;
   const displayedRate = useExactAccountAmount
     ? derivedExactRateScaled ? rateScaledToInput(derivedExactRateScaled, rateScale) : ""
@@ -1037,22 +1077,22 @@ function TransactionForm({
     <Modal
       open={open}
       onClose={close}
-      title={initial ? "Duplicate transaction" : "Add transaction"}
-      description={sessionCount ? `${sessionCount} transaction${sessionCount === 1 ? "" : "s"} added in this session` : "Record actual activity. Press Ctrl/⌘ + Enter to save."}
+      title={initial ? t("finance.transactions.form.duplicateTitle") : t("finance.transactions.form.title")}
+      description={sessionCount ? t("finance.transactions.form.sessionCount", { count: sessionCount }) : t("finance.transactions.form.description")}
       wide
       footer={
         <>
           {!initial ? (
             <label className={`${ui.small} ${ui.footerCheck}`}>
-              <input type="checkbox" checked={addAnother} onChange={(event) => setAddAnother(event.target.checked)} /> Keep adding
+              <input type="checkbox" checked={addAnother} onChange={(event) => setAddAnother(event.target.checked)} /> {t("finance.transactions.form.keepAdding")}
             </label>
           ) : null}
-          <Button variant="ghost" onClick={close}>Cancel</Button>
+          <Button variant="ghost" onClick={close}>{t("common.actions.cancel")}</Button>
           <Button
             disabled={submitting || Boolean(!pendingAttachmentTransactionId && duplicateDetected && !duplicateConfirmed)}
             onClick={() => void submit()}
           >
-            {submitting ? "Saving…" : pendingAttachmentTransactionId ? "Retry receipt upload" : addAnother ? "Save & add another" : "Save transaction"}
+            {submitting ? t("finance.transactions.form.saving") : pendingAttachmentTransactionId ? t("finance.transactions.form.retryReceipt") : addAnother ? t("finance.transactions.form.saveAnother") : t("finance.transactions.form.save")}
           </Button>
         </>
       }
@@ -1061,13 +1101,13 @@ function TransactionForm({
         onSubmit={(event) => void submit(event)}
         onKeyDown={(event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void submit(); }}
       >
-        <div className={ui.typeSwitch} role="group" aria-label="Transaction type">
+        <div className={ui.typeSwitch} role="group" aria-label={t("finance.transactions.form.typeAria")}>
           {([
-            ["expense", "Expense", <ArrowUpRight size={14} key="expense" />],
-            ["income", "Income", <ArrowDownLeft size={14} key="income" />],
-            ["transfer", "Transfer", <ArrowLeftRight size={14} key="transfer" />],
-            ["refund", "Refund", <RotateCcw size={14} key="refund" />],
-            ["adjustment", "Adjustment", <SlidersHorizontal size={14} key="adjustment" />],
+            ["expense", "finance.transactions.kinds.expense", <ArrowUpRight size={14} key="expense" />],
+            ["income", "finance.transactions.kinds.income", <ArrowDownLeft size={14} key="income" />],
+            ["transfer", "finance.transactions.kinds.transfer", <ArrowLeftRight size={14} key="transfer" />],
+            ["refund", "finance.transactions.kinds.refund", <RotateCcw size={14} key="refund" />],
+            ["adjustment", "finance.transactions.kinds.adjustment", <SlidersHorizontal size={14} key="adjustment" />],
           ] as const).map(([value, label, icon]) => (
             <button type="button" key={value} aria-pressed={kind === value} onClick={() => {
               const nextAccounts = transactionEntryAccounts(accounts, value);
@@ -1091,18 +1131,18 @@ function TransactionForm({
               } else if (enteredCurrencyFollowsAccount) {
                 setEnteredCurrency(nextCurrency);
               }
-            }}>{icon} {label}</button>
+            }}>{icon} {t(label)}</button>
           ))}
         </div>
 
         <div className={`${ui.formGrid} ${ui.formOffset}`}>
-          <Field label="Date">
+          <Field label={t("finance.transactions.form.date")}>
             <Input type="date" max={isoToday()} value={date} onChange={(event) => setDate(event.target.value)} />
           </Field>
-          <Field label="Status" hint="Pending means the activity already occurred but has not settled. Use Planned Payments for future cash movements.">
-            <Select value={status} onValueChange={(value) => setStatus(value)}><option value="cleared">Cleared</option><option value="pending">Pending</option></Select>
+          <Field label={t("finance.transactions.form.status")} hint={t("finance.transactions.form.statusHint")}>
+            <Select value={status} onValueChange={(value) => setStatus(value)}><option value="cleared">{t("finance.transactions.status.cleared")}</option><option value="pending">{t("finance.transactions.status.pending")}</option></Select>
           </Field>
-          <Field label={kind === "transfer" ? "From account" : "Account"}>
+          <Field label={kind === "transfer" ? t("finance.transactions.form.fromAccount") : t("finance.transactions.common.account")}>
             <Select value={selectedAccountId} onValueChange={(value) => {
               const nextAccountId = value;
               const nextCurrency = stringFrom(readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === nextAccountId)).currency, DEFAULT_CURRENCY).toUpperCase();
@@ -1110,30 +1150,43 @@ function TransactionForm({
               setAccountId(nextAccountId);
               if (toAccountId === nextAccountId) setToAccountId("");
             }}>
-              <option value="">Choose account</option>
-              {entryAccounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, stringFrom(account.currency, DEFAULT_CURRENCY))}</option>; })}
+              <option value="">{t("finance.transactions.form.chooseAccount")}</option>
+              {entryAccounts.map((item, index) => { const account = readRecord(item); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, t("finance.transactions.common.account"))} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, stringFrom(account.currency, DEFAULT_CURRENCY))}</option>; })}
             </Select>
           </Field>
           {kind === "transfer" ? (
-            <Field label="To account">
+            <Field label={t("finance.transactions.form.toAccount")}>
               <Select value={toAccountId} onValueChange={(value) => setToAccountId(value)}>
-                <option value="">Choose destination</option>
-                {entryAccounts.filter((item) => String(readRecord(item).id) !== selectedAccountId).map((item, index) => { const account = readRecord(item); const accountCurrency = stringFrom(account.currency, DEFAULT_CURRENCY); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, "Account")} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, accountCurrency)}</option>; })}
+                <option value="">{t("finance.transactions.form.chooseDestination")}</option>
+                {entryAccounts.filter((item) => String(readRecord(item).id) !== selectedAccountId).map((item, index) => { const account = readRecord(item); const accountCurrency = stringFrom(account.currency, DEFAULT_CURRENCY); return <option value={String(account.id)} key={stringFrom(account.id, String(index))}>{stringFrom(account.name, t("finance.transactions.common.account"))} · {formatMoney(account.balanceMinor ?? account.currentBalanceMinor, accountCurrency)}</option>; })}
               </Select>
             </Field>
           ) : (
-            <Field label="Merchant or source">
-              <Input autoFocus value={merchant} onChange={(event) => setMerchant(event.target.value)} placeholder={kind === "income" ? "e.g. Employer" : "e.g. Supermarket"} maxLength={120} />
+            <Field label={t("finance.transactions.form.merchant")}>
+              <Input autoFocus value={merchant} onChange={(event) => setMerchant(event.target.value)} placeholder={kind === "income" ? t("finance.transactions.form.incomeMerchantPlaceholder") : t("finance.transactions.form.expenseMerchantPlaceholder")} maxLength={120} />
             </Field>
           )}
           <Field
-            label={`${kind === "adjustment" ? "Signed amount" : isForeignEntry ? kind === "expense" ? "Purchase amount" : kind === "income" ? "Income amount" : kind === "refund" ? "Refund amount" : "Original amount" : "Amount"} (${kind === "transfer" ? selectedCurrency : normalizedEnteredCurrency || selectedCurrency})`}
-            hint={kind === "adjustment" ? "Use a minus sign to reduce the balance." : "Enter a positive amount."}
+            label={t("finance.transactions.form.amountLabel", {
+              label: kind === "adjustment"
+                ? t("finance.transactions.form.signedAmount")
+                : isForeignEntry
+                  ? kind === "expense"
+                    ? t("finance.transactions.form.purchaseAmount")
+                    : kind === "income"
+                      ? t("finance.transactions.form.incomeAmount")
+                      : kind === "refund"
+                        ? t("finance.transactions.form.refundAmount")
+                        : t("finance.transactions.form.originalAmount")
+                  : t("finance.transactions.form.amount"),
+              currency: kind === "transfer" ? selectedCurrency : normalizedEnteredCurrency || selectedCurrency,
+            })}
+            hint={kind === "adjustment" ? t("finance.transactions.form.adjustmentHint") : t("finance.transactions.form.amountHint")}
           >
             <Input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={minorToInput(0, kind === "transfer" ? selectedCurrency : normalizedEnteredCurrency || selectedCurrency)} />
           </Field>
           {kind !== "transfer" ? (
-            <Field htmlFor="transaction-entered-currency" label="Entered currency" hint={`Account ledger currency: ${selectedCurrency}`}>
+            <Field htmlFor="transaction-entered-currency" label={t("finance.transactions.form.enteredCurrency")} hint={t("finance.transactions.form.ledgerCurrency", { currency: selectedCurrency })}>
               <CurrencyCombobox
                 id="transaction-entered-currency"
                 value={enteredCurrency}
@@ -1149,41 +1202,40 @@ function TransactionForm({
             <div className={`${ui.fxPanel} ${ui.formSpan}`}>
               <div className={ui.fxPanelHeader}>
                 <span>
-                  <strong>{isCrossCurrencyTransfer ? "Transfer conversion" : "Currency conversion"}</strong>
-                  <small>BNR is a reference estimate. Your bank or card statement is the source of truth.</small>
+                  <strong>{isCrossCurrencyTransfer ? t("finance.transactions.fx.transferTitle") : t("finance.transactions.fx.title")}</strong>
+                  <small>{t("finance.transactions.fx.description")}</small>
                 </span>
-                {fxLoading ? <Pill tone="info">Loading BNR rate…</Pill> : fxQuote ? <Pill tone={fxQuote.isFallback ? "warning" : "info"}>BNR reference</Pill> : <Pill tone="warning">Manual rate needed</Pill>}
+                {fxLoading ? <Pill tone="info">{t("finance.transactions.fx.loadingRate")}</Pill> : fxQuote ? <Pill tone={fxQuote.isFallback ? "warning" : "info"}>{t("finance.transactions.fx.bnrReference")}</Pill> : <Pill tone="warning">{t("finance.transactions.fx.manualNeeded")}</Pill>}
               </div>
               {fxQuote ? (
                 <div className={ui.fxReference}>
                   <strong>1 {conversionFromCurrency} = {formatRate(fxQuote.rateScaled, fxQuote.rateScale)} {conversionToCurrency}</strong>
-                  <span>
-                    Effective {formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" })}
-                    {fxQuote.isFallback ? ` · previous available BNR day (${fxQuote.fallbackDays} day${fxQuote.fallbackDays === 1 ? "" : "s"} earlier)` : ""}
-                  </span>
+                  <span>{fxQuote.isFallback
+                    ? t("finance.transactions.fx.effectiveFallback", { date: formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" }), days: fxQuote.fallbackDays })
+                    : t("finance.transactions.fx.effective", { date: formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" }) })}</span>
                 </div>
-              ) : fxError ? <div className={ui.fxError} role="status">{fxError} Enter a manual exchange rate to continue.</div> : null}
+              ) : fxError ? <div className={ui.fxError} role="status">{t("finance.transactions.fx.errorInstruction", { error: fxError })}</div> : null}
               {fxQuote?.isStale ? (
-                <div className={ui.fxError} role="status">Live BNR refresh failed, so this uses the cached official quote dated {formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" })}. You can keep this reference or enter a manual rate.</div>
+                <div className={ui.fxError} role="status">{t("finance.transactions.fx.stale", { date: formatDate(fxQuote.rateDate, { day: "2-digit", month: "short", year: "numeric" }) })}</div>
               ) : null}
               <div className={ui.fxControls}>
                 <Field
-                  label={`Exchange rate (${conversionToCurrency} per 1 ${conversionFromCurrency})`}
-                  hint={useExactAccountAmount ? "Derived from the exact original and account amounts." : rateMode === "manual" ? "Manual override; BNR reference remains recorded when available." : "BNR reference rate; enable manual editing to override it."}
+                  label={t("finance.transactions.fx.rateLabel", { toCurrency: conversionToCurrency, fromCurrency: conversionFromCurrency })}
+                  hint={useExactAccountAmount ? t("finance.transactions.fx.derivedHint") : rateMode === "manual" ? t("finance.transactions.fx.manualHint") : t("finance.transactions.fx.referenceHint")}
                 >
                   <Input
                     inputMode="decimal"
                     value={displayedRate}
                     disabled={rateMode === "reference" || useExactAccountAmount}
                     onChange={(event) => { setManualRate(event.target.value); setUseExactAccountAmount(false); }}
-                    placeholder={fxLoading ? "Loading…" : "e.g. 5.075"}
+                    placeholder={fxLoading ? t("finance.transactions.fx.loading") : t("finance.transactions.fx.ratePlaceholder")}
                   />
                 </Field>
                 <Field
-                  label={`Amount posted to ${conversionTargetAccountName} (${conversionToCurrency})`}
+                  label={t("finance.transactions.fx.postedAmountLabel", { account: conversionTargetAccountName, currency: conversionToCurrency })}
                   hint={useExactAccountAmount
-                    ? exactAmountReconciles ? "Exact statement or bank amount; the rate is derived from both amounts." : "This amount cannot reconcile at eight-decimal rate precision. Edit the rate instead."
-                    : "Calculated with integer minor-unit rounding."}
+                    ? exactAmountReconciles ? t("finance.transactions.fx.exactHint") : t("finance.transactions.fx.precisionHint")
+                    : t("finance.transactions.fx.roundingHint")}
                 >
                   <Input
                     inputMode="decimal"
@@ -1191,7 +1243,7 @@ function TransactionForm({
                     disabled={!useExactAccountAmount}
                     aria-invalid={useExactAccountAmount && !exactAmountReconciles}
                     onChange={(event) => setExactAccountAmount(event.target.value)}
-                    placeholder={fxLoading ? "Calculating…" : minorToInput(0, conversionToCurrency)}
+                    placeholder={fxLoading ? t("finance.transactions.fx.calculating") : minorToInput(0, conversionToCurrency)}
                   />
                 </Field>
               </div>
@@ -1209,7 +1261,7 @@ function TransactionForm({
                         setUseExactAccountAmount(false);
                       }
                     }}
-                  /> Edit exchange rate manually
+                  /> {t("finance.transactions.fx.editManually")}
                 </label>
                 <label className={`${ui.small} ${ui.inlineCheck}`}>
                   <input
@@ -1225,29 +1277,29 @@ function TransactionForm({
                         setManualRate(rateScaledToInput(derivedExactRateScaled, rateScale));
                       }
                     }}
-                  /> Use exact {isCrossCurrencyTransfer ? "destination" : "account"} amount
+                  /> {isCrossCurrencyTransfer ? t("finance.transactions.fx.useExactDestination") : t("finance.transactions.fx.useExactAccount")}
                 </label>
               </div>
               {status === "pending" && !useExactAccountAmount ? (
-                <p className={ui.fxEstimateNote}>This pending transaction will be saved with an estimated posted amount. Update it from the final statement amount when cleared.</p>
+                <p className={ui.fxEstimateNote}>{t("finance.transactions.fx.pendingEstimate")}</p>
               ) : null}
             </div>
           ) : null}
           {kind !== "transfer" ? (
             <Field
-              label="Category"
-              hint={useSplits ? "The new category will be assigned to the first empty split row." : inferredCategoryKind ? `Showing ${inferredCategoryKind} and shared categories.` : "Adjustments can use existing categories, but do not create a new spending classification."}
+              label={t("finance.transactions.common.category")}
+              hint={useSplits ? t("finance.transactions.category.splitHint") : inferredCategoryKind ? t("finance.transactions.category.filteredHint", { kind: kindLabel(inferredCategoryKind, t) }) : t("finance.transactions.category.adjustmentHint")}
             >
               <div className={ui.categoryPickerRow}>
                 <Select
                   searchable
-                  searchPlaceholder="Search categories"
+                  searchPlaceholder={t("finance.transactions.category.search")}
                   disabled={useSplits}
                   value={categoryId}
                   onValueChange={setCategoryId}
                 >
-                  <option value="">Uncategorised</option>
-                  {selectableCategories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{categoryPathLabel(item)}</option>; })}
+                  <option value="">{t("finance.transactions.common.uncategorised")}</option>
+                  {selectableCategories.map((item, index) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(index))}>{categoryPathLabel(item, t)}</option>; })}
                 </Select>
                 {inferredCategoryKind ? (
                   <Button
@@ -1261,7 +1313,7 @@ function TransactionForm({
                       setCategoryCreateError(null);
                     }}
                   >
-                    Create category
+                    {t("finance.transactions.category.create")}
                   </Button>
                 ) : null}
               </div>
@@ -1283,13 +1335,13 @@ function TransactionForm({
             >
               <div className={ui.inlineCategoryHeader}>
                 <span>
-                  <strong id="transaction-category-creator-title">New {inferredCategoryKind} category</strong>
-                  <small>Create it here, keep this transaction open, and select it immediately.</small>
+                  <strong id="transaction-category-creator-title">{t("finance.transactions.category.newTitle", { kind: kindLabel(inferredCategoryKind, t) })}</strong>
+                  <small>{t("finance.transactions.category.description")}</small>
                 </span>
-                <IconButton label="Close category creator" onClick={resetCategoryCreator}><X size={15} /></IconButton>
+                <IconButton label={t("finance.transactions.category.closeAria")} onClick={resetCategoryCreator}><X size={15} /></IconButton>
               </div>
               <div className={ui.inlineCategoryGrid}>
-                <Field label="Category name">
+                <Field label={t("finance.transactions.category.name")}>
                   <Input
                     autoFocus
                     value={newCategoryName}
@@ -1302,30 +1354,30 @@ function TransactionForm({
                         void createAndSelectCategory();
                       }
                     }}
-                    placeholder={inferredCategoryKind === "income" ? "e.g. Freelance" : "e.g. Home maintenance"}
+                    placeholder={inferredCategoryKind === "income" ? t("finance.transactions.category.incomePlaceholder") : t("finance.transactions.category.expensePlaceholder")}
                   />
                 </Field>
-                <Field label="Parent category" hint="Optional; any compatible nesting depth is supported.">
-                  <Select searchable searchPlaceholder="Search parent categories" value={newCategoryParentId} onValueChange={setNewCategoryParentId}>
-                    <option value="">None — top level</option>
+                <Field label={t("finance.transactions.category.parent")} hint={t("finance.transactions.category.parentHint")}>
+                  <Select searchable searchPlaceholder={t("finance.transactions.category.searchParents")} value={newCategoryParentId} onValueChange={setNewCategoryParentId}>
+                    <option value="">{t("finance.transactions.category.topLevel")}</option>
                     {quickCategoryParents.map((item, index) => {
                       const category = readRecord(item);
-                      return <option value={stringFrom(category.id)} key={stringFrom(category.id, String(index))}>{categoryPathLabel(item)}</option>;
+                      return <option value={stringFrom(category.id)} key={stringFrom(category.id, String(index))}>{categoryPathLabel(item, t)}</option>;
                     })}
                   </Select>
                 </Field>
                 {inferredCategoryKind === "expense" ? (
                   <>
-                    <Field label="Spending pattern">
+                    <Field label={t("finance.transactions.category.spendingPattern")}>
                       <Select value={newCategoryNature} onValueChange={(value) => setNewCategoryNature(value as "fixed" | "variable")}>
-                        <option value="variable">Variable</option>
-                        <option value="fixed">Fixed</option>
+                        <option value="variable">{t("finance.transactions.category.variable")}</option>
+                        <option value="fixed">{t("finance.transactions.category.fixed")}</option>
                       </Select>
                     </Field>
-                    <Field label="Priority">
+                    <Field label={t("finance.transactions.category.priority")}>
                       <Select value={newCategoryPriority} onValueChange={(value) => setNewCategoryPriority(value as "essential" | "discretionary")}>
-                        <option value="discretionary">Discretionary</option>
-                        <option value="essential">Essential</option>
+                        <option value="discretionary">{t("finance.transactions.category.discretionary")}</option>
+                        <option value="essential">{t("finance.transactions.category.essential")}</option>
                       </Select>
                     </Field>
                   </>
@@ -1333,20 +1385,20 @@ function TransactionForm({
               </div>
               <FormMessage error={categoryCreateError} />
               <div className={ui.inlineCategoryActions}>
-                <Button variant="ghost" onClick={resetCategoryCreator}>Cancel</Button>
+                <Button variant="ghost" onClick={resetCategoryCreator}>{t("common.actions.cancel")}</Button>
                 <Button disabled={creatingCategory || !newCategoryName.trim()} onClick={() => void createAndSelectCategory()}>
-                  {creatingCategory ? "Creating…" : useSplits ? "Create and add to split" : "Create and select"}
+                  {creatingCategory ? t("finance.transactions.category.creating") : useSplits ? t("finance.transactions.category.createSplit") : t("finance.transactions.category.createSelect")}
                 </Button>
               </div>
             </div>
           ) : null}
-          <Field label="Tags" hint="Comma-separated; new tags are created automatically">
-            <Input value={tagText} onChange={(event) => setTagText(event.target.value)} placeholder="home, work" />
+          <Field label={t("finance.transactions.form.tags")} hint={t("finance.transactions.form.tagsHint")}>
+            <Input value={tagText} onChange={(event) => setTagText(event.target.value)} placeholder={t("finance.transactions.form.tagsPlaceholder")} />
           </Field>
           <Field
             htmlFor="transaction-receipt"
-            label="Receipt"
-            hint="Optional PDF or image · up to 10 MB · stored privately with this transaction"
+            label={t("finance.transactions.form.receipt")}
+            hint={t("finance.transactions.form.receiptHint")}
           >
             <div className={ui.attachmentUpload}>
               <input
@@ -1359,16 +1411,16 @@ function TransactionForm({
                 onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)}
               />
               <label className={`${kit.button} ${kit.button_secondary} ${ui.attachmentPicker}`} htmlFor="transaction-receipt">
-                <Paperclip size={15} aria-hidden="true" /> {attachmentFile ? "Replace receipt" : "Choose receipt"}
+                <Paperclip size={15} aria-hidden="true" /> {attachmentFile ? t("finance.transactions.form.replaceReceipt") : t("finance.transactions.attachments.choose")}
               </label>
               {attachmentFile ? (
                 <span className={ui.attachmentPreview}>
                   <span>
                     <strong>{attachmentFile.name}</strong>
-                    <small>{new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(attachmentFile.size / 1024)} KB</small>
+                    <small>{t("finance.transactions.attachments.sizeKb", { size: new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(attachmentFile.size / 1024) })}</small>
                   </span>
                   <IconButton
-                    label="Remove selected receipt"
+                    label={t("finance.transactions.form.removeReceipt")}
                     onClick={() => {
                       setAttachmentFile(null);
                       setAttachmentInputKey((current) => current + 1);
@@ -1378,42 +1430,42 @@ function TransactionForm({
                   </IconButton>
                 </span>
               ) : initial && numberFrom(initial.attachmentCount) > 0 ? (
-                <span className={ui.attachmentLegacyNote}>Existing receipts are not copied to the duplicate.</span>
+                <span className={ui.attachmentLegacyNote}>{t("finance.transactions.form.receiptsNotCopied")}</span>
               ) : null}
             </div>
           </Field>
-          <Field label="Notes" className={ui.formSpan}>
-            <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional detail" maxLength={1000} />
+          <Field label={t("finance.transactions.form.notes")} className={ui.formSpan}>
+            <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={t("finance.transactions.form.notesPlaceholder")} maxLength={1000} />
           </Field>
         </div>
 
         {kind !== "transfer" ? (
           <div className={ui.blockOffset}>
             <label className={`${ui.small} ${ui.inlineCheck}`}>
-              <input type="checkbox" checked={useSplits} onChange={(event) => setUseSplits(event.target.checked)} /> Split across categories
+              <input type="checkbox" checked={useSplits} onChange={(event) => setUseSplits(event.target.checked)} /> {t("finance.transactions.splits.toggle")}
             </label>
           </div>
         ) : (
-          <div className={`${ui.inlineNotice} ${ui.noticeOffset}`}><ArrowLeftRight size={16} />LedgerLab creates linked entries in each account’s own currency. Transfers are excluded from all income and spending totals.</div>
+          <div className={`${ui.inlineNotice} ${ui.noticeOffset}`}><ArrowLeftRight size={16} />{t("finance.transactions.form.transferNotice")}</div>
         )}
 
         {useSplits ? (
-          <Section title="Category split" description="Every split uses integer minor units internally" plain>
+          <Section title={t("finance.transactions.splits.title")} description={t("finance.transactions.splits.description")} plain>
             <div className={ui.splitList}>
               {splits.map((split, index) => (
                 <div className={ui.splitRow} key={index}>
-                  <Field label={`Category ${index + 1}`}>
-                    <Select searchable searchPlaceholder="Search categories" value={split.categoryId} onValueChange={(value) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, categoryId: value } : item))}>
-                      <option value="">Choose category</option>
-                      {selectableCategories.map((item, categoryIndex) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(categoryIndex))}>{categoryPathLabel(item)}</option>; })}
+                  <Field label={t("finance.transactions.splits.category", { number: index + 1 })}>
+                    <Select searchable searchPlaceholder={t("finance.transactions.category.search")} value={split.categoryId} onValueChange={(value) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, categoryId: value } : item))}>
+                      <option value="">{t("finance.transactions.splits.chooseCategory")}</option>
+                      {selectableCategories.map((item, categoryIndex) => { const category = readRecord(item); return <option value={String(category.id)} key={stringFrom(category.id, String(categoryIndex))}>{categoryPathLabel(item, t)}</option>; })}
                     </Select>
                   </Field>
-                  <Field label={`Amount (${selectedCurrency})`}><Input inputMode="decimal" value={split.amount} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></Field>
-                  <IconButton label="Remove split" disabled={splits.length <= 2} onClick={() => setSplits((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={15} /></IconButton>
+                  <Field label={t("finance.transactions.form.amountLabel", { label: t("finance.transactions.form.amount"), currency: selectedCurrency })}><Input inputMode="decimal" value={split.amount} onChange={(event) => setSplits((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></Field>
+                  <IconButton label={t("finance.transactions.splits.remove")} disabled={splits.length <= 2} onClick={() => setSplits((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={15} /></IconButton>
                 </div>
               ))}
-              <Button type="button" variant="ghost" icon={<Plus size={14} />} onClick={() => setSplits((current) => [...current, { categoryId: "", amount: "" }])}>Add split</Button>
-              <div className={ui.splitTotal}><span>Split total ({selectedCurrency})</span><strong className={splitTotal === (postedAccountAmountAbsolute ?? 0) ? ui.positive : ui.warning}>{formatMoney(splitTotal, selectedCurrency)} / {postedAccountAmountAbsolute === null ? "—" : formatMoney(postedAccountAmountAbsolute, selectedCurrency)}</strong></div>
+              <Button type="button" variant="ghost" icon={<Plus size={14} />} onClick={() => setSplits((current) => [...current, { categoryId: "", amount: "" }])}>{t("finance.transactions.splits.add")}</Button>
+              <div className={ui.splitTotal}><span>{t("finance.transactions.splits.total", { currency: selectedCurrency })}</span><strong className={splitTotal === (postedAccountAmountAbsolute ?? 0) ? ui.positive : ui.warning}>{formatMoney(splitTotal, selectedCurrency)} / {postedAccountAmountAbsolute === null ? "—" : formatMoney(postedAccountAmountAbsolute, selectedCurrency)}</strong></div>
             </div>
           </Section>
         ) : null}
@@ -1423,7 +1475,7 @@ function TransactionForm({
             <ReceiptText size={16} />
             <label>
               <input type="checkbox" checked={duplicateConfirmed} onChange={(event) => setConfirmedDuplicateKey(event.target.checked ? duplicateKey : null)} />
-              I reviewed this possible duplicate and want to save it again.
+              {t("finance.transactions.form.confirmDuplicate")}
             </label>
           </div>
         ) : null}

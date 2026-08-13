@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { messageCatalogs } from "../../src/i18n/generated";
 
 const PASSWORD = "LedgerLab-E2E-2026!";
 
@@ -7,8 +8,20 @@ function uniqueEmail(prefix: string) {
   return `${prefix}-${nonce}@ledgerlab.test`;
 }
 
+function uniqueTestClientAddress() {
+  const suffix = Array.from(
+    { length: 4 },
+    () => Math.floor(Math.random() * 0x10000).toString(16),
+  ).join(":");
+  return `2001:db8:${suffix}`;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function labelStartsWith(value: string) {
+  return new RegExp(`^${escapeRegExp(value)}`);
 }
 
 function isoDateOffset(days: number) {
@@ -76,6 +89,10 @@ async function selectDesktopDateRange(page: Page, quickPick: string) {
 
 async function register(page: Page, prefix: string) {
   const email = uniqueEmail(prefix);
+  // Keep independent scenarios and their CI retries in separate anti-abuse buckets.
+  await page.context().setExtraHTTPHeaders({
+    "x-forwarded-for": uniqueTestClientAddress(),
+  });
   await navigate(page, "/register");
   await page.getByRole("button", { name: "Show", exact: true }).click();
   await expect(page.getByRole("button", { name: "Hide", exact: true })).toBeVisible();
@@ -123,6 +140,22 @@ async function selectNamedOption(combobox: Locator, optionText: string) {
   await expect(option).toHaveCount(1);
   await option.click();
   await expect(combobox).toHaveAttribute("aria-expanded", "false");
+}
+
+async function expectNoRawMessageKeys(page: Page) {
+  await expect(page.locator("body")).not.toContainText(
+    /\b(?:auth|common|entities|errors|finance|planning|settings)\.[a-z][\w.]+/,
+  );
+}
+
+function messageWithValues(
+  message: string,
+  values: Readonly<Record<string, string>>,
+) {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replaceAll(`{${key}}`, value),
+    message,
+  );
 }
 
 async function createAccount(
@@ -234,6 +267,267 @@ async function expectReorganizedDesktopNavigation(page: Page) {
   await sidebar.getByRole("link", { name: "Dashboard", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
 }
+
+test.describe("Romanian interface workflow", () => {
+  test.skip(({ isMobile }) => Boolean(isMobile), "The bilingual workflow runs in the desktop project.");
+
+  test("registers, records actual and planned activity, and persists language changes", async ({
+    baseURL,
+    context,
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    if (!baseURL) throw new Error("The Romanian workflow requires a configured base URL.");
+
+    const english = messageCatalogs.en;
+    const romanian = messageCatalogs.ro;
+    const accountName = "Cont curent comun";
+    const merchantName = "Magazin de cartier";
+    const paymentName = "Factura de energie";
+    const fallbackWarnings: string[] = [];
+    page.on("console", (message) => {
+      if (message.text().includes("Missing ro translation")) {
+        fallbackWarnings.push(message.text());
+      }
+    });
+
+    await context.addCookies([{
+      name: "ledgerlab_ui_language",
+      value: "ro",
+      url: new URL(baseURL).origin,
+    }]);
+    await context.setExtraHTTPHeaders({
+      "x-forwarded-for": uniqueTestClientAddress(),
+    });
+
+    const email = uniqueEmail("romanian");
+    await navigate(page, "/register");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ro");
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    await expect(page.getByRole("heading", {
+      name: romanian["auth.register.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["auth.register.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.displayName"],
+    )).fill("Utilizator român");
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.email"],
+    )).fill(email);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.password"],
+    )).fill(PASSWORD);
+    await page.getByLabel(labelStartsWith(
+      romanian["auth.fields.confirmPassword"],
+    )).fill(PASSWORD);
+    await selectComboboxValue(
+      page.getByLabel(labelStartsWith(
+        romanian["auth.fields.workspaceCurrency"],
+      )),
+      "RON",
+    );
+    await page.getByRole("button", {
+      name: romanian["auth.register.submit"],
+      exact: true,
+    }).click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.dashboard.header.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.dashboard.header.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/accounts");
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.accounts.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.accounts.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByRole("button", {
+      name: romanian["finance.accounts.header.add"],
+      exact: true,
+    }).first().click();
+    const accountDialog = page.getByRole("dialog", {
+      name: romanian["finance.accounts.form.title"],
+    });
+    await accountDialog.getByLabel(labelStartsWith(
+      romanian["finance.accounts.form.fields.accountName"],
+    )).fill(accountName);
+    await accountDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["finance.accounts.form.asset.openingBalance"],
+      { currency: "RON" },
+    ))).fill("1000.00");
+    await accountDialog.getByRole("button", {
+      name: romanian["finance.accounts.form.actions.create"],
+      exact: true,
+    }).click();
+    await expect(accountDialog).toBeHidden();
+    await expect(page.getByText(accountName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/transactions");
+    await expect(page.getByRole("heading", {
+      name: romanian["finance.transactions.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["finance.transactions.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByRole("button", {
+      name: romanian["finance.transactions.header.add"],
+      exact: true,
+    }).first().click();
+    const transactionDialog = page.getByRole("dialog", {
+      name: romanian["finance.transactions.form.title"],
+    });
+    await transactionDialog.getByRole("button", {
+      name: romanian["finance.transactions.kinds.expense"],
+      exact: true,
+    }).click();
+    await selectNamedOption(
+      transactionDialog.getByLabel(labelStartsWith(
+        romanian["finance.transactions.common.account"],
+      )),
+      accountName,
+    );
+    await transactionDialog.getByLabel(labelStartsWith(
+      romanian["finance.transactions.form.merchant"],
+    )).fill(merchantName);
+    await transactionDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["finance.transactions.form.amountLabel"],
+      {
+        label: romanian["finance.transactions.form.amount"],
+        currency: "RON",
+      },
+    ))).fill("42.50");
+    await selectNamedOption(
+      transactionDialog.getByLabel(labelStartsWith(
+        romanian["finance.transactions.common.category"],
+      )),
+      romanian["finance.defaultCategories.groceries"],
+    );
+    await transactionDialog.getByRole("button", {
+      name: romanian["finance.transactions.form.save"],
+      exact: true,
+    }).click();
+    await expect(transactionDialog).toBeHidden();
+    await expect(page.getByText(merchantName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/planned");
+    await expect(page.getByRole("heading", {
+      name: romanian["planning.plannedPayments.header.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["planning.plannedPayments.header.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await page.getByRole("button", {
+      name: romanian["planning.plannedPayments.actions.planPayment"],
+      exact: true,
+    }).first().click();
+    const planningDialog = page.getByRole("dialog", {
+      name: romanian["planning.plannedPayments.form.title"],
+    });
+    await planningDialog.getByLabel(labelStartsWith(
+      romanian["planning.plannedPayments.form.paymentName"],
+    )).fill(paymentName);
+    await planningDialog.getByLabel(labelStartsWith(messageWithValues(
+      romanian["planning.plannedPayments.form.expectedAmount"],
+      { currency: "RON" },
+    ))).fill("125.00");
+    await planningDialog.getByLabel(labelStartsWith(
+      romanian["planning.plannedPayments.form.dueDate"],
+    )).fill(isoDateOffset(7));
+    await selectNamedOption(
+      planningDialog.getByLabel(labelStartsWith(
+        romanian["planning.plannedPayments.form.expectedAccount"],
+      )),
+      accountName,
+    );
+    await selectNamedOption(
+      planningDialog.getByLabel(labelStartsWith(
+        romanian["planning.plannedPayments.form.category"],
+      )),
+      romanian["finance.defaultCategories.utilities"],
+    );
+    await planningDialog.getByRole("button", {
+      name: romanian["planning.plannedPayments.form.create"],
+      exact: true,
+    }).click();
+    await expect(planningDialog).toBeHidden();
+    await expect(page.getByText(paymentName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+
+    await navigate(page, "/settings");
+    await expect(page.getByRole("heading", {
+      name: romanian["settings.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toHaveCount(0);
+    await selectComboboxValue(
+      page.getByRole("combobox", {
+        name: romanian["settings.preferences.interfaceLanguage"],
+        exact: true,
+      }),
+      "en",
+    );
+    await page.getByRole("button", {
+      name: romanian["settings.preferences.save"],
+      exact: true,
+    }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toBeVisible();
+
+    await selectComboboxValue(
+      page.getByRole("combobox", {
+        name: english["settings.preferences.interfaceLanguage"],
+        exact: true,
+      }),
+      "ro",
+    );
+    await page.getByRole("button", {
+      name: english["settings.preferences.save"],
+      exact: true,
+    }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ro");
+    await expect(page.getByRole("heading", {
+      name: romanian["settings.title"],
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByRole("heading", {
+      name: english["settings.title"],
+      exact: true,
+    })).toHaveCount(0);
+
+    await navigate(page, "/transactions");
+    await expect(page.getByText(merchantName, { exact: true })).toBeVisible();
+    await navigate(page, "/planned");
+    await expect(page.getByText(paymentName, { exact: true })).toBeVisible();
+    await expectNoRawMessageKeys(page);
+    expect(fallbackWarnings).toEqual([]);
+  });
+});
 
 test.describe("complete desktop finance workflow", () => {
   test.skip(({ isMobile }) => Boolean(isMobile), "The complete workflow runs in the desktop project.");
@@ -417,7 +711,9 @@ test.describe("complete desktop finance workflow", () => {
     const plannedTable = page.getByRole("region", { name: "Planned payment occurrences" });
     const plannedRow = plannedTable.getByRole("row").filter({ hasText: "Future electricity E2E" });
     await expect(plannedRow).toHaveCount(1);
-    await expect(plannedRow).toContainText("planned");
+    await expect(plannedRow).toContainText(
+      messageCatalogs.en["planning.plannedPayments.status.planned"],
+    );
     await expect(plannedRow).toContainText("300.00");
     await plannedRow.getByRole("button", { name: "Mark paid" }).click();
 
@@ -433,7 +729,9 @@ test.describe("complete desktop finance workflow", () => {
       .getByRole("region", { name: "Planned payment occurrences" })
       .getByRole("row")
       .filter({ hasText: "Future electricity E2E" });
-    await expect(paidRow).toContainText("paid");
+    await expect(paidRow).toContainText(
+      messageCatalogs.en["planning.plannedPayments.status.paid"],
+    );
     await expect(paidRow).toContainText("312.34");
 
     await selectDesktopDateRange(page, "This month");
@@ -823,7 +1121,9 @@ test.describe("adaptive account and category workflow", () => {
     const gardenRow = page.getByRole("region", { name: "Category hierarchy" })
       .getByRole("row")
       .filter({ has: page.getByText("Garden E2E", { exact: true }) });
-    await expect(gardenRow).toContainText("expense");
+    await expect(gardenRow).toContainText(
+      messageCatalogs.en["entities.categories.kind.expense"],
+    );
     await expect(gardenRow).toContainText("Under Household E2E");
     await expectNoHorizontalWindowScroll(page);
   });
@@ -860,7 +1160,12 @@ test.describe("multi-currency transaction workflow", () => {
     await dialog.getByLabel(/^Purchase amount \(EUR\)/).fill("20.00");
 
     await expect(dialog.getByText("Manual rate needed", { exact: true })).toBeVisible();
-    await expect(dialog.getByText(/Deterministic test: BNR unavailable/)).toBeVisible();
+    const fxError = dialog.getByRole("status");
+    await expect(fxError).toContainText(messageWithValues(
+      messageCatalogs.en["finance.transactions.fx.errorInstruction"],
+      { error: messageCatalogs.en["errors.generic.unexpected"] },
+    ));
+    await expect(fxError).not.toContainText("Deterministic test: BNR unavailable");
     await dialog.getByLabel("Edit exchange rate manually").check();
     await dialog.getByLabel(/^Exchange rate \(USD per 1 EUR\)/).fill("1.15");
     await expect(dialog.getByLabel(/^Amount posted to FX Current \(USD\)/)).toHaveValue("23.00");

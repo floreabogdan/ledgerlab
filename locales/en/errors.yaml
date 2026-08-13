@@ -1,0 +1,397 @@
+generic:
+  unexpected: Something went wrong. Please try again.
+  validation: Check the highlighted fields and try again.
+api:
+  badRequest: The request could not be understood.
+  authenticationRequired: Sign in to continue.
+  forbidden: You do not have permission to do that.
+  notFound: The requested item could not be found.
+  methodNotAllowed: That action is not available here.
+  conflict: This change conflicts with the current data. Reload and try again.
+  payloadTooLarge: "The request is too large. The maximum size is {maxKilobytes, number} KB."
+  unsupportedMediaType: This file or content type is not supported.
+  rateLimited: "Too many attempts. Try again in {retryAfterSeconds, plural, one {# second} other {# seconds}}."
+  invalidJson: The request contains invalid data.
+  invalidContentLength: The request size could not be verified.
+codes:
+  authEndpointNotFound: The requested authentication action is not available.
+  apiEndpointNotFound: The requested API action is not available.
+  fxQuoteQueryIncomplete: Provide a date, source currency, and destination currency for the FX quote.
+  transactionAmountFilterNegative: Amount filters cannot be negative.
+  transactionAmountRangeReversed: The minimum amount cannot exceed the maximum amount.
+  queryLimitTooSmall: "The page size must be at least {minimum, number}."
+  queryOffsetNegative: The page offset cannot be negative.
+  transactionAmountFilterAccountRequired: Choose one account before filtering by amount because account currencies cannot be compared directly.
+  liabilityCurrencyUnavailable: The liability account currency could not be determined.
+  accountIdRequired: Choose an account.
+  accountCreateFailed: The account could not be created.
+  liabilityPaymentSelectionRequired: Choose a liability payment to undo.
+  liabilityPaymentKindInvalid: Choose a card or loan payment type.
+  liabilityActionInvalid: The requested liability action is not supported.
+  categoryIdRequired: Choose a category.
+  categoryActionInvalid: The requested category action is not supported.
+  tagIdRequired: Choose a tag.
+  tagColorInvalid: Enter a six-digit hexadecimal tag colour.
+  tagActionInvalid: The requested tag action is not supported.
+  merchantIdRequired: Choose a merchant.
+  merchantActionInvalid: The requested merchant action is not supported.
+  transactionIdRequired: Choose a transaction.
+  importAccountRequired: Choose the account that will receive imported transactions.
+  settingsActionInvalid: The requested settings action is not supported.
+  insightsMonthInvalid: Choose a valid month in YYYY-MM format.
+  insightsDateRangeInvalid: Choose a valid date range.
+  insightsLiabilityCurrencyUnavailable: The liability obligation currency could not be determined.
+  budgetAmountInvalid: Budget amount must be a positive integer in minor units.
+  budgetCategoryInvalid: Choose an active category that belongs to your profile.
+  planningSourceAssumptionsNotFound: The previous month has no saved forecast assumptions to copy.
+  planningOpeningAccountRequired: Choose a valid account for every opening assumption.
+  planningOpeningAccountInvalid: Choose an account that belongs to your profile.
+  planningOpeningAccountDuplicate: Each account can have only one opening assumption.
+  planningOpeningBalanceInvalid: Enter each opening balance in minor units.
+  accountCurrencyImmutable: An account currency cannot be changed after creation; create a new account and transfer the balance instead.
+  accountCurrencyTypeInvalid: Account currency must be an ISO 4217 code.
+  accountCurrencyUnsupported: Choose a supported ISO 4217 currency.
+  accountNameConflict: An account with this name already exists.
+  accountNotFound: Account not found.
+  accountOpeningDateFuture: Account opening date cannot be in the future.
+  accountOpeningDateTypeInvalid: Account opening date must be a date.
+  categoryArchiveChildrenFirst: Archive or move the active subcategories before archiving their parent.
+  categoryClassificationInvalid: Choose a valid category classification.
+  categoryColorInvalid: Category colour must be a six-digit hex value.
+  categoryDepthLimitExceeded: "Categories can be nested up to {maxLevels, number} levels deep."
+  categoryDescendantParentForbidden: A category cannot be moved inside one of its descendants.
+  categoryHierarchyInvalid: The category hierarchy is invalid.
+  categoryKindChangeBlocked: Change or move the incompatible subcategories before changing this category type.
+  categoryKindInvalid: Choose an income, expense, or income-and-expense category type.
+  categoryNameConflict: A category with this name already exists at that level.
+  categoryNameInvalid: Category name must be between 1 and 80 characters.
+  categoryNestingTooDeep: Category nesting is too deep.
+  categoryNotFound: Category not found.
+  categoryParentKindIncompatible: "A {childKind} category cannot be nested under a {parentKind} category."
+  categoryParentNotFound: Parent category not found.
+  categoryParentRestoreRequired: Restore the parent category before nesting under it.
+  categoryRestoreParentsFirst: Restore the parent categories first.
+  categorySelfParentForbidden: A category cannot be its own parent.
+  categorySpendingNatureInvalid: Choose fixed or variable spending.
+  categorySpendingPriorityInvalid: Choose essential or discretionary spending.
+  merchantArchived: This merchant is archived. Restore it before using it on a new entry.
+  merchantNameConflict: Another merchant already uses this name.
+  merchantNameInvalid: Merchant name must be between 1 and 120 characters.
+  merchantNameTooLong: Merchant name must be 120 characters or fewer.
+  merchantNotFound: Merchant not found.
+  tagArchived: This tag is archived. Restore it before using it.
+  tagArchivedNameConflict: An archived tag already uses this name; restore it instead.
+  tagCommaForbidden: Tag names cannot contain commas because commas separate tags.
+  tagNameConflict: This tag already exists.
+  tagNameInvalid: Tag name must be between 1 and 40 characters.
+  tagNotFound: Tag not found.
+  transactionAccountInvalid: Choose an active account.
+  transactionAmountFilterAccountInvalid: Choose an account that belongs to your profile before filtering by amount.
+  transactionAmountInvalid: Transaction amount must be a positive integer in minor units.
+  transactionCategoryInvalid: Choose an active category that belongs to your profile.
+  transactionCategoryKindInvalid: "Choose a {kind} category for this transaction."
+  transactionClearDateFuture: A pending transaction cannot be cleared before its transaction date.
+  transactionDateFuture: Transactions cannot be dated in the future; use Planned Payments for future cash movements.
+  transactionDestinationAccountRequired: Choose a destination account.
+  transactionDuplicate: This looks like a duplicate transaction.
+  transactionLiabilityAdjustmentWorkflowRequired: Use the dedicated loan or credit-card workflow to reconcile a liability balance.
+  transactionLiabilityTransferWorkflowRequired: Use the dedicated loan or credit-card workflow for liability transfers.
+  transactionLiabilityUndoRequired: Use liability-payment undo so the debt ledger and transaction stay reconciled.
+  transactionLoanPaymentWorkflowRequired: Use the loan payment workflow so principal, interest, and fees are classified correctly.
+  transactionMerchantInvalid: Choose a merchant that belongs to your profile.
+  transactionNotFound: Transaction not found.
+  transactionPendingRequired: Only pending transactions can be cleared.
+  transactionPlannedOccurrenceInvalid: Choose a planned-payment occurrence that belongs to your profile.
+  transactionPlannedUndoRequired: Use planned-payment undo so the occurrence and actual transaction stay reconciled.
+  transactionSplitAmountInvalid: Every split amount must be a non-zero integer in minor units.
+  transactionSplitTotalMismatch: Split amounts must add up to the transaction amount.
+  transactionTransferAccountsSame: Transfer accounts must be different.
+  transactionTransferCategoryForbidden: Transfers cannot be assigned to income or expense categories.
+  transactionTransferIncomplete: This transfer is incomplete and cannot be cleared safely.
+  importCsvTooLarge: "CSV files must be smaller than {maxMegabytes, number} MB."
+  importDestinationAccountRequired: Choose an active destination account.
+  importCsvParseError: This CSV row could not be parsed.
+  importRowLimitExceeded: "One import is limited to {maxRows, number} rows. Split the CSV into smaller files before importing."
+  importMappingRequired: Map both a date and amount column before importing.
+  importAmbiguousDate: Choose DD/MM/YYYY or MM/DD/YYYY for this ambiguous date before importing.
+  importInvalidDate: Enter a valid transaction date.
+  importInvalidAmount: Enter a non-zero transaction amount.
+  importOriginalPairRequired: Provide both the original amount and original currency.
+  importUnsupportedOriginalCurrency: "{currency} is not a supported ISO 4217 currency."
+  importInvalidOriginalAmount: Enter a valid original amount.
+  importAmountDirectionMismatch: Posted and original amounts must have the same direction.
+  importSameCurrencyAmountMismatch: Same-currency posted and original amounts must match.
+  importFxPrecisionMismatch: The original and posted amounts cannot be reconciled at the supported FX precision.
+  importExchangeRateMismatch: The mapped exchange rate does not reconcile with the posted amount.
+  importInvalidExchangeRate: Enter a valid exchange rate.
+  importFxOriginalRequired: An exchange rate requires an original amount and currency.
+  importRowCountInvalid: "Choose between {minRows, number} and {maxRows, number} rows to import."
+  importInvalidDateOrAmount: Enter a valid date and a non-zero amount.
+  importCategoryUnavailable: Choose an active category that belongs to this profile.
+  importInvalidOriginalData: Enter a valid original amount and currency.
+  importSameCurrencyFxForbidden: Same-currency original and posted amounts must match without an FX rate.
+  importForeignFxRequired: Foreign-currency rows require a positive manual FX rate and valid rate date.
+  importFxReconciliationFailed: The original amount and FX rate do not reconcile with the posted amount.
+  backupCurrencyMissing: The backup contains a missing currency.
+  backupCurrencyInvalid: The backup contains an unsupported or incorrectly formatted currency.
+  backupTransactionFxRateInvalid: A transaction in the backup has an invalid FX rate.
+  backupTransactionFxSourceInvalid: A transaction in the backup has an invalid FX source.
+  backupTransactionFxDateInvalid: A transaction in the backup has an invalid FX rate date.
+  backupTransactionReferenceFxIncomplete: A transaction in the backup has an incomplete reference FX quote.
+  backupTransactionReferenceFxInvalid: A transaction in the backup has an invalid reference FX quote.
+  backupTransactionReferenceFxDuplicate: A transaction in the backup has a duplicate reference FX quote.
+  backupTransactionBnrQuoteMismatch: A transaction does not match its stored official BNR quote.
+  backupTransactionReferenceQuoteMismatch: A transaction does not match its stored reference BNR quote.
+  backupTransactionOriginalPairRequired: A transaction must include both its original amount and original currency.
+  backupTransactionFxWithoutOriginal: A transaction has FX fields without an original amount and currency.
+  backupTransactionOriginalAmountInvalid: A transaction in the backup has an invalid original amount.
+  backupTransactionSameCurrencyFxInvalid: A same-currency transaction contains invalid FX fields.
+  backupTransactionFxMetadataMissing: A foreign-currency transaction is missing FX metadata.
+  backupTransactionFxReconciliationFailed: A transaction's original amount and FX rate do not reconcile with its account posting.
+  backupTransactionCurrencyMismatch: A transaction's currency does not match its account ledger.
+  backupTransactionAmountInvalid: A transaction in the backup has an invalid account amount.
+  backupTransactionDateInvalid: A transaction in the backup has an invalid date.
+  backupTransferLinkMissing: A transfer in the backup is missing its group or peer link.
+  backupTransactionTransferLinkInvalid: A non-transfer transaction in the backup contains transfer links.
+  backupTransferReconciliationFailed: A transfer group in the backup does not reconcile.
+  backupTransferPeerStateInvalid: A transfer group in the backup has inconsistent peer state.
+  backupUserNotFound: The user profile could not be found.
+  backupSoleOwnerRequired: Full database backups are available only when this local LedgerLab database has one owner. Use JSON or CSV export for a user-scoped copy.
+  backupTooLarge: "The complete backup exceeds {maxMegabytes, number} MB. Remove large receipt files before creating it."
+  backupRestoreConfirmationRequired: Type RESTORE to confirm replacement.
+  backupRestoreFileTooLarge: "Backup files must be smaller than {maxMegabytes, number} MB."
+  backupRestoreSoleOwnerRequired: Full database restore is available only to the sole owner of this local database.
+  backupInvalid: This is not a valid LedgerLab backup.
+  backupFormatUnsupported: This backup format is not supported.
+  backupChecksumMissing: The backup is missing a valid SHA-256 checksum.
+  backupDatabaseMissing: The backup does not contain a SQLite database.
+  backupChecksumInvalid: Backup checksum validation failed.
+  backupDatabaseIntegrityFailed: The backup database did not pass its integrity check.
+  backupTablesMissing: The backup is missing required LedgerLab tables.
+  backupRelationshipsInvalid: The backup contains broken relationships.
+  backupOwnerCountInvalid: A full restore must contain exactly one local owner.
+  backupOwnerMismatch: This backup belongs to a different local owner. The current database was not changed.
+  backupCurrencyLedgerMismatch: The backup contains an invalid currency or a transaction whose currency does not match its account ledger.
+  backupBudgetCurrencyInvalid: The backup contains an invalid budget currency.
+  backupMonthPlanCurrencyInvalid: The backup contains an invalid monthly-plan currency.
+  backupRestoredRelationshipsInvalid: The restored backup contains broken relationships.
+  backupAccountMissingAfterRestore: Backup restored, but your previous account is not present. Sign in using credentials stored in the backup.
+  reportingFxRateUnavailable: "No persisted BNR {fromCurrency}/{reportingCurrency} reference rate is available on or before {requestedDate}."
+  reportingStartDateInvalid: Choose a valid reporting-rate start date.
+  reportingEndDateInvalid: Choose a valid reporting-rate end date.
+  reportingDateRangeInvalid: The reporting-rate start date must not be after the end date.
+  fxBnrMultiplierInvalid: BNR returned an invalid currency multiplier.
+  fxBnrRateInvalid: BNR returned an invalid exchange rate.
+  fxBnrObservationsMissing: The official BNR XML did not contain any usable exchange-rate observations.
+  fxBnrFeedUnreachable: "Could not reach the official BNR exchange-rate feed for {year}."
+  fxBnrFeedHttpError: "The official BNR exchange-rate feed for {year} returned HTTP {status}."
+  fxBnrFeedTooLarge: The official BNR exchange-rate response was unexpectedly large.
+  fxBnrRefreshFailed: The official BNR exchange-rate feed could not be refreshed; a saved rate is being used.
+  fxCurrencyUnsupported: Choose a supported ISO 4217 currency.
+  fxQuoteDateInvalid: Choose a valid FX quote date in YYYY-MM-DD format.
+  fxTransactionDateInvalid: Choose a valid transaction date in YYYY-MM-DD format.
+  fxManualRateDateInvalid: Choose a valid manual FX rate date in YYYY-MM-DD format.
+  fxTransactionRateDateInvalid: Choose a valid FX rate date in YYYY-MM-DD format.
+  fxTransferDateInvalid: Choose a valid transfer date in YYYY-MM-DD format.
+  fxTransferManualRateDateInvalid: Choose a valid manual transfer FX rate date in YYYY-MM-DD format.
+  fxTransferRateDateInvalid: Choose a valid transfer FX rate date in YYYY-MM-DD format.
+  fxBnrRateUnavailable: "BNR has no common {fromCurrency}/{toCurrency} reference rate on or before {requestedDate}."
+  fxAccountInvalid: Choose an active account that belongs to your profile.
+  fxOriginalPairRequired: Provide both the original amount and original currency.
+  fxFieldsWithoutOriginal: FX rate fields require an original amount and original currency.
+  fxPostedAmountMismatch: The posted account amount does not match the original amount and FX rate.
+  fxSameCurrencyAmountsMismatch: Same-currency original and posted amounts must match.
+  fxSameCurrencyFieldsForbidden: Same-currency transactions do not need FX rate fields.
+  fxRateSourceRequired: Choose BNR or manual as the FX rate source.
+  fxBnrReferenceFieldsForbidden: A BNR transaction rate does not need separate reference-rate fields.
+  fxManualRateRequired: Enter a positive manual FX rate.
+  fxReferencePairRequired: Provide both the reference BNR rate and its rate date.
+  fxTransactionMetadataRequired: Foreign-currency transactions require a verified FX rate, source, and rate date.
+  fxTransactionTransferFieldsUnsupported: Transfers cannot carry original-currency fields; cross-currency transfers require two explicit account amounts and are not supported yet.
+  fxTransactionTransferOriginalFieldsForbidden: Transfers cannot carry original-currency fields.
+  fxTransactionBnrQuoteNotCached: The official BNR quote is not cached. Request the FX quote before posting this transaction.
+  fxTransactionReferenceQuoteNotCached: The reference BNR quote is not cached. Request the FX quote before posting this transaction.
+  fxTransferOriginalFieldsInferred: Transfer source amount and currency are inferred from the source account.
+  fxTransferAccountsInvalid: Choose active source and destination accounts that belong to your profile.
+  fxTransferAccountsSame: Transfer accounts must be different.
+  fxTransferSameCurrencyFieldsForbidden: Same-currency transfers do not need FX rate fields.
+  fxTransferSameCurrencyAmountsMismatch: Same-currency transfer amounts must match.
+  fxTransferRateSourceRequired: Choose BNR or manual as the transfer FX rate source.
+  fxTransferBnrReferenceFieldsForbidden: A BNR transfer rate does not need separate reference-rate fields.
+  fxTransferAmountTooSmall: The transfer amount is too small to produce a destination minor unit at this rate.
+  fxTransferOfficialAmountMismatch: The destination amount does not match the official transfer rate.
+  fxTransferManualRateRequired: Enter a positive manual transfer FX rate.
+  fxTransferManualAmountMismatch: The destination amount does not match the manual transfer rate.
+  fxTransferDestinationAmountRequired: Enter the amount received by the destination account.
+  fxTransferMetadataRequired: Cross-currency transfers require a verified FX rate, source, rate date, and destination amount.
+  fxTransferBnrQuoteNotCached: The official transfer quote is not cached. Request the FX quote before posting this transfer.
+  fxTransferReferenceQuoteNotCached: The reference transfer quote is not cached. Request it before posting this transfer.
+  fxTransactionBnrQuoteRateMismatch: BNR FX rate does not match the persisted official quote.
+  fxTransactionBnrQuoteDateMismatch: BNR FX date does not match the official fallback date.
+  fxTransactionReferenceQuoteRateMismatch: Reference BNR FX rate does not match the persisted official quote.
+  fxTransactionReferenceQuoteDateMismatch: Reference BNR FX date does not match the official fallback date.
+  fxTransferBnrQuoteRateMismatch: Transfer BNR FX rate does not match the persisted official quote.
+  fxTransferBnrQuoteDateMismatch: Transfer BNR FX date does not match the official fallback date.
+  fxTransferReferenceQuoteRateMismatch: Reference transfer BNR FX rate does not match the persisted official quote.
+  fxTransferReferenceQuoteDateMismatch: Reference transfer BNR FX date does not match the official fallback date.
+  crossOriginForbidden: Cross-origin changes are not allowed.
+  queryIntegerInvalid: "{field} must be a whole number."
+  queryDateInvalid: "{field} must be a valid calendar date."
+  queryDateRangeIncomplete: Both from and to dates are required.
+  queryDateRangeReversed: The start date must be on or before the end date.
+  queryDateRangeTooLong: "Choose a date range of {maxYears, plural, one {# year} other {# years}} or less."
+  currentPasswordInvalid: The current password is incorrect.
+  authRegistrationConfigInvalid: Registration is not configured correctly.
+  profileNotFound: The user profile could not be found.
+  profileCurrencyInvalid: The user profile contains an unsupported default currency.
+  profileRegionalSettingsInvalid: The user profile contains invalid regional settings.
+  planningRecurrenceDidNotAdvance: Recurring payment rules must advance to a later date.
+  planningInitialStatusInvalid: New planned payments must start as planned or scheduled.
+  planningCurrencyInvalid: Choose a supported ISO 4217 planned-payment currency.
+  planningOccurrenceNotFound: Planned payment not found.
+  planningStoredCurrencyUnsupported: The planned payment has an unsupported currency.
+  planningCrossCurrencyAmountsRequired: "Enter the amount applied in {plannedCurrency} as well as the account amount in {accountCurrency}."
+  planningAppliedAmountInvalid: Applied planned amount must be a positive integer in minor units.
+  planningPaymentRestoreRequired: Restore this planned payment before recording an actual payment.
+  planningOccurrenceAlreadyPaid: This planned payment is already paid. Undo it before recording a replacement.
+  planningOccurrenceStatusRestoreRequired: "{status, select, skipped {A skipped payment cannot be paid until it is restored.} cancelled {A cancelled payment cannot be paid until it is restored.} other {This payment cannot be paid until it is restored.}}"
+  planningAccountAmountInvalid: Account amount must be a positive integer in minor units.
+  planningPreparedAmountMismatch: The prepared original amount does not match the amount applied to the planned payment.
+  planningPreparedCurrencyMismatch: The prepared original currency does not match the planned payment currency.
+  planningCumulativeAmountTooLarge: Cumulative planned payments exceed the safe integer range.
+  planningPaymentsUndoRequiredBeforeSkip: Undo recorded payments before skipping this occurrence.
+  planningPaymentsUndoRequiredBeforeCancel: Undo recorded payments before cancelling this occurrence.
+  planningOccurrenceAlreadyCancelled: This occurrence is already cancelled.
+  planningSkipUndoRequiredBeforeCancel: Undo the skipped occurrence before cancelling it.
+  planningPaymentNotFound: Planned payment not found.
+  liabilityAccountNotFound: Account not found.
+  liabilityAccountRestoreRequired: Restore this account before changing its liability records.
+  liabilityAccountTypeInvalid: This account is not a liability.
+  liabilityBalloonScheduleUnsupported: Explicit balloon schedules are not supported yet; remove balloonMinor.
+  liabilityCardStatementNotFound: Card statement not found.
+  liabilityCashAccountRequired: Debt payments must come from a current, savings, or cash account.
+  liabilityCashAllocationTooSmall: The cash amount is too small to represent every non-zero loan allocation.
+  liabilityCategoryRequired: Choose an active category that belongs to you.
+  liabilityCreditCardAccountRequired: Choose a credit-card account.
+  liabilityCrossCurrencyCashAmountRequired: Cross-currency debt payments require an explicit cash-account amount.
+  liabilityDisbursementCrossCurrencyCashAmountRequired: Cross-currency loan disbursements require an explicit cash-account amount.
+  liabilityDisbursementSameCurrencyAmountMismatch: Same-currency loan and cash disbursement amounts must match.
+  liabilityDisbursementSameCurrencyFxForbidden: Same-currency loan disbursements do not need FX rate fields.
+  liabilityEarliestInstallmentRequired: Record the earliest outstanding installment before paying a later one.
+  liabilityFirstPaymentBeforeOrigination: The first payment cannot precede loan origination.
+  liabilityFirstRateAfterFirstPayment: The first rate must cover the first installment.
+  liabilityFixedPaymentScheduleUnsupported: Contractual fixed-payment schedules are not supported yet; remove regularPaymentMinor.
+  liabilityFixedRateRequired: Enter the fixed annual interest rate.
+  liabilityFxAllocationPrecisionUnsupported: This cash/liability allocation cannot be represented at the supported FX precision.
+  liabilityInstallmentFeesExceeded: Fee allocation exceeds this installment's remaining fees.
+  liabilityInstallmentInterestExceeded: Interest allocation exceeds this installment's remaining interest.
+  liabilityInstallmentPrincipalExceeded: Principal allocation exceeds this installment's remaining principal; record extra principal without selecting an installment.
+  liabilityLoanAccountRequired: Choose a loan account.
+  liabilityLoanAmortizationUnsupported: This loan uses an unsupported repayment schedule. Choose annuity, equal principal, or interest only.
+  liabilityLoanInstallmentAlreadyPaid: This installment is already paid.
+  liabilityLoanInstallmentNotFound: Loan installment not found.
+  liabilityLoanOriginationInFuture: Loan origination date cannot be in the future.
+  liabilityLoanScheduleCalculationFailed: Could not calculate the loan schedule.
+  liabilityLoanTermsNotFound: Loan terms not found.
+  liabilityLoanTermsRequired: Add the loan terms before recording installments.
+  liabilityMaturityBeforeFirstPayment: Maturity cannot precede the first payment.
+  liabilityMinimumDueExceedsBalance: Minimum due cannot exceed the statement balance.
+  liabilityPaymentAllocationMismatch: Principal, interest, and fees must equal the total payment.
+  liabilityPaymentAlreadyUndone: This payment was already undone.
+  liabilityPaymentCadenceIntervalMismatch: "{frequency, select, monthly {Monthly cadence does not match the payment interval.} quarterly {Quarterly cadence does not match the payment interval.} yearly {Yearly cadence does not match the payment interval.} custom {Custom cadence does not match the payment interval.} other {The payment cadence does not match the payment interval.}}"
+  liabilityPaymentCadenceUnsupported: This loan uses an unsupported payment cadence.
+  liabilityPaymentIntervalInvalid: The loan payment interval must be between 1 and 120 months.
+  liabilityPaymentNotFound: Liability payment not found.
+  liabilityPrincipalExceedsBalance: Principal payment exceeds the current outstanding loan balance.
+  liabilityRateCapBelowFloor: The rate cap cannot be below the floor.
+  liabilityRatePeriodNotAfterLatest: A new rate period must start after the latest existing period.
+  liabilityRatePeriodOrderInvalid: The rate period cannot end before it starts.
+  liabilityReferenceQuoteNotCached: The reference BNR quote is not cached. Request the FX quote before posting this liability payment.
+  liabilitySameCurrencyPaymentAmountMismatch: Same-currency cash and liability amounts must match.
+  liabilityStatementClosingBeforePeriodEnd: The closing date cannot precede the statement period end.
+  liabilityStatementClosingDateDuplicate: A statement for this closing date already exists.
+  liabilityStatementDueBeforeClosing: The due date cannot precede the closing date.
+  liabilityStatementPeriodOrderInvalid: The statement period cannot end before it starts.
+  liabilityStoredBalloonUnsupported: This loan contains an unsupported balloon value. Update its terms before using projections.
+  liabilityStoredFixedPaymentUnsupported: This loan contains an unsupported contractual fixed-payment value. Update its terms before using projections.
+  liabilityUndoLaterInstallmentsFirst: Undo later loan installments before undoing this payment.
+  liabilityVariableRateFieldsRequired: Variable rates require an index, tenor, observed rate, and reset frequency.
+  liabilityCashAccountAmountInvalid: Cash-account amount must be a positive integer in minor units.
+  liabilityCreditLimitInvalid: Credit limit must be a non-negative integer in minor units.
+  liabilityDisbursementAmountInvalid: Disbursement amount must be a positive integer in minor units.
+  liabilityDisbursementDateInvalid: Choose a valid disbursement date in YYYY-MM-DD format.
+  liabilityFeeAmountInvalid: Fee amount must be a non-negative integer in minor units.
+  liabilityFirstPaymentDateInvalid: Choose a valid first payment date in YYYY-MM-DD format.
+  liabilityInterestAmountInvalid: Interest amount must be a non-negative integer in minor units.
+  liabilityLoanOriginationDateInvalid: Choose a valid origination date in YYYY-MM-DD format.
+  liabilityMaturityDateInvalid: Choose a valid maturity date in YYYY-MM-DD format.
+  liabilityMinimumDueInvalid: Minimum due must be a non-negative integer in minor units.
+  liabilityNextResetDateInvalid: Choose a valid next reset date in YYYY-MM-DD format.
+  liabilityOriginalPrincipalInvalid: Original principal must be a positive integer in minor units.
+  liabilityPaymentAmountInvalid: Payment amount must be a positive integer in minor units.
+  liabilityPaymentDateInvalid: Choose a valid payment date in YYYY-MM-DD format.
+  liabilityPrincipalAmountInvalid: Principal amount must be a non-negative integer in minor units.
+  liabilityRateEffectiveDateInvalid: Choose a valid rate effective date in YYYY-MM-DD format.
+  liabilityRateEndDateInvalid: Choose a valid rate end date in YYYY-MM-DD format.
+  liabilityStatementBalanceInvalid: Statement balance must be a positive integer in minor units.
+  liabilityStatementClosingDateInvalid: Choose a valid statement closing date in YYYY-MM-DD format.
+  liabilityStatementDueDateInvalid: Choose a valid statement due date in YYYY-MM-DD format.
+  liabilityStatementPeriodEndInvalid: Choose a valid statement period end in YYYY-MM-DD format.
+  liabilityStatementPeriodStartInvalid: Choose a valid statement period start in YYYY-MM-DD format.
+  liabilityTotalPaymentInvalid: Total payment must be a positive integer in minor units.
+  attachmentConfigInvalid: Receipt storage is not configured correctly.
+  attachmentConfigOutOfRange: Receipt storage is not configured correctly.
+  attachmentConfigQuotaInvalid: Receipt storage is not configured correctly.
+  attachmentConfigRootUnsafe: Receipt storage is not configured correctly.
+  attachmentStorageDirectoryInvalid: Receipt storage is unavailable.
+  attachmentStorageEntryUnsafe: Receipt storage is unavailable.
+  attachmentStoragePathUnsafe: Receipt storage is unavailable.
+  attachmentStorageMetadataInvalid: Receipt storage is unavailable.
+  attachmentStorageChecksumPathMismatch: Receipt storage is unavailable.
+  attachmentStorageIntegrityFailed: The stored receipt failed its integrity check.
+  attachmentTransactionNotFound: The transaction could not be found.
+  attachmentFilenameLengthInvalid: "Receipt filenames must contain between {minCharacters, number} and {maxCharacters, number} characters."
+  attachmentFilenameUnsafe: The receipt filename contains unsupported characters.
+  attachmentContentLengthInvalid: The receipt size could not be verified.
+  attachmentFileTooLarge: "Receipt files must not exceed {maxBytes, number} bytes."
+  attachmentFileRequired: Choose a receipt file to upload.
+  attachmentFileEmpty: Receipt files cannot be empty.
+  attachmentFileLimitReached: "A transaction can have at most {maxFiles, plural, one {# receipt file} other {# receipt files}}."
+  attachmentQuotaReached: The receipt storage quota has been reached.
+  attachmentDuplicate: This receipt is already attached to the transaction.
+  attachmentTypeUnsupported: Only PDF, PNG, JPEG, WebP, HEIC, and HEIF receipt files are supported.
+  attachmentExtensionMismatch: "The filename extension does not match the detected {detectedMimeType} content."
+  attachmentDeclaredTypeMismatch: The declared file type does not match the receipt content.
+  attachmentNotFound: The attachment could not be found.
+  attachmentReferenceNotDownloadable: This attachment is a reference and has no local file.
+  attachmentContentUnavailable: The stored receipt is missing or failed its integrity check.
+  attachmentBackupMetadataConflict: Receipt metadata conflicts with another stored receipt.
+  attachmentBackupContentMissing: Receipt content is missing from the backup.
+  attachmentBackupContentInvalid: Receipt content failed its integrity check.
+  attachmentBackupSizeInvalid: The backup contains an invalid receipt size.
+  attachmentBackupDataInvalid: The backup contains invalid receipt data.
+  attachmentBackupIntegrityFailed: A receipt in the backup failed its integrity check.
+  attachmentBackupManifestInvalid: The backup receipt manifest is invalid.
+  attachmentBackupEntryDuplicate: The backup contains a duplicate receipt entry.
+  attachmentBackupMetadataMismatch: The backup receipt manifest does not match its database metadata.
+  attachmentRestoreStorageConflict: Existing receipt storage conflicts with the restored backup.
+auth:
+  authenticationRequired: Sign in to continue.
+  invalidCredentials: The email address or password is incorrect.
+  emailTaken: An account already exists for this email address.
+  weakPassword: Choose a stronger password.
+  invalidEmail: Enter a valid email address.
+  invalidCurrency: Choose a supported currency.
+  invalidLocale: Choose a valid formatting locale.
+  invalidTimeZone: Choose a valid time zone.
+  registrationClosed: Registration is closed for this installation.
+validationIssues:
+  invalidType: Enter a value of the expected type.
+  tooSmall: "The value must be at least {minimum, number}."
+  tooBig: "The value must be at most {maximum, number}."
+  invalidFormat: Enter a value in the expected format.
+  custom: Check this value and try again.
+validation:
+  required: This field is required.
+  invalidEmail: Enter a valid email address.
+  minimumCharacters: "Enter at least {count, plural, one {# character} other {# characters}}."

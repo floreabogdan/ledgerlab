@@ -14,7 +14,7 @@ import {
 import { open, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { HttpError } from "@/lib/api-response";
+import { HttpError, type ApiErrorParameters } from "@/lib/api-response";
 import { audit, database, one } from "@/server/core";
 
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -24,6 +24,19 @@ const MAX_CONFIGURED_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_CONFIGURED_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 const STORAGE_PATH_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+function attachmentError(
+  status: number,
+  code: string,
+  message: string,
+  params?: ApiErrorParameters,
+) {
+  return new HttpError(status, {
+    code: `ATTACHMENT_${code}`,
+    message,
+    params,
+  });
+}
 
 type AttachmentRow = {
   id: string;
@@ -52,10 +65,12 @@ export type AttachmentBackupFile = {
 function configuredInteger(name: string, fallback: number, maximum: number) {
   const configured = process.env[name]?.trim();
   if (!configured) return fallback;
-  if (!/^\d+$/.test(configured)) throw new HttpError(500, `${name} must be a positive integer`);
+  if (!/^\d+$/.test(configured)) {
+    throw attachmentError(500, "CONFIG_INVALID", `${name} must be a positive integer`);
+  }
   const value = Number(configured);
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-    throw new HttpError(500, `${name} must be between 1 and ${maximum}`);
+    throw attachmentError(500, "CONFIG_OUT_OF_RANGE", `${name} must be between 1 and ${maximum}`);
   }
   return value;
 }
@@ -72,7 +87,7 @@ export function attachmentLimits() {
     MAX_CONFIGURED_QUOTA_BYTES,
   );
   if (userQuotaBytes < maxFileBytes) {
-    throw new HttpError(500, "ATTACHMENT_USER_QUOTA_BYTES cannot be smaller than ATTACHMENT_MAX_FILE_BYTES");
+    throw attachmentError(500, "CONFIG_QUOTA_INVALID", "ATTACHMENT_USER_QUOTA_BYTES cannot be smaller than ATTACHMENT_MAX_FILE_BYTES");
   }
   return {
     maxFileBytes,
@@ -95,7 +110,7 @@ export function attachmentStorageRoot() {
   const configured = process.env.ATTACHMENTS_DIR?.trim();
   const resolved = configured ? path.resolve(configured) : path.join(path.dirname(databaseFilePath()), "attachments");
   if (resolved === path.parse(resolved).root) {
-    throw new HttpError(500, "ATTACHMENTS_DIR cannot be a filesystem root");
+    throw attachmentError(500, "CONFIG_ROOT_UNSAFE", "ATTACHMENTS_DIR cannot be a filesystem root");
   }
   return resolved;
 }
@@ -107,14 +122,16 @@ function ensureStorageRoot() {
 }
 
 function ensureStorageChildDirectory(name: string) {
-  if (!/^(?:[0-9a-f]{2}|\.tmp)$/.test(name)) throw new HttpError(500, "Attachment storage directory is invalid");
+  if (!/^(?:[0-9a-f]{2}|\.tmp)$/.test(name)) {
+    throw attachmentError(500, "STORAGE_DIRECTORY_INVALID", "Attachment storage directory is invalid");
+  }
   const root = ensureStorageRoot();
   const rootRealPath = realpathSync(root);
   const child = path.join(root, name);
   if (existsSync(child)) {
     const childStats = lstatSync(child);
     if (childStats.isSymbolicLink() || !childStats.isDirectory()) {
-      throw new HttpError(500, "Attachment storage contains an unsafe directory entry");
+      throw attachmentError(500, "STORAGE_ENTRY_UNSAFE", "Attachment storage contains an unsafe directory entry");
     }
   } else {
     mkdirSync(child, { mode: 0o700 });
@@ -122,22 +139,26 @@ function ensureStorageChildDirectory(name: string) {
   const childRealPath = realpathSync(child);
   const relative = path.relative(rootRealPath, childRealPath);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new HttpError(500, "Attachment storage directory escaped its configured root");
+    throw attachmentError(500, "STORAGE_PATH_UNSAFE", "Attachment storage directory escaped its configured root");
   }
   return childRealPath;
 }
 
 export function attachmentStoragePathForHash(sha256: string) {
   const normalized = sha256.trim().toLowerCase();
-  if (!SHA256_PATTERN.test(normalized)) throw new HttpError(500, "Attachment storage metadata is invalid");
+  if (!SHA256_PATTERN.test(normalized)) {
+    throw attachmentError(500, "STORAGE_METADATA_INVALID", "Attachment storage metadata is invalid");
+  }
   return `${normalized.slice(0, 2)}/${normalized}`;
 }
 
 function assertStoragePath(storagePath: string, sha256?: string | null) {
   const normalized = storagePath.replaceAll("\\", "/").toLowerCase();
-  if (!STORAGE_PATH_PATTERN.test(normalized)) throw new HttpError(500, "Attachment storage metadata is invalid");
+  if (!STORAGE_PATH_PATTERN.test(normalized)) {
+    throw attachmentError(500, "STORAGE_METADATA_INVALID", "Attachment storage metadata is invalid");
+  }
   if (sha256 && attachmentStoragePathForHash(sha256) !== normalized) {
-    throw new HttpError(500, "Attachment storage checksum does not match its path");
+    throw attachmentError(500, "STORAGE_CHECKSUM_PATH_MISMATCH", "Attachment storage checksum does not match its path");
   }
   return normalized;
 }
@@ -153,7 +174,7 @@ function assertOwnedTransaction(userId: string, transactionId: string) {
     "SELECT id FROM transactions WHERE id = ? AND user_id = ?",
     [transactionId, userId],
   );
-  if (!transaction) throw new HttpError(404, "Transaction not found");
+  if (!transaction) throw attachmentError(404, "TRANSACTION_NOT_FOUND", "Transaction not found");
 }
 
 function toMetadata(row: AttachmentRow): AttachmentMetadata {
@@ -178,10 +199,13 @@ export function listTransactionAttachments(userId: string, transactionId: string
 function normalizedFilename(input: string) {
   const value = input.normalize("NFC").trim();
   if (!value || value.length > 180 || Buffer.byteLength(value, "utf8") > 255) {
-    throw new HttpError(422, "Attachment filenames must be between 1 and 180 characters");
+    throw attachmentError(422, "FILENAME_LENGTH_INVALID", "Attachment filenames must be between 1 and 180 characters", {
+      minCharacters: 1,
+      maxCharacters: 180,
+    });
   }
   if (/[\u0000-\u001f\u007f/\\]/.test(value) || /^[.\-\s]/.test(value) || /[.\s]$/.test(value)) {
-    throw new HttpError(422, "Attachment filename contains unsafe characters");
+    throw attachmentError(422, "FILENAME_UNSAFE", "Attachment filename contains unsafe characters");
   }
   return value;
 }
@@ -221,12 +245,16 @@ function normalizedClaimedMimeType(value: string | null) {
 
 function assertContentLength(value: string | null, maxBytes: number) {
   if (!value) return;
-  if (!/^\d+$/.test(value)) throw new HttpError(400, "Content-Length must be a non-negative integer");
-  if (BigInt(value) > BigInt(maxBytes)) throw new HttpError(413, `Receipt files must not exceed ${maxBytes} bytes`);
+  if (!/^\d+$/.test(value)) {
+    throw attachmentError(400, "CONTENT_LENGTH_INVALID", "Content-Length must be a non-negative integer");
+  }
+  if (BigInt(value) > BigInt(maxBytes)) {
+    throw attachmentError(413, "FILE_TOO_LARGE", `Receipt files must not exceed ${maxBytes} bytes`, { maxBytes });
+  }
 }
 
 async function writeUploadToTemporaryFile(body: ReadableStream<Uint8Array> | null, maxBytes: number) {
-  if (!body) throw new HttpError(400, "Choose a receipt file to upload");
+  if (!body) throw attachmentError(400, "FILE_REQUIRED", "Choose a receipt file to upload");
   const temporaryDirectory = ensureStorageChildDirectory(".tmp");
   const temporaryPath = path.join(temporaryDirectory, `${randomUUID()}.upload`);
   const handle = await open(temporaryPath, "wx", 0o600);
@@ -241,7 +269,7 @@ async function writeUploadToTemporaryFile(body: ReadableStream<Uint8Array> | nul
       sizeBytes += value.byteLength;
       if (sizeBytes > maxBytes) {
         try { await reader.cancel(); } catch { /* Preserve the useful size error. */ }
-        throw new HttpError(413, `Receipt files must not exceed ${maxBytes} bytes`);
+        throw attachmentError(413, "FILE_TOO_LARGE", `Receipt files must not exceed ${maxBytes} bytes`, { maxBytes });
       }
       const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
       digest.update(chunk);
@@ -253,7 +281,7 @@ async function writeUploadToTemporaryFile(body: ReadableStream<Uint8Array> | nul
         offset += bytesWritten;
       }
     }
-    if (sizeBytes < 1) throw new HttpError(422, "Receipt files cannot be empty");
+    if (sizeBytes < 1) throw attachmentError(422, "FILE_EMPTY", "Receipt files cannot be empty");
     await handle.sync();
     return { temporaryPath, sizeBytes, sha256: digest.digest("hex"), header };
   } catch (error) {
@@ -274,7 +302,7 @@ async function installTemporaryFile(temporaryPath: string, storagePath: string, 
     if (code !== "EEXIST") throw error;
     const existing = await readFile(finalPath);
     if (existing.length !== sizeBytes || createHash("sha256").update(existing).digest("hex") !== sha256) {
-      throw new HttpError(500, "Stored attachment content failed its integrity check");
+      throw attachmentError(500, "STORAGE_INTEGRITY_FAILED", "Stored attachment content failed its integrity check");
     }
   } finally {
     await rm(temporaryPath, { force: true }).catch(() => undefined);
@@ -300,16 +328,21 @@ function assertAttachmentCapacity(
     [transactionId],
   )?.count ?? 0;
   if (transactionFileCount >= limits.maxFilesPerTransaction) {
-    throw new HttpError(409, `A transaction can have at most ${limits.maxFilesPerTransaction} receipt files`);
+    throw attachmentError(
+      409,
+      "FILE_LIMIT_REACHED",
+      `A transaction can have at most ${limits.maxFilesPerTransaction} receipt files`,
+      { maxFiles: limits.maxFilesPerTransaction },
+    );
   }
   if (totalBytes + sizeBytes > limits.userQuotaBytes) {
-    throw new HttpError(413, "The attachment storage quota has been reached");
+    throw attachmentError(413, "QUOTA_REACHED", "The attachment storage quota has been reached");
   }
   const duplicate = one<{ id: string }>(
     "SELECT id FROM attachments WHERE transaction_id = ? AND sha256 = ? LIMIT 1",
     [transactionId, sha256],
   );
-  if (duplicate) throw new HttpError(409, "This receipt file is already attached to the transaction");
+  if (duplicate) throw attachmentError(409, "DUPLICATE", "This receipt file is already attached to the transaction");
 }
 
 export async function uploadTransactionAttachment(
@@ -330,15 +363,20 @@ export async function uploadTransactionAttachment(
   const detected = detectFileType(uploaded.header);
   try {
     if (!detected) {
-      throw new HttpError(415, "Only PDF, PNG, JPEG, WebP, HEIC, and HEIF receipt files are supported");
+      throw attachmentError(415, "TYPE_UNSUPPORTED", "Only PDF, PNG, JPEG, WebP, HEIC, and HEIF receipt files are supported");
     }
     const extension = path.extname(fileName).toLowerCase();
     if (!detected.extensions.includes(extension)) {
-      throw new HttpError(415, `The filename extension does not match the detected ${detected.mimeType} content`);
+      throw attachmentError(
+        415,
+        "EXTENSION_MISMATCH",
+        `The filename extension does not match the detected ${detected.mimeType} content`,
+        { detectedMimeType: detected.mimeType },
+      );
     }
     const claimed = normalizedClaimedMimeType(input.claimedMimeType);
     if (claimed !== "application/octet-stream" && claimed !== detected.mimeType) {
-      throw new HttpError(415, "The declared file type does not match the receipt content");
+      throw attachmentError(415, "DECLARED_TYPE_MISMATCH", "The declared file type does not match the receipt content");
     }
     const storagePath = attachmentStoragePathForHash(uploaded.sha256);
     assertAttachmentCapacity(userId, transactionId, uploaded.sizeBytes, uploaded.sha256, limits);
@@ -393,14 +431,14 @@ function ownedAttachment(userId: string, attachmentId: string) {
        FROM attachments WHERE id = ? AND user_id = ?`,
     [attachmentId, userId],
   );
-  if (!row) throw new HttpError(404, "Attachment not found");
+  if (!row) throw attachmentError(404, "NOT_FOUND", "Attachment not found");
   return row;
 }
 
 export function attachmentDownload(userId: string, attachmentId: string) {
   const row = ownedAttachment(userId, attachmentId);
   if (!row.storagePath || !row.sha256 || row.sizeBytes === null || !row.mimeType) {
-    throw new HttpError(404, "This attachment is a reference and has no local file");
+    throw attachmentError(404, "REFERENCE_NOT_DOWNLOADABLE", "This attachment is a reference and has no local file");
   }
   const filePath = resolveAttachmentStoragePath(row.storagePath, row.sha256);
   let rootRealPath: string;
@@ -415,11 +453,11 @@ export function attachmentDownload(userId: string, attachmentId: string) {
     const actual = statSync(fileRealPath);
     if (actual.size !== row.sizeBytes) throw new Error("Size mismatch");
   } catch {
-    throw new HttpError(410, "The stored receipt file is missing or failed its integrity check");
+    throw attachmentError(410, "CONTENT_UNAVAILABLE", "The stored receipt file is missing or failed its integrity check");
   }
   const content = readFileSync(fileRealPath);
   if (createHash("sha256").update(content).digest("hex") !== row.sha256) {
-    throw new HttpError(410, "The stored receipt file is missing or failed its integrity check");
+    throw attachmentError(410, "CONTENT_UNAVAILABLE", "The stored receipt file is missing or failed its integrity check");
   }
   return { ...toMetadata(row), content };
 }
@@ -440,7 +478,7 @@ export function deleteAttachment(userId: string, attachmentId: string) {
   const row = ownedAttachment(userId, attachmentId);
   const shouldDeleteFile = database().transaction(() => {
     const result = database().prepare("DELETE FROM attachments WHERE id = ? AND user_id = ?").run(attachmentId, userId);
-    if (result.changes !== 1) throw new HttpError(404, "Attachment not found");
+    if (result.changes !== 1) throw attachmentError(404, "NOT_FOUND", "Attachment not found");
     audit(userId, "attachment", attachmentId, "delete", {
       transactionId: row.transactionId,
       fileName: row.fileName,
@@ -477,7 +515,7 @@ export function collectAttachmentBackupFiles(userId: string): AttachmentBackupFi
     const existingMetadata = files.get(storagePath);
     if (existingMetadata) {
       if (existingMetadata.sizeBytes !== row.sizeBytes || existingMetadata.sha256 !== row.sha256) {
-        throw new HttpError(409, `Receipt metadata conflicts for ${storagePath}`);
+        throw attachmentError(409, "BACKUP_METADATA_CONFLICT", `Receipt metadata conflicts for ${storagePath}`);
       }
       continue;
     }
@@ -488,10 +526,10 @@ export function collectAttachmentBackupFiles(userId: string): AttachmentBackupFi
       if (direct.isSymbolicLink() || !direct.isFile()) throw new Error("Not a regular file");
       content = readFileSync(filePath);
     } catch {
-      throw new HttpError(409, `Receipt content is missing for ${storagePath}; repair or delete that attachment before backing up`);
+      throw attachmentError(409, "BACKUP_CONTENT_MISSING", `Receipt content is missing for ${storagePath}; repair or delete that attachment before backing up`);
     }
     if (content.length !== row.sizeBytes || createHash("sha256").update(content).digest("hex") !== row.sha256) {
-      throw new HttpError(409, `Receipt content failed its integrity check for ${storagePath}`);
+      throw attachmentError(409, "BACKUP_CONTENT_INVALID", `Receipt content failed its integrity check for ${storagePath}`);
     }
     files.set(storagePath, {
       storagePath,
@@ -506,14 +544,14 @@ export function collectAttachmentBackupFiles(userId: string): AttachmentBackupFi
 function decodeBackupFile(file: AttachmentBackupFile) {
   const storagePath = assertStoragePath(file.storagePath, file.sha256);
   if (!Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 1) {
-    throw new HttpError(422, "The backup contains an invalid receipt size");
+    throw attachmentError(422, "BACKUP_SIZE_INVALID", "The backup contains an invalid receipt size");
   }
   if (typeof file.data !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.data)) {
-    throw new HttpError(422, "The backup contains invalid receipt data");
+    throw attachmentError(422, "BACKUP_DATA_INVALID", "The backup contains invalid receipt data");
   }
   const content = Buffer.from(file.data, "base64");
   if (content.length !== file.sizeBytes || createHash("sha256").update(content).digest("hex") !== file.sha256) {
-    throw new HttpError(422, "A receipt in the backup failed its integrity check");
+    throw attachmentError(422, "BACKUP_INTEGRITY_FAILED", "A receipt in the backup failed its integrity check");
   }
   return { storagePath, content };
 }
@@ -522,28 +560,34 @@ export function validateAttachmentBackupFiles(
   files: AttachmentBackupFile[],
   expected: Array<{ storagePath: string; sizeBytes: number; sha256: string }>,
 ) {
-  if (!Array.isArray(files)) throw new HttpError(422, "The backup receipt manifest is invalid");
+  if (!Array.isArray(files)) throw attachmentError(422, "BACKUP_MANIFEST_INVALID", "The backup receipt manifest is invalid");
   const expectedByPath = new Map<string, { sizeBytes: number; sha256: string }>();
   for (const row of expected) {
     const storagePath = assertStoragePath(row.storagePath, row.sha256);
     const existing = expectedByPath.get(storagePath);
     if (existing && (existing.sizeBytes !== row.sizeBytes || existing.sha256 !== row.sha256)) {
-      throw new HttpError(422, "The backup contains conflicting receipt metadata");
+      throw attachmentError(422, "BACKUP_METADATA_CONFLICT", "The backup contains conflicting receipt metadata");
     }
     expectedByPath.set(storagePath, { sizeBytes: row.sizeBytes, sha256: row.sha256 });
   }
   const decoded = new Map<string, Buffer>();
   for (const file of files) {
-    if (!file || typeof file !== "object") throw new HttpError(422, "The backup receipt manifest is invalid");
+    if (!file || typeof file !== "object") {
+      throw attachmentError(422, "BACKUP_MANIFEST_INVALID", "The backup receipt manifest is invalid");
+    }
     const result = decodeBackupFile(file);
-    if (decoded.has(result.storagePath)) throw new HttpError(422, "The backup contains a duplicate receipt entry");
+    if (decoded.has(result.storagePath)) {
+      throw attachmentError(422, "BACKUP_ENTRY_DUPLICATE", "The backup contains a duplicate receipt entry");
+    }
     const expectedFile = expectedByPath.get(result.storagePath);
     if (!expectedFile || expectedFile.sizeBytes !== file.sizeBytes || expectedFile.sha256 !== file.sha256) {
-      throw new HttpError(422, "The backup receipt manifest does not match its database metadata");
+      throw attachmentError(422, "BACKUP_METADATA_MISMATCH", "The backup receipt manifest does not match its database metadata");
     }
     decoded.set(result.storagePath, result.content);
   }
-  if (decoded.size !== expectedByPath.size) throw new HttpError(422, "The backup is missing receipt file content");
+  if (decoded.size !== expectedByPath.size) {
+    throw attachmentError(422, "BACKUP_CONTENT_MISSING", "The backup is missing receipt file content");
+  }
   return decoded;
 }
 
@@ -554,7 +598,7 @@ export function installAttachmentBackupFiles(files: Map<string, Buffer>) {
     if (existsSync(target)) {
       const existing = readFileSync(target);
       if (existing.length !== content.length || !existing.equals(content)) {
-        throw new HttpError(500, "Existing receipt storage conflicts with the restored backup");
+        throw attachmentError(500, "RESTORE_STORAGE_CONFLICT", "Existing receipt storage conflicts with the restored backup");
       }
       continue;
     }

@@ -14,6 +14,7 @@ This directory contains the operator and contributor documentation shipped with 
 
 - [Data model](data-model.md) — accounting semantics and invariants
 - [Architecture](architecture.md) — application layers, persistence, and request flow
+- [Internationalization](internationalization.md) — language packs, translation conventions, and structured API errors
 - [Contributing](../CONTRIBUTING.md) — development workflow and pull-request expectations
 - [Security policy](../SECURITY.md) — supported versions, deployment assumptions, and private reporting
 - [Release process](release-checklist.md) — maintainer verification and publishing guidance

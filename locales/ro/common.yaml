@@ -1,0 +1,167 @@
+app:
+  name: LedgerLab
+  brandContext: Finanțe personale
+  personalWorkspace: Spațiu de lucru personal
+  localAccount: Cont local
+  reportingCurrency: "Raportare în {currency}"
+  workspaceDetails: "{currency} · {timeZone}"
+metadata:
+  titleTemplate: "{title} · LedgerLab"
+  description: Un spațiu dedicat finanțelor personale, pentru planificare, obligații și urmărirea tranzacțiilor în mai multe monede.
+actions:
+  back: Înapoi
+  cancel: Anulează
+  close: Închide
+  continue: Continuă
+  delete: Șterge
+  save: Salvează
+  applyRange: Aplică intervalul
+  tryAgain: Încearcă din nou
+  signOut: Deconectare
+status:
+  loading: Se încarcă
+  noData: Nu există încă date.
+  saving: Se salvează…
+  loadingDetails: Îți centralizăm datele…
+  emptyTitle: Nu există încă nimic aici
+  emptyDescription: Adaugă primul element pentru a începe.
+  failureTitle: Nu am putut încărca această secțiune
+  failureDescription: Încearcă din nou peste câteva momente.
+welcome:
+  named: "Bun venit, {name}."
+items:
+  count: "{count, plural, one {# element} few {# elemente} other {# de elemente}}"
+navigation:
+  primaryAria: Navigare principală
+  mobileAria: Navigare pe mobil
+  dashboardAria: Panoul LedgerLab
+  sections:
+    workspace: Spațiu de lucru
+    manage: Administrare
+  pages:
+    dashboard:
+      label: Panou de control
+      shortLabel: Panou
+    accounts:
+      label: Conturi
+      shortLabel: Conturi
+    transactions:
+      label: Tranzacții
+      shortLabel: Tranzacții
+    plannedPayments:
+      label: Plăți planificate
+      shortLabel: Planificate
+    monthlyForecast:
+      label: Prognoză lunară
+      shortLabel: Prognoză
+    budgets:
+      label: Bugete
+      shortLabel: Bugete
+    statistics:
+      label: Statistici
+      shortLabel: Statistici
+    categories:
+      label: Categorii
+      shortLabel: Categorii
+    tags:
+      label: Etichete
+      shortLabel: Etichete
+    merchants:
+      label: Comercianți
+      shortLabel: Comercianți
+    importTransactions:
+      label: Importă tranzacții
+      shortLabel: Import
+    profileSettings:
+      label: Setări de profil
+      shortLabel: Setări
+    dataBackups:
+      label: Date și copii de siguranță
+      shortLabel: Copii
+shell:
+  skipToContent: Sari la conținutul principal
+  searchAndNavigate: Caută și navighează
+  searchOrNavigate: Caută sau navighează
+  accountMenuFor: "Deschide meniul contului pentru {name}"
+  userAccount: Cont de utilizator
+  commandTitle: Navighează la
+  commandDescription: Caută printre spațiile de lucru și acțiunile LedgerLab.
+  commandInputLabel: Caută pagini
+  commandInputPlaceholder: Tranzacții, prognoză, conturi…
+  commandResultsLabel: Pagini
+  commandNoMatches: Nicio pagină nu corespunde căutării.
+dateRange:
+  triggerAria: "Interval de date: {label}"
+  dialogTitle: Alege intervalul de date
+  dialogDescription: "Datele folosesc fusul orar {timeZone}."
+  quickGroup: Intervale rapide
+  customHeading: Interval personalizat
+  startDate: Data de început
+  endDate: Data de sfârșit
+  invalid: Interval de date nevalid
+  validation:
+    missing: Alege o dată de început și una de sfârșit.
+    invalidCalendar: Folosește date calendaristice valide.
+    reversed: Data de început trebuie să fie anterioară sau egală cu data de sfârșit.
+    tooLong: Alege un interval de cel mult zece ani.
+  quick:
+    currentMonth: Luna curentă
+    monthToDate: De la începutul lunii
+    previousMonth: Luna trecută
+    nextMonth: Luna următoare
+    previousThreeMonths: Ultimele 3 luni
+    previousSixMonths: Ultimele 6 luni
+    yearToDate: De la începutul anului
+    previousTwelveMonths: Ultimele 12 luni
+controls:
+  required: obligatoriu
+  dialogClose: Închide fereastra de dialog
+  tooltipInfo: Detalii despre calcul
+  suggestions: Sugestii
+  options: Opțiuni
+  search:
+    label: Căutare
+    placeholder: Caută…
+    clear: Șterge căutarea
+  select:
+    choose: Alege o opțiune
+    searchLabel: Caută în opțiuni
+    searchPlaceholder: Caută în opțiuni
+    noMatches: Nicio opțiune nu corespunde căutării.
+    namedList: "Opțiuni pentru {label}"
+    searchNamed: "Caută în {label}"
+    resultCount: "{count, plural, one {# opțiune} few {# opțiuni} other {# de opțiuni}}"
+  editable:
+    showSuggestions: Arată sugestiile
+    hideSuggestions: Ascunde sugestiile
+    noMatches: Nicio sugestie nu corespunde căutării. Valoarea personalizată va fi păstrată.
+    customValuesAccepted: Sunt acceptate valori personalizate
+    acceptedCustomValue: "Valoare personalizată acceptată: {value}"
+    namedList: "Sugestii pentru {label}"
+    resultCount: "{count, plural, one {# sugestie} few {# sugestii} other {# de sugestii}}"
+  currency:
+    noDecimals: Fără zecimale
+    decimalPlaces: "{count, plural, one {# zecimală} few {# zecimale} other {# de zecimale}}"
+    optionLabel: "{code}, {name}, {precision}"
+    choose: Alege moneda
+    catalogHelp: Caută în catalogul ISO 4217
+    required: Obligatoriu.
+    searchLabel: Caută monede
+    searchPlaceholder: Caută după cod, nume sau simbol
+    matches: "{count, plural, one {# rezultat} few {# rezultate} other {# de rezultate}}"
+    commonFirst: Monedele uzuale sunt afișate primele
+    isoHeading: ISO 4217
+    currenciesList: Monede
+    commonGroup: Uzuale
+    noMatches: "Nicio monedă nu corespunde căutării „{query}”."
+  chart:
+    valueLabel: "Valoarea {index}"
+    valueTitle: "{label}: {amount}"
+  progress: Progres
+  month:
+    previous: Luna anterioară
+    next: Luna următoare
+request:
+  failedWithStatus: "Cererea a eșuat ({status})"
+  unexpected: A apărut o eroare.
+  saveFailed: Modificările nu au putut fi salvate

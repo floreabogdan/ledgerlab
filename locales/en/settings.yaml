@@ -1,0 +1,108 @@
+title: Profile settings
+page:
+  eyebrow: Local account
+  description: Manage your identity, regional display defaults, in-app reminders and local password. Finance lists and data tools have dedicated workspaces.
+  sectionsAria: Profile settings sections
+tabs:
+  profile: Profile & preferences
+  reminders: Reminders
+  security: Security
+messages:
+  actionFailed: Could not save this setting
+preferences:
+  title: Profile & preferences
+  description: Identity, interface language, reporting currency, regional formatting and table density
+  saved: Profile preferences saved.
+  profileGroup: Profile
+  displayName: Display name
+  displayNamePlaceholder: Your name
+  email: Email
+  regionGroup: Reporting & region
+  reportingCurrency: Reporting currency
+  reportingCurrencyHelp: Used for totals across accounts. Changing it recalculates reports; it never relabels native history. Cross-currency totals require BNR to publish both currencies.
+  locale: Formatting locale
+  localeHelp: Controls how dates, numbers, and currencies are formatted. It does not change the interface language.
+  localePlaceholder: e.g. en-US
+  localeNoMatches: No matching common locale. You can keep this valid BCP 47 locale code.
+  localeDescription: "{language} ({region})"
+  timeZone: Time zone
+  timeZoneHelp: Determines today, monthly boundaries, and due or overdue status.
+  timeZonePlaceholder: e.g. Europe/Bucharest
+  timeZoneNoMatches: No matching IANA time zone. You can keep a custom runtime-supported value.
+  utcDescription: Coordinated Universal Time
+  interfaceGroup: Interface
+  interfaceLanguage: Interface language
+  interfaceLanguageHelp: Changes the words, labels, and messages shown by LedgerLab. Formatting locale remains a separate setting for dates, numbers, and currencies.
+  compactTables: Compact data tables
+  compactTablesHelp: Use tighter rows while retaining readable mobile layouts.
+  save: Save profile settings
+  saving: Saving…
+reminders:
+  title: In-app reminders
+  description: Shown inside LedgerLab; no external messages are sent
+  saved: Reminder preferences saved.
+  dueSoonWindow: Due-soon window
+  daysBefore: "{count, plural, one {# day before} other {# days before}}"
+  dueSoon: Bills due soon
+  dueSoonHelp: Highlight planned occurrences approaching their due date.
+  overdue: Overdue obligations
+  overdueHelp: Keep unpaid past-due occurrences visible on the dashboard.
+  budgetWarnings: Budget warnings
+  budgetWarningsHelp: Flag actual spending near or above a category limit.
+  save: Save reminders
+  saving: Saving…
+security:
+  title: Local account security
+  description: Password and persistent session controls
+  localUser: local user
+  signedInAs: "Signed in as <identity>{identity}</identity>. Session cookies are HttpOnly and stored session tokens are hashed."
+  changeHeading: Change password
+  currentPassword: Current password
+  newPassword: New password
+  newPasswordHelp: At least 10 characters
+  confirmPassword: Confirm new password
+  validation:
+    passwordMinimum: Use at least 10 characters for the new password.
+    passwordsMismatch: New passwords do not match.
+  saved: Password changed. Other sessions were revoked.
+  save: Change password
+  saving: Changing…
+data:
+  eyebrow: Data management
+  title: Data & backups
+  description: Export portable transaction data, create a complete local backup, or safely restore a previous LedgerLab database.
+  importTransactions: Import transactions
+  portable:
+    title: Portable exports
+    description: Download actual transaction data
+    csvTitle: CSV export
+    csvDescription: Spreadsheet-friendly actual transactions with readable and integer posted amounts, original currencies, and applied FX snapshots.
+    csvButton: Download CSV
+    jsonTitle: JSON export
+    jsonDescription: Structured accounts, categories and actual transactions, including exact dated exchange-rate provenance.
+    jsonButton: Download JSON
+  safety:
+    title: Full database safety
+    description: Backup or restore all local LedgerLab data
+    createTitle: Create full backup
+    createDescription: Includes accounts, balances, transactions, plans, budgets, recurrence rules, profile settings, and the downloaded BNR rate cache.
+    createButton: Download backup
+    restoreTitle: Restore a backup
+    restoreDescription: Validates a LedgerLab backup before replacing data for the signed-in local user.
+    restoreButton: Choose backup
+  errors:
+    exportFailed: Could not export data
+    backupFailed: Could not create backup
+    restoreFailed: Could not restore this backup
+    fileTooLarge: Backup files must be smaller than 100 MB.
+    invalidFile: This is not a valid LedgerLab JSON backup.
+    confirmationRequired: Confirm that you understand the current database will be replaced.
+  restored: Backup restored. Reload other open LedgerLab tabs before making changes.
+  confirmation:
+    title: Restore full database backup?
+    cancel: Cancel
+    restoring: Restoring…
+    replace: Replace data & restore
+    warning: This replaces current LedgerLab data.
+    warningHelp: Create a fresh backup first if you may need to recover the current state. Sessions for other browser tabs may become stale.
+    acknowledgement: I understand that current finance data will be replaced by the selected backup.

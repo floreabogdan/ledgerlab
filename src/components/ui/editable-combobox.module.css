@@ -5,7 +5,7 @@
 }
 
 .input {
-  padding-right: calc(var(--space-10) + var(--space-1)) !important;
+  padding-inline-end: calc(var(--space-10) + var(--space-1)) !important;
 }
 
 .input::placeholder {
@@ -15,7 +15,7 @@
 .toggle {
   position: absolute;
   top: 0;
-  right: 0;
+  inset-inline-end: 0;
   display: grid;
   width: var(--space-10);
   height: var(--control-height, 44px);
@@ -94,7 +94,7 @@
   background: transparent;
   color: var(--ink);
   padding: var(--space-2) var(--space-3);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 

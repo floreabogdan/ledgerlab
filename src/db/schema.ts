@@ -40,6 +40,7 @@ export const users = sqliteTable(
     normalizedEmail: text("normalized_email").notNull(),
     passwordHash: text("password_hash").notNull(),
     displayName: text("display_name").notNull(),
+    uiLanguage: text("ui_language").notNull().default("en"),
     defaultCurrency: text("default_currency").notNull().default(DEFAULT_CURRENCY),
     locale: text("locale").notNull().default(DEFAULT_LOCALE),
     timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
@@ -708,7 +709,11 @@ export const importBatches = sqliteTable(
     importedRows: integer("imported_rows").notNull().default(0),
     duplicateRows: integer("duplicate_rows").notNull().default(0),
     invalidRows: integer("invalid_rows").notNull().default(0),
-    errors: text("errors", { mode: "json" }).$type<Array<{ row: number; message: string }>>(),
+    errors: text("errors", { mode: "json" }).$type<Array<{
+      row: number;
+      code: string;
+      params?: Record<string, string | number | boolean | null>;
+    }>>(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     completedAt: text("completed_at"),
   },
@@ -727,7 +732,10 @@ export const importRecords = sqliteTable(
     status: text("status").notNull().$type<"valid" | "invalid" | "duplicate" | "imported" | "skipped">(),
     duplicateOfTransactionId: text("duplicate_of_transaction_id").references(() => transactions.id, { onDelete: "set null" }),
     transactionId: text("transaction_id").references(() => transactions.id, { onDelete: "set null" }),
-    validationErrors: text("validation_errors", { mode: "json" }).$type<string[]>(),
+    validationErrors: text("validation_errors", { mode: "json" }).$type<Array<{
+      code: string;
+      params?: Record<string, string | number | boolean | null>;
+    }>>(),
   },
   (table) => [uniqueIndex("import_records_batch_row_unique").on(table.batchId, table.rowNumber)],
 );

@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 
 import { ensureDatabase, sqlite } from "@/db";
-import { HttpError } from "@/lib/api-response";
+import {
+  HttpError,
+  type ApiErrorParameters,
+} from "@/lib/api-response";
 import { isSupportedCurrency } from "@/lib/currencies";
 
 export const FX_RATE_SCALE = 100_000_000;
@@ -31,7 +34,10 @@ export type FxQuote = {
   sourceUrls: string[];
   cacheStatus: "identity" | "cached" | "refreshed" | "stale";
   isStale: boolean;
-  refreshError?: string;
+  refreshError?: {
+    code: string;
+    params?: ApiErrorParameters;
+  };
 };
 
 export type TransactionFxFields = {
@@ -93,6 +99,25 @@ type YearSyncResult = "cached" | "refreshed";
 
 const pendingYearSyncs = new Map<number, Promise<YearSyncResult>>();
 const currencyDigitsCache = new Map<string, number>();
+
+type FxErrorCode = `FX_${string}`;
+
+function fxError(
+  status: number,
+  code: FxErrorCode,
+  message: string,
+  options: {
+    params?: ApiErrorParameters;
+    details?: unknown;
+  } = {},
+) {
+  return new HttpError(status, {
+    code,
+    message,
+    params: options.params,
+    details: options.details,
+  });
+}
 
 function safeInteger(value: bigint, label: string): number {
   const result = Number(value);
@@ -209,7 +234,11 @@ export function deriveRateScaledFromAmounts(
 function normalizeCurrency(value: string): string {
   const currency = value.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency) || !isSupportedCurrency(currency)) {
-    throw new HttpError(422, "Choose a supported ISO 4217 currency");
+    throw fxError(
+      422,
+      "FX_CURRENCY_UNSUPPORTED",
+      "Choose a supported ISO 4217 currency",
+    );
   }
   return currency;
 }
@@ -220,8 +249,14 @@ function isDateKey(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function requireDateKey(value: string, label = "date") {
-  if (!isDateKey(value)) throw new HttpError(422, `Choose a valid ${label} in YYYY-MM-DD format`);
+function requireDateKey(value: string, label: string, code: FxErrorCode) {
+  if (!isDateKey(value)) {
+    throw fxError(
+      422,
+      code,
+      `Choose a valid ${label} in YYYY-MM-DD format`,
+    );
+  }
 }
 
 function attribute(attributes: string, name: string): string | null {
@@ -245,18 +280,32 @@ export function parseBnrXml(xml: string): ParsedBnrXml {
       const multiplierValue = attribute(rate[1], "multiplier") ?? "1";
       const multiplier = Number(multiplierValue);
       if (!Number.isSafeInteger(multiplier) || multiplier <= 0) {
-        throw new HttpError(502, `BNR returned an invalid multiplier for ${currencyValue}`);
+        throw fxError(
+          502,
+          "FX_BNR_MULTIPLIER_INVALID",
+          `BNR returned an invalid multiplier for ${currencyValue}`,
+        );
       }
       let publishedRateScaled: number;
       try {
         publishedRateScaled = parseRateDecimalToScaled(rate[2]);
       } catch {
-        throw new HttpError(502, `BNR returned an invalid rate for ${currencyValue} on ${rateDate}`);
+        throw fxError(
+          502,
+          "FX_BNR_RATE_INVALID",
+          `BNR returned an invalid rate for ${currencyValue} on ${rateDate}`,
+        );
       }
       observations.push({ rateDate, currency: currencyValue, publishedRateScaled, multiplier });
     }
   }
-  if (!observations.length) throw new HttpError(502, "The official BNR XML did not contain any usable exchange-rate observations");
+  if (!observations.length) {
+    throw fxError(
+      502,
+      "FX_BNR_OBSERVATIONS_MISSING",
+      "The official BNR XML did not contain any usable exchange-rate observations",
+    );
+  }
   const dates = observations.map((item) => item.rateDate).sort();
   return {
     publishingDate,
@@ -353,22 +402,44 @@ async function fetchAndPersistYear(year: number, requestedDate: string): Promise
       signal: controller.signal,
     });
   } catch (error) {
-    throw new HttpError(502, `Could not reach the official BNR exchange-rate feed for ${year}`, {
-      provider: BNR_PROVIDER,
-      sourceUrl,
-      reason: error instanceof Error ? error.message : "Network request failed",
-    });
+    throw fxError(
+      502,
+      "FX_BNR_FEED_UNREACHABLE",
+      `Could not reach the official BNR exchange-rate feed for ${year}`,
+      {
+        params: { year },
+        details: {
+          provider: BNR_PROVIDER,
+          sourceUrl,
+          reason: error instanceof Error ? error.message : "Network request failed",
+        },
+      },
+    );
   } finally {
     clearTimeout(timeout);
   }
   if (!response.ok) {
-    throw new HttpError(502, `The official BNR exchange-rate feed for ${year} returned HTTP ${response.status}`, {
-      provider: BNR_PROVIDER,
-      sourceUrl,
-    });
+    throw fxError(
+      502,
+      "FX_BNR_FEED_HTTP_ERROR",
+      `The official BNR exchange-rate feed for ${year} returned HTTP ${response.status}`,
+      {
+        params: { year, status: response.status },
+        details: {
+          provider: BNR_PROVIDER,
+          sourceUrl,
+        },
+      },
+    );
   }
   const xml = await response.text();
-  if (xml.length > 20 * 1024 * 1024) throw new HttpError(502, "The official BNR exchange-rate response was unexpectedly large");
+  if (xml.length > 20 * 1024 * 1024) {
+    throw fxError(
+      502,
+      "FX_BNR_FEED_TOO_LARGE",
+      "The official BNR exchange-rate response was unexpectedly large",
+    );
+  }
   persistBnrXml(xml, sourceUrl);
   return "refreshed";
 }
@@ -439,7 +510,11 @@ function identityQuote(requestedDate: string, currency: string): FxQuote {
 
 export function findPersistedBnrQuote(requestedDateValue: string, fromValue: string, toValue: string): FxQuote | null {
   ensureDatabase();
-  requireDateKey(requestedDateValue, "FX quote date");
+  requireDateKey(
+    requestedDateValue,
+    "FX quote date",
+    "FX_QUOTE_DATE_INVALID",
+  );
   const fromCurrency = normalizeCurrency(fromValue);
   const toCurrency = normalizeCurrency(toValue);
   if (fromCurrency === toCurrency) return identityQuote(requestedDateValue, fromCurrency);
@@ -471,7 +546,7 @@ export function findPersistedBnrQuote(requestedDateValue: string, fromValue: str
 }
 
 export async function resolveBnrQuote(requestedDate: string, from: string, to: string): Promise<FxQuote> {
-  requireDateKey(requestedDate, "FX quote date");
+  requireDateKey(requestedDate, "FX quote date", "FX_QUOTE_DATE_INVALID");
   const fromCurrency = normalizeCurrency(from);
   const toCurrency = normalizeCurrency(to);
   if (fromCurrency === toCurrency) {
@@ -500,7 +575,9 @@ export async function resolveBnrQuote(requestedDate: string, from: string, to: s
         ...quote,
         cacheStatus: "stale",
         isStale: true,
-        refreshError: syncError instanceof Error ? syncError.message : "The BNR feed could not be refreshed",
+        refreshError: syncError instanceof HttpError
+          ? { code: syncError.code, params: syncError.params }
+          : { code: "FX_BNR_REFRESH_FAILED" },
       };
     }
     return {
@@ -509,13 +586,21 @@ export async function resolveBnrQuote(requestedDate: string, from: string, to: s
     };
   }
   if (syncError instanceof HttpError) throw syncError;
-  throw new HttpError(422, `BNR has no common ${fromCurrency}/${toCurrency} reference rate on or before ${requestedDate}`, {
-    provider: BNR_PROVIDER,
-    requestedDate,
-    fromCurrency,
-    toCurrency,
-    noFutureRatesUsed: true,
-  });
+  throw fxError(
+    422,
+    "FX_BNR_RATE_UNAVAILABLE",
+    `BNR has no common ${fromCurrency}/${toCurrency} reference rate on or before ${requestedDate}`,
+    {
+      params: { fromCurrency, toCurrency, requestedDate },
+      details: {
+        provider: BNR_PROVIDER,
+        requestedDate,
+        fromCurrency,
+        toCurrency,
+        noFutureRatesUsed: true,
+      },
+    },
+  );
 }
 
 function hasFxValue(input: TransactionFxFields) {
@@ -533,7 +618,13 @@ function hasFxValue(input: TransactionFxFields) {
 function requireOriginalPair(input: TransactionFxFields) {
   const hasAmount = input.originalAmountMinor !== undefined && input.originalAmountMinor !== null;
   const hasCurrency = Boolean(input.originalCurrency?.trim());
-  if (hasAmount !== hasCurrency) throw new HttpError(422, "Provide both the original amount and original currency");
+  if (hasAmount !== hasCurrency) {
+    throw fxError(
+      422,
+      "FX_ORIGINAL_PAIR_REQUIRED",
+      "Provide both the original amount and original currency",
+    );
+  }
   return hasAmount && hasCurrency;
 }
 
@@ -546,14 +637,21 @@ function validatePostedConversion(accountCurrency: string, amountMinor: number, 
     currencyMinorUnitDigits(accountCurrency),
   );
   if (expected !== amountMinor) {
-    throw new HttpError(422, "The posted account amount does not match the original amount and FX rate", {
-      expectedAmountMinor: expected,
-      receivedAmountMinor: amountMinor,
-      accountCurrency,
-      originalCurrency: input.originalCurrency,
-      rateScaled: input.fxRateScaled,
-      rateScale: FX_RATE_SCALE,
-    });
+    throw fxError(
+      422,
+      "FX_POSTED_AMOUNT_MISMATCH",
+      "The posted account amount does not match the original amount and FX rate",
+      {
+        details: {
+          expectedAmountMinor: expected,
+          receivedAmountMinor: amountMinor,
+          accountCurrency,
+          originalCurrency: input.originalCurrency,
+          rateScaled: input.fxRateScaled,
+          rateScale: FX_RATE_SCALE,
+        },
+      },
+    );
   }
 }
 
@@ -573,7 +671,11 @@ function validateTransferConversion(
 
 function rejectTransferOriginalFields(input: TransferFxFields) {
   if (input.originalAmountMinor != null || input.originalCurrency?.trim()) {
-    throw new HttpError(422, "Transfer source amount and currency are inferred from the source account");
+    throw fxError(
+      422,
+      "FX_TRANSFER_ORIGINAL_FIELDS_INFERRED",
+      "Transfer source amount and currency are inferred from the source account",
+    );
   }
 }
 
@@ -586,31 +688,84 @@ function transferAccountCurrencies(userId: string, sourceAccountId: string, dest
   const sourceCurrency = byId.get(sourceAccountId);
   const destinationCurrency = byId.get(destinationAccountId);
   if (!sourceCurrency || !destinationCurrency) {
-    throw new HttpError(422, "Choose active source and destination accounts that belong to your profile");
+    throw fxError(
+      422,
+      "FX_TRANSFER_ACCOUNTS_INVALID",
+      "Choose active source and destination accounts that belong to your profile",
+    );
   }
-  if (sourceAccountId === destinationAccountId) throw new HttpError(422, "Transfer accounts must be different");
+  if (sourceAccountId === destinationAccountId) {
+    throw fxError(
+      422,
+      "FX_TRANSFER_ACCOUNTS_SAME",
+      "Transfer accounts must be different",
+    );
+  }
   return { sourceCurrency, destinationCurrency };
 }
+
+type QuoteMatchErrorContext = {
+  label: string;
+  rateCode: FxErrorCode;
+  dateCode: FxErrorCode;
+};
+
+const QUOTE_MATCH_ERRORS = {
+  transaction: {
+    label: "BNR FX",
+    rateCode: "FX_TRANSACTION_BNR_QUOTE_RATE_MISMATCH",
+    dateCode: "FX_TRANSACTION_BNR_QUOTE_DATE_MISMATCH",
+  },
+  transactionReference: {
+    label: "Reference BNR FX",
+    rateCode: "FX_TRANSACTION_REFERENCE_QUOTE_RATE_MISMATCH",
+    dateCode: "FX_TRANSACTION_REFERENCE_QUOTE_DATE_MISMATCH",
+  },
+  transfer: {
+    label: "Transfer BNR FX",
+    rateCode: "FX_TRANSFER_BNR_QUOTE_RATE_MISMATCH",
+    dateCode: "FX_TRANSFER_BNR_QUOTE_DATE_MISMATCH",
+  },
+  transferReference: {
+    label: "Reference transfer BNR FX",
+    rateCode: "FX_TRANSFER_REFERENCE_QUOTE_RATE_MISMATCH",
+    dateCode: "FX_TRANSFER_REFERENCE_QUOTE_DATE_MISMATCH",
+  },
+} as const satisfies Record<string, QuoteMatchErrorContext>;
 
 function assertQuoteMatchesSupplied(
   quote: FxQuote,
   suppliedRate?: number | null,
   suppliedDate?: string | null,
-  label = "BNR FX",
+  errorContext: QuoteMatchErrorContext = QUOTE_MATCH_ERRORS.transaction,
 ) {
   if (suppliedRate !== undefined && suppliedRate !== null && suppliedRate !== quote.rateScaled) {
-    throw new HttpError(422, `${label} rate does not match the persisted official quote`, {
-      expectedRateScaled: quote.rateScaled,
-      receivedRateScaled: suppliedRate,
-      rateScale: FX_RATE_SCALE,
-      rateDate: quote.rateDate,
-    });
+    throw fxError(
+      422,
+      errorContext.rateCode,
+      `${errorContext.label} rate does not match the persisted official quote`,
+      {
+        details: {
+          expectedRateScaled: quote.rateScaled,
+          receivedRateScaled: suppliedRate,
+          rateScale: FX_RATE_SCALE,
+          rateDate: quote.rateDate,
+        },
+      },
+    );
   }
   if (suppliedDate && suppliedDate !== quote.rateDate) {
-    throw new HttpError(422, `${label} date does not match the official fallback date`, {
-      expectedRateDate: quote.rateDate,
-      receivedRateDate: suppliedDate,
-    });
+    throw fxError(
+      422,
+      errorContext.dateCode,
+      `${errorContext.label} date does not match the official fallback date`,
+      {
+        details: {
+          expectedRateDate: quote.rateDate,
+          receivedRateDate: suppliedDate,
+        },
+      },
+    );
   }
 }
 
@@ -626,15 +781,33 @@ export async function prepareTransactionFx(
   const account = sqlite.prepare(
     "SELECT currency FROM accounts WHERE id = ? AND user_id = ? AND archived_at IS NULL",
   ).get(accountId, userId) as { currency: string } | undefined;
-  if (!account) throw new HttpError(422, "Choose an active account that belongs to your profile");
-  requireDateKey(date, "transaction date");
+  if (!account) {
+    throw fxError(
+      422,
+      "FX_ACCOUNT_INVALID",
+      "Choose an active account that belongs to your profile",
+    );
+  }
+  requireDateKey(date, "transaction date", "FX_TRANSACTION_DATE_INVALID");
   assertSafeInteger(amountMinor, "amountMinor", 1);
   if (kind === "transfer") {
-    if (hasFxValue(input)) throw new HttpError(422, "Transfers cannot carry original-currency fields; cross-currency transfers require two explicit account amounts and are not supported yet");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_TRANSACTION_TRANSFER_FIELDS_UNSUPPORTED",
+        "Transfers cannot carry original-currency fields; cross-currency transfers require two explicit account amounts and are not supported yet",
+      );
+    }
     return {};
   }
   if (!requireOriginalPair(input)) {
-    if (hasFxValue(input)) throw new HttpError(422, "FX rate fields require an original amount and original currency");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_FIELDS_WITHOUT_ORIGINAL",
+        "FX rate fields require an original amount and original currency",
+      );
+    }
     return {};
   }
 
@@ -643,20 +816,40 @@ export async function prepareTransactionFx(
   const originalCurrency = normalizeCurrency(input.originalCurrency as string);
   const accountCurrency = normalizeCurrency(account.currency);
   if (originalCurrency === accountCurrency) {
-    if (amountMinor !== originalAmountMinor) throw new HttpError(422, "Same-currency original and posted amounts must match");
+    if (amountMinor !== originalAmountMinor) {
+      throw fxError(
+        422,
+        "FX_SAME_CURRENCY_AMOUNTS_MISMATCH",
+        "Same-currency original and posted amounts must match",
+      );
+    }
     if ([input.fxRateScaled, input.fxRateSource, input.fxRateDate, input.referenceFxRateScaled, input.referenceFxRateDate]
       .some((value) => value !== undefined && value !== null && value !== "")) {
-      throw new HttpError(422, "Same-currency transactions do not need FX rate fields");
+      throw fxError(
+        422,
+        "FX_SAME_CURRENCY_FIELDS_FORBIDDEN",
+        "Same-currency transactions do not need FX rate fields",
+      );
     }
     return { originalAmountMinor, originalCurrency };
   }
 
-  if (!input.fxRateSource) throw new HttpError(422, "Choose BNR or manual as the FX rate source");
+  if (!input.fxRateSource) {
+    throw fxError(
+      422,
+      "FX_RATE_SOURCE_REQUIRED",
+      "Choose BNR or manual as the FX rate source",
+    );
+  }
   if (input.fxRateSource === "bnr") {
     const quote = await resolveBnrQuote(date, originalCurrency, accountCurrency);
     assertQuoteMatchesSupplied(quote, input.fxRateScaled, input.fxRateDate);
     if (input.referenceFxRateScaled != null || input.referenceFxRateDate) {
-      throw new HttpError(422, "A BNR transaction rate does not need separate reference-rate fields");
+      throw fxError(
+        422,
+        "FX_BNR_REFERENCE_FIELDS_FORBIDDEN",
+        "A BNR transaction rate does not need separate reference-rate fields",
+      );
     }
     const prepared: PreparedTransactionFx = {
       originalAmountMinor,
@@ -669,12 +862,22 @@ export async function prepareTransactionFx(
     return prepared;
   }
 
-  if (!input.fxRateScaled) throw new HttpError(422, "Enter a positive manual FX rate");
+  if (!input.fxRateScaled) {
+    throw fxError(
+      422,
+      "FX_MANUAL_RATE_REQUIRED",
+      "Enter a positive manual FX rate",
+    );
+  }
   assertSafeInteger(input.fxRateScaled, "fxRateScaled", 1);
   const hasReferenceRate = input.referenceFxRateScaled !== undefined && input.referenceFxRateScaled !== null;
   const hasReferenceDate = Boolean(input.referenceFxRateDate);
   if (hasReferenceRate !== hasReferenceDate) {
-    throw new HttpError(422, "Provide both the reference BNR rate and its rate date");
+    throw fxError(
+      422,
+      "FX_REFERENCE_PAIR_REQUIRED",
+      "Provide both the reference BNR rate and its rate date",
+    );
   }
   const prepared: PreparedTransactionFx = {
     originalAmountMinor,
@@ -683,10 +886,19 @@ export async function prepareTransactionFx(
     fxRateSource: "manual",
     fxRateDate: input.fxRateDate || date,
   };
-  requireDateKey(prepared.fxRateDate as string, "manual FX rate date");
+  requireDateKey(
+    prepared.fxRateDate as string,
+    "manual FX rate date",
+    "FX_MANUAL_RATE_DATE_INVALID",
+  );
   if (hasReferenceRate && input.referenceFxRateDate) {
     const quote = await resolveBnrQuote(date, originalCurrency, accountCurrency);
-    assertQuoteMatchesSupplied(quote, input.referenceFxRateScaled, input.referenceFxRateDate, "Reference BNR FX");
+    assertQuoteMatchesSupplied(
+      quote,
+      input.referenceFxRateScaled,
+      input.referenceFxRateDate,
+      QUOTE_MATCH_ERRORS.transactionReference,
+    );
     prepared.referenceFxRateScaled = quote.rateScaled;
     prepared.referenceFxRateDate = quote.rateDate;
   }
@@ -709,7 +921,7 @@ export async function prepareTransferFx(
   input: TransferFxFields,
 ): Promise<PreparedTransferFx> {
   ensureDatabase();
-  requireDateKey(date, "transfer date");
+  requireDateKey(date, "transfer date", "FX_TRANSFER_DATE_INVALID");
   assertSafeInteger(sourceAmountMinor, "sourceAmountMinor", 1);
   rejectTransferOriginalFields(input);
   const { sourceCurrency, destinationCurrency } = transferAccountCurrencies(
@@ -723,19 +935,44 @@ export async function prepareTransferFx(
     assertSafeInteger(suppliedDestinationAmount, "destinationAmountMinor", 1);
   }
   if (sourceCurrency === destinationCurrency) {
-    if (hasFxValue(input)) throw new HttpError(422, "Same-currency transfers do not need FX rate fields");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_TRANSFER_SAME_CURRENCY_FIELDS_FORBIDDEN",
+        "Same-currency transfers do not need FX rate fields",
+      );
+    }
     if (suppliedDestinationAmount != null && suppliedDestinationAmount !== sourceAmountMinor) {
-      throw new HttpError(422, "Same-currency transfer amounts must match");
+      throw fxError(
+        422,
+        "FX_TRANSFER_SAME_CURRENCY_AMOUNTS_MISMATCH",
+        "Same-currency transfer amounts must match",
+      );
     }
     return { destinationAmountMinor: sourceAmountMinor };
   }
 
-  if (!input.fxRateSource) throw new HttpError(422, "Choose BNR or manual as the transfer FX rate source");
+  if (!input.fxRateSource) {
+    throw fxError(
+      422,
+      "FX_TRANSFER_RATE_SOURCE_REQUIRED",
+      "Choose BNR or manual as the transfer FX rate source",
+    );
+  }
   if (input.fxRateSource === "bnr") {
     const quote = await resolveBnrQuote(date, sourceCurrency, destinationCurrency);
-    assertQuoteMatchesSupplied(quote, input.fxRateScaled, input.fxRateDate, "Transfer BNR FX");
+    assertQuoteMatchesSupplied(
+      quote,
+      input.fxRateScaled,
+      input.fxRateDate,
+      QUOTE_MATCH_ERRORS.transfer,
+    );
     if (input.referenceFxRateScaled != null || input.referenceFxRateDate) {
-      throw new HttpError(422, "A BNR transfer rate does not need separate reference-rate fields");
+      throw fxError(
+        422,
+        "FX_TRANSFER_BNR_REFERENCE_FIELDS_FORBIDDEN",
+        "A BNR transfer rate does not need separate reference-rate fields",
+      );
     }
     const destinationAmountMinor = convertMinorAtRate(
       sourceAmountMinor,
@@ -744,14 +981,25 @@ export async function prepareTransferFx(
       quote.toMinorUnitDigits,
     );
     if (destinationAmountMinor <= 0) {
-      throw new HttpError(422, "The transfer amount is too small to produce a destination minor unit at this rate");
+      throw fxError(
+        422,
+        "FX_TRANSFER_AMOUNT_TOO_SMALL",
+        "The transfer amount is too small to produce a destination minor unit at this rate",
+      );
     }
     if (suppliedDestinationAmount != null && suppliedDestinationAmount !== destinationAmountMinor) {
-      throw new HttpError(422, "The destination amount does not match the official transfer rate", {
-        expectedAmountMinor: destinationAmountMinor,
-        receivedAmountMinor: suppliedDestinationAmount,
-        destinationCurrency,
-      });
+      throw fxError(
+        422,
+        "FX_TRANSFER_OFFICIAL_AMOUNT_MISMATCH",
+        "The destination amount does not match the official transfer rate",
+        {
+          details: {
+            expectedAmountMinor: destinationAmountMinor,
+            receivedAmountMinor: suppliedDestinationAmount,
+            destinationCurrency,
+          },
+        },
+      );
     }
     return {
       destinationAmountMinor,
@@ -761,7 +1009,13 @@ export async function prepareTransferFx(
     };
   }
 
-  if (!input.fxRateScaled) throw new HttpError(422, "Enter a positive manual transfer FX rate");
+  if (!input.fxRateScaled) {
+    throw fxError(
+      422,
+      "FX_TRANSFER_MANUAL_RATE_REQUIRED",
+      "Enter a positive manual transfer FX rate",
+    );
+  }
   assertSafeInteger(input.fxRateScaled, "fxRateScaled", 1);
   const destinationAmountMinor = convertMinorAtRate(
     sourceAmountMinor,
@@ -770,14 +1024,25 @@ export async function prepareTransferFx(
     currencyMinorUnitDigits(destinationCurrency),
   );
   if (destinationAmountMinor <= 0) {
-    throw new HttpError(422, "The transfer amount is too small to produce a destination minor unit at this rate");
+    throw fxError(
+      422,
+      "FX_TRANSFER_AMOUNT_TOO_SMALL",
+      "The transfer amount is too small to produce a destination minor unit at this rate",
+    );
   }
   if (suppliedDestinationAmount != null && suppliedDestinationAmount !== destinationAmountMinor) {
-    throw new HttpError(422, "The destination amount does not match the manual transfer rate", {
-      expectedAmountMinor: destinationAmountMinor,
-      receivedAmountMinor: suppliedDestinationAmount,
-      destinationCurrency,
-    });
+    throw fxError(
+      422,
+      "FX_TRANSFER_MANUAL_AMOUNT_MISMATCH",
+      "The destination amount does not match the manual transfer rate",
+      {
+        details: {
+          expectedAmountMinor: destinationAmountMinor,
+          receivedAmountMinor: suppliedDestinationAmount,
+          destinationCurrency,
+        },
+      },
+    );
   }
   const prepared: PreparedTransferFx = {
     destinationAmountMinor,
@@ -785,15 +1050,28 @@ export async function prepareTransferFx(
     fxRateSource: "manual",
     fxRateDate: input.fxRateDate || date,
   };
-  requireDateKey(prepared.fxRateDate as string, "manual transfer FX rate date");
+  requireDateKey(
+    prepared.fxRateDate as string,
+    "manual transfer FX rate date",
+    "FX_TRANSFER_MANUAL_RATE_DATE_INVALID",
+  );
   const hasReferenceRate = input.referenceFxRateScaled != null;
   const hasReferenceDate = Boolean(input.referenceFxRateDate);
   if (hasReferenceRate !== hasReferenceDate) {
-    throw new HttpError(422, "Provide both the reference BNR rate and its rate date");
+    throw fxError(
+      422,
+      "FX_REFERENCE_PAIR_REQUIRED",
+      "Provide both the reference BNR rate and its rate date",
+    );
   }
   if (hasReferenceRate && input.referenceFxRateDate) {
     const quote = await resolveBnrQuote(date, sourceCurrency, destinationCurrency);
-    assertQuoteMatchesSupplied(quote, input.referenceFxRateScaled, input.referenceFxRateDate, "Reference transfer BNR FX");
+    assertQuoteMatchesSupplied(
+      quote,
+      input.referenceFxRateScaled,
+      input.referenceFxRateDate,
+      QUOTE_MATCH_ERRORS.transferReference,
+    );
     prepared.referenceFxRateScaled = quote.rateScaled;
     prepared.referenceFxRateDate = quote.rateDate;
   }
@@ -817,24 +1095,48 @@ export function validateTransferFxForPosting(
 ): PreparedTransferFx {
   const sourceCurrency = normalizeCurrency(sourceCurrencyValue);
   const destinationCurrency = normalizeCurrency(destinationCurrencyValue);
-  requireDateKey(date, "transfer date");
+  requireDateKey(date, "transfer date", "FX_TRANSFER_DATE_INVALID");
   assertSafeInteger(sourceAmountMinor, "sourceAmountMinor", 1);
   rejectTransferOriginalFields(input);
   const destinationAmountMinor = input.destinationAmountMinor;
   if (sourceCurrency === destinationCurrency) {
-    if (hasFxValue(input)) throw new HttpError(422, "Same-currency transfers do not need FX rate fields");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_TRANSFER_SAME_CURRENCY_FIELDS_FORBIDDEN",
+        "Same-currency transfers do not need FX rate fields",
+      );
+    }
     if (destinationAmountMinor != null && destinationAmountMinor !== sourceAmountMinor) {
-      throw new HttpError(422, "Same-currency transfer amounts must match");
+      throw fxError(
+        422,
+        "FX_TRANSFER_SAME_CURRENCY_AMOUNTS_MISMATCH",
+        "Same-currency transfer amounts must match",
+      );
     }
     return { destinationAmountMinor: sourceAmountMinor };
   }
-  if (!destinationAmountMinor) throw new HttpError(422, "Enter the amount received by the destination account");
+  if (!destinationAmountMinor) {
+    throw fxError(
+      422,
+      "FX_TRANSFER_DESTINATION_AMOUNT_REQUIRED",
+      "Enter the amount received by the destination account",
+    );
+  }
   assertSafeInteger(destinationAmountMinor, "destinationAmountMinor", 1);
   if (!input.fxRateSource || !input.fxRateScaled || !input.fxRateDate) {
-    throw new HttpError(422, "Cross-currency transfers require a verified FX rate, source, rate date, and destination amount");
+    throw fxError(
+      422,
+      "FX_TRANSFER_METADATA_REQUIRED",
+      "Cross-currency transfers require a verified FX rate, source, rate date, and destination amount",
+    );
   }
   assertSafeInteger(input.fxRateScaled, "fxRateScaled", 1);
-  requireDateKey(input.fxRateDate, "transfer FX rate date");
+  requireDateKey(
+    input.fxRateDate,
+    "transfer FX rate date",
+    "FX_TRANSFER_RATE_DATE_INVALID",
+  );
   const prepared: PreparedTransferFx = {
     destinationAmountMinor,
     fxRateScaled: input.fxRateScaled,
@@ -843,21 +1145,51 @@ export function validateTransferFxForPosting(
   };
   if (input.fxRateSource === "bnr") {
     const quote = findPersistedBnrQuote(date, sourceCurrency, destinationCurrency);
-    if (!quote) throw new HttpError(422, "The official transfer quote is not cached. Request the FX quote before posting this transfer");
-    assertQuoteMatchesSupplied(quote, input.fxRateScaled, input.fxRateDate, "Transfer BNR FX");
+    if (!quote) {
+      throw fxError(
+        422,
+        "FX_TRANSFER_BNR_QUOTE_NOT_CACHED",
+        "The official transfer quote is not cached. Request the FX quote before posting this transfer",
+      );
+    }
+    assertQuoteMatchesSupplied(
+      quote,
+      input.fxRateScaled,
+      input.fxRateDate,
+      QUOTE_MATCH_ERRORS.transfer,
+    );
     if (input.referenceFxRateScaled != null || input.referenceFxRateDate) {
-      throw new HttpError(422, "A BNR transfer rate does not need separate reference-rate fields");
+      throw fxError(
+        422,
+        "FX_TRANSFER_BNR_REFERENCE_FIELDS_FORBIDDEN",
+        "A BNR transfer rate does not need separate reference-rate fields",
+      );
     }
   } else {
     const hasReferenceRate = input.referenceFxRateScaled != null;
     const hasReferenceDate = Boolean(input.referenceFxRateDate);
     if (hasReferenceRate !== hasReferenceDate) {
-      throw new HttpError(422, "Provide both the reference BNR rate and its rate date");
+      throw fxError(
+        422,
+        "FX_REFERENCE_PAIR_REQUIRED",
+        "Provide both the reference BNR rate and its rate date",
+      );
     }
     if (hasReferenceRate && input.referenceFxRateDate) {
       const quote = findPersistedBnrQuote(date, sourceCurrency, destinationCurrency);
-      if (!quote) throw new HttpError(422, "The reference transfer quote is not cached. Request it before posting this transfer");
-      assertQuoteMatchesSupplied(quote, input.referenceFxRateScaled, input.referenceFxRateDate, "Reference transfer BNR FX");
+      if (!quote) {
+        throw fxError(
+          422,
+          "FX_TRANSFER_REFERENCE_QUOTE_NOT_CACHED",
+          "The reference transfer quote is not cached. Request it before posting this transfer",
+        );
+      }
+      assertQuoteMatchesSupplied(
+        quote,
+        input.referenceFxRateScaled,
+        input.referenceFxRateDate,
+        QUOTE_MATCH_ERRORS.transferReference,
+      );
       prepared.referenceFxRateScaled = quote.rateScaled as number;
       prepared.referenceFxRateDate = quote.rateDate;
     }
@@ -881,28 +1213,54 @@ export function validateTransactionFxForPosting(
   input: TransactionFxFields,
 ): PreparedTransactionFx {
   const accountCurrency = normalizeCurrency(accountCurrencyValue);
-  requireDateKey(date, "transaction date");
+  requireDateKey(date, "transaction date", "FX_TRANSACTION_DATE_INVALID");
   if (kind === "transfer") {
-    if (hasFxValue(input)) throw new HttpError(422, "Transfers cannot carry original-currency fields");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_TRANSACTION_TRANSFER_ORIGINAL_FIELDS_FORBIDDEN",
+        "Transfers cannot carry original-currency fields",
+      );
+    }
     return {};
   }
   if (!requireOriginalPair(input)) {
-    if (hasFxValue(input)) throw new HttpError(422, "FX rate fields require an original amount and original currency");
+    if (hasFxValue(input)) {
+      throw fxError(
+        422,
+        "FX_FIELDS_WITHOUT_ORIGINAL",
+        "FX rate fields require an original amount and original currency",
+      );
+    }
     return {};
   }
   const originalAmountMinor = input.originalAmountMinor as number;
   assertSafeInteger(originalAmountMinor, "originalAmountMinor", 1);
   const originalCurrency = normalizeCurrency(input.originalCurrency as string);
   if (originalCurrency === accountCurrency) {
-    if (amountMinor !== originalAmountMinor) throw new HttpError(422, "Same-currency original and posted amounts must match");
+    if (amountMinor !== originalAmountMinor) {
+      throw fxError(
+        422,
+        "FX_SAME_CURRENCY_AMOUNTS_MISMATCH",
+        "Same-currency original and posted amounts must match",
+      );
+    }
     if ([input.fxRateScaled, input.fxRateSource, input.fxRateDate, input.referenceFxRateScaled, input.referenceFxRateDate]
       .some((value) => value !== undefined && value !== null && value !== "")) {
-      throw new HttpError(422, "Same-currency transactions do not need FX rate fields");
+      throw fxError(
+        422,
+        "FX_SAME_CURRENCY_FIELDS_FORBIDDEN",
+        "Same-currency transactions do not need FX rate fields",
+      );
     }
     return { originalAmountMinor, originalCurrency };
   }
   if (!input.fxRateSource || !input.fxRateScaled || !input.fxRateDate) {
-    throw new HttpError(422, "Foreign-currency transactions require a verified FX rate, source, and rate date");
+    throw fxError(
+      422,
+      "FX_TRANSACTION_METADATA_REQUIRED",
+      "Foreign-currency transactions require a verified FX rate, source, and rate date",
+    );
   }
   const fxRateDate = input.fxRateDate;
   assertSafeInteger(input.fxRateScaled, "fxRateScaled", 1);
@@ -913,19 +1271,46 @@ export function validateTransactionFxForPosting(
     fxRateSource: input.fxRateSource,
     fxRateDate,
   };
-  requireDateKey(fxRateDate, "FX rate date");
+  requireDateKey(
+    fxRateDate,
+    "FX rate date",
+    "FX_TRANSACTION_RATE_DATE_INVALID",
+  );
   if (input.fxRateSource === "bnr") {
     const quote = findPersistedBnrQuote(date, originalCurrency, accountCurrency);
-    if (!quote) throw new HttpError(422, "The official BNR quote is not cached. Request the FX quote before posting this transaction");
+    if (!quote) {
+      throw fxError(
+        422,
+        "FX_TRANSACTION_BNR_QUOTE_NOT_CACHED",
+        "The official BNR quote is not cached. Request the FX quote before posting this transaction",
+      );
+    }
     assertQuoteMatchesSupplied(quote, input.fxRateScaled, input.fxRateDate);
   }
   const hasReferenceRate = input.referenceFxRateScaled !== undefined && input.referenceFxRateScaled !== null;
   const hasReferenceDate = Boolean(input.referenceFxRateDate);
-  if (hasReferenceRate !== hasReferenceDate) throw new HttpError(422, "Provide both the reference BNR rate and its rate date");
+  if (hasReferenceRate !== hasReferenceDate) {
+    throw fxError(
+      422,
+      "FX_REFERENCE_PAIR_REQUIRED",
+      "Provide both the reference BNR rate and its rate date",
+    );
+  }
   if (hasReferenceRate && input.referenceFxRateDate) {
     const quote = findPersistedBnrQuote(date, originalCurrency, accountCurrency);
-    if (!quote) throw new HttpError(422, "The reference BNR quote is not cached. Request the FX quote before posting this transaction");
-    assertQuoteMatchesSupplied(quote, input.referenceFxRateScaled, input.referenceFxRateDate, "Reference BNR FX");
+    if (!quote) {
+      throw fxError(
+        422,
+        "FX_TRANSACTION_REFERENCE_QUOTE_NOT_CACHED",
+        "The reference BNR quote is not cached. Request the FX quote before posting this transaction",
+      );
+    }
+    assertQuoteMatchesSupplied(
+      quote,
+      input.referenceFxRateScaled,
+      input.referenceFxRateDate,
+      QUOTE_MATCH_ERRORS.transactionReference,
+    );
     prepared.referenceFxRateScaled = quote.rateScaled;
     prepared.referenceFxRateDate = quote.rateDate;
   }

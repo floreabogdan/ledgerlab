@@ -1,0 +1,397 @@
+generic:
+  unexpected: Ceva nu a funcționat. Încearcă din nou.
+  validation: Verifică câmpurile evidențiate și încearcă din nou.
+api:
+  badRequest: Solicitarea nu a putut fi interpretată.
+  authenticationRequired: Autentifică-te pentru a continua.
+  forbidden: Nu ai permisiunea de a face acest lucru.
+  notFound: Elementul solicitat nu a putut fi găsit.
+  methodNotAllowed: Această acțiune nu este disponibilă aici.
+  conflict: Această modificare intră în conflict cu datele curente. Reîncarcă pagina și încearcă din nou.
+  payloadTooLarge: "Solicitarea este prea mare. Dimensiunea maximă este de {maxKilobytes, number} KB."
+  unsupportedMediaType: Acest fișier sau tip de conținut nu este acceptat.
+  rateLimited: "Prea multe încercări. Încearcă din nou peste {retryAfterSeconds, plural, one {# secundă} few {# secunde} other {# de secunde}}."
+  invalidJson: Solicitarea conține date nevalide.
+  invalidContentLength: Dimensiunea solicitării nu a putut fi verificată.
+codes:
+  authEndpointNotFound: Acțiunea de autentificare solicitată nu este disponibilă.
+  apiEndpointNotFound: Acțiunea API solicitată nu este disponibilă.
+  fxQuoteQueryIncomplete: Introdu data, moneda sursă și moneda destinație pentru cotația FX.
+  transactionAmountFilterNegative: Filtrele de sumă nu pot avea valori negative.
+  transactionAmountRangeReversed: Suma minimă nu poate depăși suma maximă.
+  queryLimitTooSmall: "Dimensiunea paginii trebuie să fie de cel puțin {minimum, number}."
+  queryOffsetNegative: Poziția de început a paginii nu poate fi negativă.
+  transactionAmountFilterAccountRequired: Alege un singur cont înainte de filtrarea după sumă, deoarece monedele conturilor nu pot fi comparate direct.
+  liabilityCurrencyUnavailable: Moneda contului de datorie nu a putut fi determinată.
+  accountIdRequired: Alege un cont.
+  accountCreateFailed: Contul nu a putut fi creat.
+  liabilityPaymentSelectionRequired: Alege o plată a datoriei pe care vrei să o anulezi.
+  liabilityPaymentKindInvalid: Alege tipul de plată pentru card sau împrumut.
+  liabilityActionInvalid: Acțiunea solicitată pentru datorie nu este acceptată.
+  categoryIdRequired: Alege o categorie.
+  categoryActionInvalid: Acțiunea solicitată pentru categorie nu este acceptată.
+  tagIdRequired: Alege o etichetă.
+  tagColorInvalid: Introdu o culoare a etichetei cu șase caractere hexazecimale.
+  tagActionInvalid: Acțiunea solicitată pentru etichetă nu este acceptată.
+  merchantIdRequired: Alege un comerciant.
+  merchantActionInvalid: Acțiunea solicitată pentru comerciant nu este acceptată.
+  transactionIdRequired: Alege o tranzacție.
+  importAccountRequired: Alege contul în care vor fi importate tranzacțiile.
+  settingsActionInvalid: Acțiunea solicitată pentru setări nu este acceptată.
+  insightsMonthInvalid: Alege o lună validă în formatul YYYY-MM.
+  insightsDateRangeInvalid: Alege un interval de date valid.
+  insightsLiabilityCurrencyUnavailable: Moneda obligației aferente datoriei nu a putut fi determinată.
+  budgetAmountInvalid: Suma bugetului trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  budgetCategoryInvalid: Alege o categorie activă care aparține profilului tău.
+  planningSourceAssumptionsNotFound: Luna anterioară nu are ipoteze de prognoză salvate care să poată fi copiate.
+  planningOpeningAccountRequired: Alege un cont valid pentru fiecare ipoteză de sold inițial.
+  planningOpeningAccountInvalid: Alege un cont care aparține profilului tău.
+  planningOpeningAccountDuplicate: Fiecare cont poate avea o singură ipoteză de sold inițial.
+  planningOpeningBalanceInvalid: Introdu fiecare sold inițial în unități monetare minore.
+  accountCurrencyImmutable: Moneda unui cont nu poate fi schimbată după creare; creează un cont nou și transferă soldul în acesta.
+  accountCurrencyTypeInvalid: Moneda contului trebuie să fie un cod ISO 4217.
+  accountCurrencyUnsupported: Alege o monedă ISO 4217 acceptată.
+  accountNameConflict: Există deja un cont cu acest nume.
+  accountNotFound: Contul nu a fost găsit.
+  accountOpeningDateFuture: Data deschiderii contului nu poate fi în viitor.
+  accountOpeningDateTypeInvalid: Data deschiderii contului trebuie să fie o dată validă.
+  categoryArchiveChildrenFirst: Arhivează sau mută subcategoriile active înainte de a arhiva categoria părinte.
+  categoryClassificationInvalid: Alege o clasificare validă pentru categorie.
+  categoryColorInvalid: Culoarea categoriei trebuie să aibă șase caractere hexazecimale.
+  categoryDepthLimitExceeded: "Categoriile pot fi imbricate pe cel mult {maxLevels, number} niveluri."
+  categoryDescendantParentForbidden: O categorie nu poate fi mutată în interiorul uneia dintre categoriile sale descendente.
+  categoryHierarchyInvalid: Ierarhia categoriilor nu este validă.
+  categoryKindChangeBlocked: Schimbă sau mută subcategoriile incompatibile înainte de a modifica tipul acestei categorii.
+  categoryKindInvalid: Alege o categorie de venituri, de cheltuieli sau de venituri și cheltuieli.
+  categoryNameConflict: Există deja o categorie cu acest nume la nivelul respectiv.
+  categoryNameInvalid: Numele categoriei trebuie să conțină între 1 și 80 de caractere.
+  categoryNestingTooDeep: Categoriile sunt imbricate pe prea multe niveluri.
+  categoryNotFound: Categoria nu a fost găsită.
+  categoryParentKindIncompatible: "O categorie de tip {childKind} nu poate fi imbricată într-o categorie de tip {parentKind}."
+  categoryParentNotFound: Categoria părinte nu a fost găsită.
+  categoryParentRestoreRequired: Restaurează categoria părinte înainte de a adăuga o subcategorie în aceasta.
+  categoryRestoreParentsFirst: Restaurează mai întâi categoriile părinte.
+  categorySelfParentForbidden: O categorie nu poate fi propria categorie părinte.
+  categorySpendingNatureInvalid: Alege cheltuieli fixe sau variabile.
+  categorySpendingPriorityInvalid: Alege cheltuieli esențiale sau discreționare.
+  merchantArchived: Acest comerciant este arhivat. Restaurează-l înainte de a-l folosi într-o înregistrare nouă.
+  merchantNameConflict: Un alt comerciant folosește deja acest nume.
+  merchantNameInvalid: Numele comerciantului trebuie să conțină între 1 și 120 de caractere.
+  merchantNameTooLong: Numele comerciantului trebuie să conțină cel mult 120 de caractere.
+  merchantNotFound: Comerciantul nu a fost găsit.
+  tagArchived: Această etichetă este arhivată. Restaureaz-o înainte de utilizare.
+  tagArchivedNameConflict: O etichetă arhivată folosește deja acest nume; restaureaz-o în loc să creezi alta.
+  tagCommaForbidden: Numele etichetelor nu pot conține virgule, deoarece virgulele separă etichetele.
+  tagNameConflict: Această etichetă există deja.
+  tagNameInvalid: Numele etichetei trebuie să conțină între 1 și 40 de caractere.
+  tagNotFound: Eticheta nu a fost găsită.
+  transactionAccountInvalid: Alege un cont activ.
+  transactionAmountFilterAccountInvalid: Alege un cont care aparține profilului tău înainte de filtrarea după sumă.
+  transactionAmountInvalid: Suma tranzacției trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  transactionCategoryInvalid: Alege o categorie activă care aparține profilului tău.
+  transactionCategoryKindInvalid: "Alege o categorie de tip {kind} pentru această tranzacție."
+  transactionClearDateFuture: O tranzacție în așteptare nu poate fi decontată înainte de data tranzacției.
+  transactionDateFuture: Tranzacțiile nu pot fi datate în viitor; folosește Plăți planificate pentru mișcările viitoare de numerar.
+  transactionDestinationAccountRequired: Alege un cont de destinație.
+  transactionDuplicate: Aceasta pare să fie o tranzacție duplicată.
+  transactionLiabilityAdjustmentWorkflowRequired: Folosește fluxul dedicat împrumuturilor sau cardurilor de credit pentru a reconcilia soldul unei datorii.
+  transactionLiabilityTransferWorkflowRequired: Folosește fluxul dedicat împrumuturilor sau cardurilor de credit pentru transferurile aferente datoriilor.
+  transactionLiabilityUndoRequired: Folosește anularea plății datoriei pentru ca registrul datoriei și tranzacția să rămână reconciliate.
+  transactionLoanPaymentWorkflowRequired: Folosește fluxul de plată a împrumutului pentru clasificarea corectă a principalului, dobânzii și comisioanelor.
+  transactionMerchantInvalid: Alege un comerciant care aparține profilului tău.
+  transactionNotFound: Tranzacția nu a fost găsită.
+  transactionPendingRequired: Numai tranzacțiile în așteptare pot fi decontate.
+  transactionPlannedOccurrenceInvalid: Alege o apariție a unei plăți planificate care aparține profilului tău.
+  transactionPlannedUndoRequired: Folosește anularea plății planificate pentru ca apariția și tranzacția efectivă să rămână reconciliate.
+  transactionSplitAmountInvalid: Fiecare sumă defalcată trebuie să fie un număr întreg nenul exprimat în unități monetare minore.
+  transactionSplitTotalMismatch: Sumele defalcate trebuie să însumeze valoarea tranzacției.
+  transactionTransferAccountsSame: Conturile de transfer trebuie să fie diferite.
+  transactionTransferCategoryForbidden: Transferurile nu pot fi asociate categoriilor de venituri sau cheltuieli.
+  transactionTransferIncomplete: Acest transfer este incomplet și nu poate fi decontat în siguranță.
+  importCsvTooLarge: "Fișierele CSV trebuie să fie mai mici de {maxMegabytes, number} MB."
+  importDestinationAccountRequired: Alege un cont de destinație activ.
+  importCsvParseError: Acest rând CSV nu a putut fi interpretat.
+  importRowLimitExceeded: "Un import este limitat la {maxRows, number} rânduri. Împarte fișierul CSV în fișiere mai mici înainte de import."
+  importMappingRequired: Asociază atât coloana datei, cât și coloana sumei înainte de import.
+  importAmbiguousDate: Alege DD/MM/YYYY sau MM/DD/YYYY pentru această dată ambiguă înainte de import.
+  importInvalidDate: Introdu o dată validă pentru tranzacție.
+  importInvalidAmount: Introdu o sumă nenulă pentru tranzacție.
+  importOriginalPairRequired: Introdu atât suma originală, cât și moneda originală.
+  importUnsupportedOriginalCurrency: "{currency} nu este o monedă ISO 4217 acceptată."
+  importInvalidOriginalAmount: Introdu o sumă originală validă.
+  importAmountDirectionMismatch: Suma înregistrată și cea originală trebuie să aibă același sens.
+  importSameCurrencyAmountMismatch: Suma înregistrată și cea originală trebuie să coincidă atunci când folosesc aceeași monedă.
+  importFxPrecisionMismatch: Suma originală și cea înregistrată nu pot fi reconciliate la precizia FX acceptată.
+  importExchangeRateMismatch: Cursul de schimb asociat nu reconciliază suma înregistrată.
+  importInvalidExchangeRate: Introdu un curs de schimb valid.
+  importFxOriginalRequired: Un curs de schimb necesită o sumă originală și o monedă originală.
+  importRowCountInvalid: "Alege între {minRows, number} și {maxRows, number} rânduri pentru import."
+  importInvalidDateOrAmount: Introdu o dată validă și o sumă nenulă.
+  importCategoryUnavailable: Alege o categorie activă care aparține acestui profil.
+  importInvalidOriginalData: Introdu o sumă originală și o monedă originală valide.
+  importSameCurrencyFxForbidden: Suma originală și cea înregistrată trebuie să coincidă fără un curs FX atunci când folosesc aceeași monedă.
+  importForeignFxRequired: Rândurile în monedă străină necesită un curs FX manual pozitiv și o dată validă a cursului.
+  importFxReconciliationFailed: Suma originală și cursul FX nu reconciliază suma înregistrată.
+  backupCurrencyMissing: Copia de siguranță conține o monedă lipsă.
+  backupCurrencyInvalid: Copia de siguranță conține o monedă neacceptată sau formatată incorect.
+  backupTransactionFxRateInvalid: O tranzacție din copia de siguranță are un curs FX nevalid.
+  backupTransactionFxSourceInvalid: O tranzacție din copia de siguranță are o sursă FX nevalidă.
+  backupTransactionFxDateInvalid: O tranzacție din copia de siguranță are o dată nevalidă a cursului FX.
+  backupTransactionReferenceFxIncomplete: O tranzacție din copia de siguranță are o cotație FX de referință incompletă.
+  backupTransactionReferenceFxInvalid: O tranzacție din copia de siguranță are o cotație FX de referință nevalidă.
+  backupTransactionReferenceFxDuplicate: O tranzacție din copia de siguranță are o cotație FX de referință duplicată.
+  backupTransactionBnrQuoteMismatch: O tranzacție nu corespunde cotației oficiale BNR stocate.
+  backupTransactionReferenceQuoteMismatch: O tranzacție nu corespunde cotației BNR de referință stocate.
+  backupTransactionOriginalPairRequired: O tranzacție trebuie să includă atât suma originală, cât și moneda originală.
+  backupTransactionFxWithoutOriginal: O tranzacție are câmpuri FX fără o sumă originală și o monedă originală.
+  backupTransactionOriginalAmountInvalid: O tranzacție din copia de siguranță are o sumă originală nevalidă.
+  backupTransactionSameCurrencyFxInvalid: O tranzacție în aceeași monedă conține câmpuri FX nevalide.
+  backupTransactionFxMetadataMissing: Unei tranzacții în monedă străină îi lipsesc metadatele FX.
+  backupTransactionFxReconciliationFailed: Suma originală și cursul FX ale unei tranzacții nu se reconciliază cu înregistrarea din cont.
+  backupTransactionCurrencyMismatch: Moneda unei tranzacții nu corespunde monedei registrului contului.
+  backupTransactionAmountInvalid: O tranzacție din copia de siguranță are o sumă nevalidă în cont.
+  backupTransactionDateInvalid: O tranzacție din copia de siguranță are o dată nevalidă.
+  backupTransferLinkMissing: Unui transfer din copia de siguranță îi lipsește legătura către grup sau către tranzacția pereche.
+  backupTransactionTransferLinkInvalid: O tranzacție care nu este transfer conține legături de transfer.
+  backupTransferReconciliationFailed: Un grup de transfer nu se reconciliază.
+  backupTransferPeerStateInvalid: Un grup de transfer are stări incompatibile între tranzacțiile pereche.
+  backupUserNotFound: Profilul utilizatorului nu a putut fi găsit.
+  backupSoleOwnerRequired: Copiile de siguranță complete ale bazei de date sunt disponibile numai când baza de date LedgerLab locală are un singur proprietar. Folosește exportul JSON sau CSV pentru o copie limitată la utilizator.
+  backupTooLarge: "Copia de siguranță completă depășește {maxMegabytes, number} MB. Elimină fișierele mari ale bonurilor înainte de a o crea."
+  backupRestoreConfirmationRequired: Tastează RESTORE pentru a confirma înlocuirea.
+  backupRestoreFileTooLarge: "Fișierele copiilor de siguranță trebuie să fie mai mici de {maxMegabytes, number} MB."
+  backupRestoreSoleOwnerRequired: Restaurarea completă a bazei de date este disponibilă numai proprietarului unic al acestei baze de date locale.
+  backupInvalid: Aceasta nu este o copie de siguranță LedgerLab validă.
+  backupFormatUnsupported: Formatul acestei copii de siguranță nu este acceptat.
+  backupChecksumMissing: Copiei de siguranță îi lipsește o sumă de control SHA-256 validă.
+  backupDatabaseMissing: Copia de siguranță nu conține o bază de date SQLite.
+  backupChecksumInvalid: Validarea sumei de control a copiei de siguranță a eșuat.
+  backupDatabaseIntegrityFailed: Baza de date din copia de siguranță nu a trecut verificarea integrității.
+  backupTablesMissing: Copiei de siguranță îi lipsesc tabele LedgerLab obligatorii.
+  backupRelationshipsInvalid: Copia de siguranță conține relații întrerupte.
+  backupOwnerCountInvalid: O restaurare completă trebuie să conțină exact un proprietar local.
+  backupOwnerMismatch: Această copie de siguranță aparține altui proprietar local. Baza de date curentă nu a fost modificată.
+  backupCurrencyLedgerMismatch: Copia de siguranță conține o monedă nevalidă sau o tranzacție a cărei monedă nu corespunde registrului contului.
+  backupBudgetCurrencyInvalid: Copia de siguranță conține o monedă nevalidă pentru buget.
+  backupMonthPlanCurrencyInvalid: Copia de siguranță conține o monedă nevalidă pentru planul lunar.
+  backupRestoredRelationshipsInvalid: Copia de siguranță restaurată conține relații întrerupte.
+  backupAccountMissingAfterRestore: Copia de siguranță a fost restaurată, dar contul anterior nu este prezent. Autentifică-te folosind datele de autentificare stocate în copia de siguranță.
+  reportingFxRateUnavailable: "Nu este disponibil niciun curs BNR de referință salvat pentru {fromCurrency}/{reportingCurrency} la data de {requestedDate} sau anterior."
+  reportingStartDateInvalid: Alege o dată de început validă pentru cursul de raportare.
+  reportingEndDateInvalid: Alege o dată de sfârșit validă pentru cursul de raportare.
+  reportingDateRangeInvalid: Data de început a cursului de raportare nu poate fi ulterioară datei de sfârșit.
+  fxBnrMultiplierInvalid: BNR a returnat un multiplicator de monedă nevalid.
+  fxBnrRateInvalid: BNR a returnat un curs de schimb nevalid.
+  fxBnrObservationsMissing: Fișierul XML oficial al BNR nu conține observații utilizabile privind cursurile de schimb.
+  fxBnrFeedUnreachable: "Fluxul oficial BNR pentru cursurile de schimb din {year} nu a putut fi accesat."
+  fxBnrFeedHttpError: "Fluxul oficial BNR pentru cursurile de schimb din {year} a returnat codul HTTP {status}."
+  fxBnrFeedTooLarge: Răspunsul oficial BNR privind cursurile de schimb este neașteptat de mare.
+  fxBnrRefreshFailed: Fluxul oficial BNR pentru cursurile de schimb nu a putut fi reîmprospătat; se folosește un curs salvat.
+  fxCurrencyUnsupported: Alege o monedă ISO 4217 acceptată.
+  fxQuoteDateInvalid: Alege o dată validă pentru cotația FX în formatul YYYY-MM-DD.
+  fxTransactionDateInvalid: Alege o dată validă pentru tranzacție în formatul YYYY-MM-DD.
+  fxManualRateDateInvalid: Alege o dată validă pentru cursul FX manual în formatul YYYY-MM-DD.
+  fxTransactionRateDateInvalid: Alege o dată validă pentru cursul FX în formatul YYYY-MM-DD.
+  fxTransferDateInvalid: Alege o dată validă pentru transfer în formatul YYYY-MM-DD.
+  fxTransferManualRateDateInvalid: Alege o dată validă pentru cursul FX manual al transferului în formatul YYYY-MM-DD.
+  fxTransferRateDateInvalid: Alege o dată validă pentru cursul FX al transferului în formatul YYYY-MM-DD.
+  fxBnrRateUnavailable: "BNR nu are un curs de referință comun pentru {fromCurrency}/{toCurrency} la data de {requestedDate} sau anterior."
+  fxAccountInvalid: Alege un cont activ care aparține profilului tău.
+  fxOriginalPairRequired: Introdu atât suma originală, cât și moneda originală.
+  fxFieldsWithoutOriginal: Câmpurile cursului FX necesită o sumă originală și o monedă originală.
+  fxPostedAmountMismatch: Suma înregistrată în cont nu corespunde sumei originale și cursului FX.
+  fxSameCurrencyAmountsMismatch: Suma originală și cea înregistrată trebuie să coincidă atunci când folosesc aceeași monedă.
+  fxSameCurrencyFieldsForbidden: Tranzacțiile în aceeași monedă nu necesită câmpuri pentru cursul FX.
+  fxRateSourceRequired: Alege BNR sau manual ca sursă a cursului FX.
+  fxBnrReferenceFieldsForbidden: Un curs BNR pentru tranzacție nu necesită câmpuri separate pentru cursul de referință.
+  fxManualRateRequired: Introdu un curs FX manual pozitiv.
+  fxReferencePairRequired: Introdu atât cursul BNR de referință, cât și data acestuia.
+  fxTransactionMetadataRequired: Tranzacțiile în monedă străină necesită un curs FX verificat, sursa și data cursului.
+  fxTransactionTransferFieldsUnsupported: Transferurile nu pot conține câmpuri pentru moneda originală; transferurile între monede diferite necesită două sume explicite în conturi și nu sunt încă acceptate.
+  fxTransactionTransferOriginalFieldsForbidden: Transferurile nu pot conține câmpuri pentru moneda originală.
+  fxTransactionBnrQuoteNotCached: Cotația oficială BNR nu este în memoria cache. Solicită cotația FX înainte de a înregistra această tranzacție.
+  fxTransactionReferenceQuoteNotCached: Cotația BNR de referință nu este în memoria cache. Solicită cotația FX înainte de a înregistra această tranzacție.
+  fxTransferOriginalFieldsInferred: Suma și moneda sursă ale transferului sunt deduse din contul sursă.
+  fxTransferAccountsInvalid: Alege conturi sursă și destinație active care aparțin profilului tău.
+  fxTransferAccountsSame: Conturile de transfer trebuie să fie diferite.
+  fxTransferSameCurrencyFieldsForbidden: Transferurile în aceeași monedă nu necesită câmpuri pentru cursul FX.
+  fxTransferSameCurrencyAmountsMismatch: Sumele transferului trebuie să coincidă atunci când conturile folosesc aceeași monedă.
+  fxTransferRateSourceRequired: Alege BNR sau manual ca sursă a cursului FX pentru transfer.
+  fxTransferBnrReferenceFieldsForbidden: Un curs BNR pentru transfer nu necesită câmpuri separate pentru cursul de referință.
+  fxTransferAmountTooSmall: Suma transferului este prea mică pentru a produce o unitate monetară minoră în contul destinație la acest curs.
+  fxTransferOfficialAmountMismatch: Suma din contul destinație nu corespunde cursului oficial al transferului.
+  fxTransferManualRateRequired: Introdu un curs FX manual pozitiv pentru transfer.
+  fxTransferManualAmountMismatch: Suma din contul destinație nu corespunde cursului manual al transferului.
+  fxTransferDestinationAmountRequired: Introdu suma primită în contul de destinație.
+  fxTransferMetadataRequired: Transferurile între monede diferite necesită un curs FX verificat, sursa, data cursului și suma din contul destinație.
+  fxTransferBnrQuoteNotCached: Cotația oficială pentru transfer nu este în memoria cache. Solicită cotația FX înainte de a înregistra acest transfer.
+  fxTransferReferenceQuoteNotCached: Cotația de referință pentru transfer nu este în memoria cache. Solicit-o înainte de a înregistra acest transfer.
+  fxTransactionBnrQuoteRateMismatch: Cursul FX BNR nu corespunde cotației oficiale salvate.
+  fxTransactionBnrQuoteDateMismatch: Data cursului FX BNR nu corespunde datei oficiale de rezervă.
+  fxTransactionReferenceQuoteRateMismatch: Cursul FX BNR de referință nu corespunde cotației oficiale salvate.
+  fxTransactionReferenceQuoteDateMismatch: Data cursului FX BNR de referință nu corespunde datei oficiale de rezervă.
+  fxTransferBnrQuoteRateMismatch: Cursul FX BNR al transferului nu corespunde cotației oficiale salvate.
+  fxTransferBnrQuoteDateMismatch: Data cursului FX BNR al transferului nu corespunde datei oficiale de rezervă.
+  fxTransferReferenceQuoteRateMismatch: Cursul FX BNR de referință al transferului nu corespunde cotației oficiale salvate.
+  fxTransferReferenceQuoteDateMismatch: Data cursului FX BNR de referință al transferului nu corespunde datei oficiale de rezervă.
+  crossOriginForbidden: Modificările între origini diferite nu sunt permise.
+  queryIntegerInvalid: "{field} trebuie să fie un număr întreg."
+  queryDateInvalid: "{field} trebuie să fie o dată calendaristică validă."
+  queryDateRangeIncomplete: Sunt necesare atât data de început, cât și data de sfârșit.
+  queryDateRangeReversed: Data de început trebuie să fie anterioară sau egală cu data de sfârșit.
+  queryDateRangeTooLong: "Alege un interval de cel mult {maxYears, plural, one {# an} few {# ani} other {# de ani}}."
+  currentPasswordInvalid: Parola curentă este incorectă.
+  authRegistrationConfigInvalid: Înregistrarea nu este configurată corect.
+  profileNotFound: Profilul utilizatorului nu a putut fi găsit.
+  profileCurrencyInvalid: Profilul utilizatorului conține o monedă implicită neacceptată.
+  profileRegionalSettingsInvalid: Profilul utilizatorului conține setări regionale nevalide.
+  planningRecurrenceDidNotAdvance: Regulile plății recurente trebuie să avanseze la o dată ulterioară.
+  planningInitialStatusInvalid: Plățile planificate noi trebuie să înceapă cu starea planificată sau programată.
+  planningCurrencyInvalid: Alege o monedă ISO 4217 acceptată pentru plata planificată.
+  planningOccurrenceNotFound: Plata planificată nu a fost găsită.
+  planningStoredCurrencyUnsupported: Plata planificată are o monedă neacceptată.
+  planningCrossCurrencyAmountsRequired: "Introdu suma aplicată în {plannedCurrency}, precum și suma din cont în {accountCurrency}."
+  planningAppliedAmountInvalid: Suma aplicată planului trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  planningPaymentRestoreRequired: Restaurează această plată planificată înainte de a înregistra o plată efectivă.
+  planningOccurrenceAlreadyPaid: Această plată planificată este deja achitată. Anuleaz-o înainte de a înregistra o plată înlocuitoare.
+  planningOccurrenceStatusRestoreRequired: "{status, select, skipped {O plată omisă nu poate fi achitată înainte de a fi restaurată.} cancelled {O plată anulată nu poate fi achitată înainte de a fi restaurată.} other {Această plată nu poate fi achitată înainte de a fi restaurată.}}"
+  planningAccountAmountInvalid: Suma din cont trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  planningPreparedAmountMismatch: Suma originală pregătită nu corespunde sumei aplicate plății planificate.
+  planningPreparedCurrencyMismatch: Moneda originală pregătită nu corespunde monedei plății planificate.
+  planningCumulativeAmountTooLarge: Plățile planificate cumulate depășesc intervalul sigur pentru numere întregi.
+  planningPaymentsUndoRequiredBeforeSkip: Anulează plățile înregistrate înainte de a omite această apariție.
+  planningPaymentsUndoRequiredBeforeCancel: Anulează plățile înregistrate înainte de a anula această apariție.
+  planningOccurrenceAlreadyCancelled: Această apariție este deja anulată.
+  planningSkipUndoRequiredBeforeCancel: Restaurează apariția omisă înainte de a o anula.
+  planningPaymentNotFound: Plata planificată nu a fost găsită.
+  liabilityAccountNotFound: Contul nu a fost găsit.
+  liabilityAccountRestoreRequired: Restaurează acest cont înainte de a-i modifica înregistrările de datorie.
+  liabilityAccountTypeInvalid: Acest cont nu este un cont de datorie.
+  liabilityBalloonScheduleUnsupported: Graficele explicite cu plată finală majorată nu sunt încă acceptate; elimină balloonMinor.
+  liabilityCardStatementNotFound: Extrasul de card nu a fost găsit.
+  liabilityCashAccountRequired: Plățile datoriilor trebuie să provină dintr-un cont curent, de economii sau de numerar.
+  liabilityCashAllocationTooSmall: Suma în numerar este prea mică pentru a reprezenta fiecare alocare nenulă a împrumutului.
+  liabilityCategoryRequired: Alege o categorie activă care îți aparține.
+  liabilityCreditCardAccountRequired: Alege un cont de card de credit.
+  liabilityCrossCurrencyCashAmountRequired: Plățile datoriilor între monede diferite necesită o sumă explicită în contul de numerar.
+  liabilityDisbursementCrossCurrencyCashAmountRequired: Debursările împrumuturilor între monede diferite necesită o sumă explicită în contul de numerar.
+  liabilityDisbursementSameCurrencyAmountMismatch: Sumele debursării din contul împrumutului și din contul de numerar trebuie să coincidă când folosesc aceeași monedă.
+  liabilityDisbursementSameCurrencyFxForbidden: Debursările împrumuturilor în aceeași monedă nu necesită câmpuri pentru cursul FX.
+  liabilityEarliestInstallmentRequired: Înregistrează cea mai veche rată restantă înainte de a achita o rată ulterioară.
+  liabilityFirstPaymentBeforeOrigination: Prima plată nu poate preceda acordarea împrumutului.
+  liabilityFirstRateAfterFirstPayment: Prima rată a dobânzii trebuie să acopere prima scadență.
+  liabilityFixedPaymentScheduleUnsupported: Graficele contractuale cu plată fixă nu sunt încă acceptate; elimină regularPaymentMinor.
+  liabilityFixedRateRequired: Introdu rata anuală fixă a dobânzii.
+  liabilityFxAllocationPrecisionUnsupported: Această alocare între numerar și datorie nu poate fi reprezentată la precizia FX acceptată.
+  liabilityInstallmentFeesExceeded: Alocarea comisioanelor depășește comisioanele rămase pentru această rată.
+  liabilityInstallmentInterestExceeded: Alocarea dobânzii depășește dobânda rămasă pentru această rată.
+  liabilityInstallmentPrincipalExceeded: Alocarea principalului depășește principalul rămas pentru această rată; înregistrează principalul suplimentar fără a selecta o rată.
+  liabilityLoanAccountRequired: Alege un cont de împrumut.
+  liabilityLoanAmortizationUnsupported: Acest împrumut folosește un grafic de rambursare neacceptat. Alege anuități, principal egal sau numai dobândă.
+  liabilityLoanInstallmentAlreadyPaid: Această rată este deja achitată.
+  liabilityLoanInstallmentNotFound: Rata împrumutului nu a fost găsită.
+  liabilityLoanOriginationInFuture: Data acordării împrumutului nu poate fi în viitor.
+  liabilityLoanScheduleCalculationFailed: Graficul de rambursare a împrumutului nu a putut fi calculat.
+  liabilityLoanTermsNotFound: Condițiile împrumutului nu au fost găsite.
+  liabilityLoanTermsRequired: Adaugă condițiile împrumutului înainte de a înregistra rate.
+  liabilityMaturityBeforeFirstPayment: Scadența finală nu poate preceda prima plată.
+  liabilityMinimumDueExceedsBalance: Suma minimă datorată nu poate depăși soldul extrasului.
+  liabilityPaymentAllocationMismatch: Principalul, dobânda și comisioanele trebuie să însumeze plata totală.
+  liabilityPaymentAlreadyUndone: Această plată a fost deja anulată.
+  liabilityPaymentCadenceIntervalMismatch: "{frequency, select, monthly {Frecvența lunară nu corespunde intervalului de plată.} quarterly {Frecvența trimestrială nu corespunde intervalului de plată.} yearly {Frecvența anuală nu corespunde intervalului de plată.} custom {Frecvența personalizată nu corespunde intervalului de plată.} other {Frecvența plăților nu corespunde intervalului de plată.}}"
+  liabilityPaymentCadenceUnsupported: Acest împrumut folosește o frecvență de plată neacceptată.
+  liabilityPaymentIntervalInvalid: Intervalul de plată a împrumutului trebuie să fie între 1 și 120 de luni.
+  liabilityPaymentNotFound: Plata datoriei nu a fost găsită.
+  liabilityPrincipalExceedsBalance: Plata principalului depășește soldul curent restant al împrumutului.
+  liabilityRateCapBelowFloor: Plafonul ratei dobânzii nu poate fi mai mic decât pragul minim.
+  liabilityRatePeriodNotAfterLatest: O perioadă nouă a ratei dobânzii trebuie să înceapă după cea mai recentă perioadă existentă.
+  liabilityRatePeriodOrderInvalid: Perioada ratei dobânzii nu se poate încheia înainte de a începe.
+  liabilityReferenceQuoteNotCached: Cotația BNR de referință nu este în memoria cache. Solicită cotația FX înainte de a înregistra această plată a datoriei.
+  liabilitySameCurrencyPaymentAmountMismatch: Sumele din contul de numerar și din contul de datorie trebuie să coincidă când folosesc aceeași monedă.
+  liabilityStatementClosingBeforePeriodEnd: Data închiderii nu poate preceda sfârșitul perioadei extrasului.
+  liabilityStatementClosingDateDuplicate: Există deja un extras pentru această dată de închidere.
+  liabilityStatementDueBeforeClosing: Data scadenței nu poate preceda data închiderii.
+  liabilityStatementPeriodOrderInvalid: Perioada extrasului nu se poate încheia înainte de a începe.
+  liabilityStoredBalloonUnsupported: Acest împrumut conține o valoare neacceptată pentru plata finală majorată. Actualizează-i condițiile înainte de a folosi proiecțiile.
+  liabilityStoredFixedPaymentUnsupported: Acest împrumut conține o valoare contractuală neacceptată pentru plata fixă. Actualizează-i condițiile înainte de a folosi proiecțiile.
+  liabilityUndoLaterInstallmentsFirst: Anulează ratele ulterioare ale împrumutului înainte de a anula această plată.
+  liabilityVariableRateFieldsRequired: Ratele variabile ale dobânzii necesită un indice, un termen, o rată observată și o frecvență de resetare.
+  liabilityCashAccountAmountInvalid: Suma din contul de numerar trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  liabilityCreditLimitInvalid: Limita de credit trebuie să fie un număr întreg nenegativ exprimat în unități monetare minore.
+  liabilityDisbursementAmountInvalid: Suma debursată trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  liabilityDisbursementDateInvalid: Alege o dată validă pentru debursare în formatul YYYY-MM-DD.
+  liabilityFeeAmountInvalid: Valoarea comisionului trebuie să fie un număr întreg nenegativ exprimat în unități monetare minore.
+  liabilityFirstPaymentDateInvalid: Alege o dată validă pentru prima plată în formatul YYYY-MM-DD.
+  liabilityInterestAmountInvalid: Valoarea dobânzii trebuie să fie un număr întreg nenegativ exprimat în unități monetare minore.
+  liabilityLoanOriginationDateInvalid: Alege o dată validă pentru acordarea împrumutului în formatul YYYY-MM-DD.
+  liabilityMaturityDateInvalid: Alege o dată de scadență validă în formatul YYYY-MM-DD.
+  liabilityMinimumDueInvalid: Suma minimă datorată trebuie să fie un număr întreg nenegativ exprimat în unități monetare minore.
+  liabilityNextResetDateInvalid: Alege o dată validă pentru următoarea resetare în formatul YYYY-MM-DD.
+  liabilityOriginalPrincipalInvalid: Principalul inițial trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  liabilityPaymentAmountInvalid: Suma plății trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  liabilityPaymentDateInvalid: Alege o dată validă pentru plată în formatul YYYY-MM-DD.
+  liabilityPrincipalAmountInvalid: Valoarea principalului trebuie să fie un număr întreg nenegativ exprimat în unități monetare minore.
+  liabilityRateEffectiveDateInvalid: Alege o dată validă de intrare în vigoare a ratei dobânzii în formatul YYYY-MM-DD.
+  liabilityRateEndDateInvalid: Alege o dată validă de sfârșit a ratei dobânzii în formatul YYYY-MM-DD.
+  liabilityStatementBalanceInvalid: Soldul extrasului trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  liabilityStatementClosingDateInvalid: Alege o dată validă de închidere a extrasului în formatul YYYY-MM-DD.
+  liabilityStatementDueDateInvalid: Alege o dată validă de scadență a extrasului în formatul YYYY-MM-DD.
+  liabilityStatementPeriodEndInvalid: Alege o dată validă de sfârșit a perioadei extrasului în formatul YYYY-MM-DD.
+  liabilityStatementPeriodStartInvalid: Alege o dată validă de început a perioadei extrasului în formatul YYYY-MM-DD.
+  liabilityTotalPaymentInvalid: Plata totală trebuie să fie un număr întreg pozitiv exprimat în unități monetare minore.
+  attachmentConfigInvalid: Stocarea bonurilor nu este configurată corect.
+  attachmentConfigOutOfRange: Stocarea bonurilor nu este configurată corect.
+  attachmentConfigQuotaInvalid: Stocarea bonurilor nu este configurată corect.
+  attachmentConfigRootUnsafe: Stocarea bonurilor nu este configurată corect.
+  attachmentStorageDirectoryInvalid: Spațiul de stocare pentru bonuri nu este disponibil.
+  attachmentStorageEntryUnsafe: Spațiul de stocare pentru bonuri nu este disponibil.
+  attachmentStoragePathUnsafe: Spațiul de stocare pentru bonuri nu este disponibil.
+  attachmentStorageMetadataInvalid: Spațiul de stocare pentru bonuri nu este disponibil.
+  attachmentStorageChecksumPathMismatch: Spațiul de stocare pentru bonuri nu este disponibil.
+  attachmentStorageIntegrityFailed: Bonul stocat nu a trecut verificarea integrității.
+  attachmentTransactionNotFound: Tranzacția nu a putut fi găsită.
+  attachmentFilenameLengthInvalid: "Numele fișierelor cu bonuri trebuie să conțină între {minCharacters, number} și {maxCharacters, number} caractere."
+  attachmentFilenameUnsafe: Numele fișierului cu bonul conține caractere neacceptate.
+  attachmentContentLengthInvalid: Dimensiunea bonului nu a putut fi verificată.
+  attachmentFileTooLarge: "Fișierele cu bonuri nu trebuie să depășească {maxBytes, number} octeți."
+  attachmentFileRequired: Alege un fișier cu bon pentru încărcare.
+  attachmentFileEmpty: Fișierele cu bonuri nu pot fi goale.
+  attachmentFileLimitReached: "O tranzacție poate avea cel mult {maxFiles, plural, one {# fișier cu bon} few {# fișiere cu bonuri} other {# de fișiere cu bonuri}}."
+  attachmentQuotaReached: Cota spațiului de stocare pentru bonuri a fost atinsă.
+  attachmentDuplicate: Acest bon este deja atașat tranzacției.
+  attachmentTypeUnsupported: Sunt acceptate numai fișiere cu bonuri în formatele PDF, PNG, JPEG, WebP, HEIC și HEIF.
+  attachmentExtensionMismatch: "Extensia numelui de fișier nu corespunde tipului de conținut detectat: {detectedMimeType}."
+  attachmentDeclaredTypeMismatch: Tipul de fișier declarat nu corespunde conținutului bonului.
+  attachmentNotFound: Fișierul atașat nu a putut fi găsit.
+  attachmentReferenceNotDownloadable: Acest fișier atașat este o referință și nu are un fișier local.
+  attachmentContentUnavailable: Bonul stocat lipsește sau nu a trecut verificarea integrității.
+  attachmentBackupMetadataConflict: Metadatele bonului intră în conflict cu un alt bon stocat.
+  attachmentBackupContentMissing: Conținutul bonului lipsește din copia de siguranță.
+  attachmentBackupContentInvalid: Conținutul bonului nu a trecut verificarea integrității.
+  attachmentBackupSizeInvalid: Copia de siguranță conține o dimensiune nevalidă pentru un bon.
+  attachmentBackupDataInvalid: Copia de siguranță conține date nevalide pentru un bon.
+  attachmentBackupIntegrityFailed: Un bon din copia de siguranță nu a trecut verificarea integrității.
+  attachmentBackupManifestInvalid: Manifestul bonurilor din copia de siguranță nu este valid.
+  attachmentBackupEntryDuplicate: Copia de siguranță conține o înregistrare duplicată pentru un bon.
+  attachmentBackupMetadataMismatch: Manifestul bonurilor din copia de siguranță nu corespunde metadatelor din baza de date.
+  attachmentRestoreStorageConflict: Spațiul de stocare existent pentru bonuri intră în conflict cu copia de siguranță restaurată.
+auth:
+  authenticationRequired: Autentifică-te pentru a continua.
+  invalidCredentials: Adresa de e-mail sau parola este incorectă.
+  emailTaken: Există deja un cont pentru această adresă de e-mail.
+  weakPassword: Alege o parolă mai puternică.
+  invalidEmail: Introdu o adresă de e-mail validă.
+  invalidCurrency: Alege o monedă acceptată.
+  invalidLocale: Alege setări regionale de formatare valide.
+  invalidTimeZone: Alege un fus orar valid.
+  registrationClosed: Înregistrarea este închisă pentru această instalare.
+validationIssues:
+  invalidType: Introdu o valoare de tipul așteptat.
+  tooSmall: "Valoarea trebuie să fie de cel puțin {minimum, number}."
+  tooBig: "Valoarea trebuie să fie de cel mult {maximum, number}."
+  invalidFormat: Introdu o valoare în formatul așteptat.
+  custom: Verifică această valoare și încearcă din nou.
+validation:
+  required: Acest câmp este obligatoriu.
+  invalidEmail: Introdu o adresă de e-mail validă.
+  minimumCharacters: "Introdu cel puțin {count, plural, one {# caracter} few {# caractere} other {# de caractere}}."

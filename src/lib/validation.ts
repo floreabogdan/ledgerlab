@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveConfiguredUiLanguage } from "@/i18n/language";
 import {
   ACCOUNT_TYPES,
   RECURRENCE_FREQUENCIES,
@@ -55,6 +56,8 @@ const timeZoneInput = z.string().trim().min(1).max(100).refine((value) => {
   }
 }, "Choose a valid IANA time zone");
 
+const uiLanguageInput = z.unknown().optional().transform(resolveConfiguredUiLanguage);
+
 export const registerInput = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(254),
@@ -62,6 +65,7 @@ export const registerInput = z.object({
   currency: currencyCodeInput.default(DEFAULT_CURRENCY),
   locale: localeInput.default(DEFAULT_LOCALE),
   timeZone: timeZoneInput.default(DEFAULT_TIME_ZONE),
+  uiLanguage: uiLanguageInput,
 });
 
 export const loginInput = z.object({
@@ -412,6 +416,7 @@ export const profilePreferencesInput = z.object({
   currency: currencyCodeInput,
   locale: localeInput.default(DEFAULT_LOCALE),
   timeZone: timeZoneInput.default(DEFAULT_TIME_ZONE),
+  uiLanguage: uiLanguageInput,
   compactTables: z.boolean().default(true),
 });
 

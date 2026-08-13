@@ -60,10 +60,15 @@ export function toReportingValue(
 
   const quote = findPersistedBnrQuote(money.date, fromCurrency, reportingCurrency);
   if (!quote) {
-    throw new HttpError(
-      422,
-      `Cannot calculate ${context}: no persisted BNR ${fromCurrency}/${reportingCurrency} reference rate is available on or before ${money.date}`,
-      {
+    throw new HttpError(422, {
+      code: "REPORTING_FX_RATE_UNAVAILABLE",
+      message: `Cannot calculate ${context}: no persisted BNR ${fromCurrency}/${reportingCurrency} reference rate is available on or before ${money.date}`,
+      params: {
+        requestedDate: money.date,
+        fromCurrency,
+        reportingCurrency,
+      },
+      details: {
         code: "REPORTING_FX_RATE_UNAVAILABLE",
         context,
         requestedDate: money.date,
@@ -71,7 +76,7 @@ export function toReportingValue(
         reportingCurrency,
         noFutureRatesUsed: true,
       },
-    );
+    });
   }
   return {
     amountMinor: convertMinorAtRate(
@@ -152,9 +157,24 @@ export async function hydrateReportingRates(
   const asOfDate = dateKey(options.asOfDate) ?? calendar.today;
   const from = options.from === undefined ? undefined : dateKey(options.from);
   const to = options.to === undefined ? undefined : dateKey(options.to);
-  if (options.from !== undefined && !from) throw new HttpError(422, "Choose a valid reporting-rate start date");
-  if (options.to !== undefined && !to) throw new HttpError(422, "Choose a valid reporting-rate end date");
-  if (from && to && from > to) throw new HttpError(422, "The reporting-rate start date must not be after the end date");
+  if (options.from !== undefined && !from) {
+    throw new HttpError(422, {
+      code: "REPORTING_START_DATE_INVALID",
+      message: "Choose a valid reporting-rate start date",
+    });
+  }
+  if (options.to !== undefined && !to) {
+    throw new HttpError(422, {
+      code: "REPORTING_END_DATE_INVALID",
+      message: "Choose a valid reporting-rate end date",
+    });
+  }
+  if (from && to && from > to) {
+    throw new HttpError(422, {
+      code: "REPORTING_DATE_RANGE_INVALID",
+      message: "The reporting-rate start date must not be after the end date",
+    });
+  }
 
   const candidates: Array<{ currency: string; date: string }> = [];
   const add = (currencyValue: unknown, dateValue: unknown, respectRange = true) => {

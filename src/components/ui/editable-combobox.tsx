@@ -18,6 +18,7 @@ import {
 
 import type { SelectComboboxOption } from "./select-combobox";
 import styles from "./editable-combobox.module.css";
+import { useTranslations } from "@/i18n/client";
 
 export interface EditableComboboxProps {
   value: string;
@@ -80,9 +81,9 @@ export function EditableCombobox({
   id,
   name,
   placeholder,
-  emptyMessage = "No matching suggestions. Your custom value will be kept.",
+  emptyMessage,
   ariaLabel,
-  listboxLabel = "Suggestions",
+  listboxLabel,
   describedBy,
   invalid = false,
   disabled = false,
@@ -97,6 +98,9 @@ export function EditableCombobox({
   inputClassName,
   onBlur,
 }: EditableComboboxProps) {
+  const t = useTranslations();
+  const resolvedEmptyMessage = emptyMessage ?? t("common.controls.editable.noMatches");
+  const resolvedListboxLabel = listboxLabel ?? t("common.controls.suggestions");
   const generatedId = useId();
   const controlId = id ?? `editable-combobox-${generatedId}`;
   const listId = `${controlId}-listbox`;
@@ -300,7 +304,7 @@ export function EditableCombobox({
         type="button"
         tabIndex={-1}
         disabled={disabled}
-        aria-label={open ? "Hide suggestions" : "Show suggestions"}
+        aria-label={open ? t("common.controls.editable.hideSuggestions") : t("common.controls.editable.showSuggestions")}
         aria-controls={open ? listId : undefined}
         aria-expanded={open}
         onPointerDown={(event) => event.preventDefault()}
@@ -328,10 +332,10 @@ export function EditableCombobox({
           } satisfies CSSProperties}
         >
           <div className={styles.caption}>
-            <span>{filtered.length} {filtered.length === 1 ? "suggestion" : "suggestions"}</span>
-            <span>Custom values accepted</span>
+            <span>{t("common.controls.editable.resultCount", { count: filtered.length })}</span>
+            <span>{t("common.controls.editable.customValuesAccepted")}</span>
           </div>
-          <div id={listId} className={styles.list} role="listbox" aria-label={listboxLabel}>
+          <div id={listId} className={styles.list} role="listbox" aria-label={resolvedListboxLabel}>
             {filtered.length ? filtered.map((option, index) => (
               <button
                 ref={(node) => {
@@ -362,7 +366,7 @@ export function EditableCombobox({
                 {option.value === value ? <Check className={styles.check} size={16} aria-hidden="true" /> : null}
               </button>
             )) : (
-              <p className={styles.empty}>{emptyMessage}</p>
+              <p className={styles.empty}>{resolvedEmptyMessage}</p>
             )}
           </div>
         </div>

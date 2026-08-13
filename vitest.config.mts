@@ -2,6 +2,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const sourceDirectory = fileURLToPath(new URL("./src", import.meta.url));
+const serverOnlyTestStub = fileURLToPath(
+  new URL("./tests/stubs/server-only.ts", import.meta.url),
+);
 
 export default defineConfig({
   test: {
@@ -12,5 +15,10 @@ export default defineConfig({
     env: { DATABASE_URL: ":memory:", REGISTRATION_MODE: "open" },
     coverage: { reporter: ["text", "html"] },
   },
-  resolve: { alias: { "@": sourceDirectory } },
+  resolve: {
+    alias: {
+      "@": sourceDirectory,
+      "server-only": serverOnlyTestStub,
+    },
+  },
 });
