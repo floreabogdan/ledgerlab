@@ -113,13 +113,37 @@ export function findHardcodedCopy(
   source: string,
   file = "fixture.tsx",
 ): HardcodedCopyViolation[] {
-  const sourceFile = ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  );
+  const absoluteFile = path.resolve(file);
+  const compilerOptions: ts.CompilerOptions = {
+    jsx: ts.JsxEmit.Preserve,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const host = ts.createCompilerHost(compilerOptions, true);
+  const originalGetSourceFile = host.getSourceFile.bind(host);
+  host.fileExists = (candidate) => path.resolve(candidate) === absoluteFile;
+  host.readFile = (candidate) =>
+    path.resolve(candidate) === absoluteFile ? source : undefined;
+  host.getSourceFile = (candidate, languageVersion, onError, shouldCreateNewSourceFile) =>
+    path.resolve(candidate) === absoluteFile
+      ? ts.createSourceFile(
+          candidate,
+          source,
+          languageVersion,
+          true,
+          ts.ScriptKind.TSX,
+        )
+      : originalGetSourceFile(
+          candidate,
+          languageVersion,
+          onError,
+          shouldCreateNewSourceFile,
+        );
+  const program = ts.createProgram([absoluteFile], compilerOptions, host);
+  const sourceFile = program.getSourceFile(absoluteFile) ?? (() => {
+    throw new Error(`Could not parse ${file}`);
+  })();
+  const checker = program.getTypeChecker();
   const violations: HardcodedCopyViolation[] = [];
   const seen = new Set<string>();
 
@@ -220,7 +244,174 @@ export function findHardcodedCopy(
     }
   }
 
-  function reportPresentationExpression(node: ts.Expression, kind: string) {
+  function reportBindingSource(
+    binding: ts.BindingElement,
+    kind: string,
+    resolving: Set<ts.Node>,
+  ) {
+    if (binding.initializer) {
+      reportPresentationExpression(binding.initializer, kind, resolving);
+      return;
+    }
+
+    const pattern = binding.parent;
+    if (!ts.isObjectBindingPattern(pattern) && !ts.isArrayBindingPattern(pattern)) {
+      return;
+    }
+    const declaration = pattern.parent;
+    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
+      return;
+    }
+
+    if (ts.isObjectBindingPattern(pattern)) {
+      const property = binding.propertyName ?? binding.name;
+      const name = propertyNameText(
+        ts.isIdentifier(property) || ts.isStringLiteral(property)
+          ? property
+          : undefined,
+      );
+      if (name) {
+        reportPropertyFromExpression(
+          declaration.initializer,
+          name,
+          kind,
+          resolving,
+        );
+      }
+      return;
+    }
+
+    const index = pattern.elements.indexOf(binding);
+    if (index >= 0) {
+      reportElementFromExpression(
+        declaration.initializer,
+        index,
+        kind,
+        resolving,
+      );
+    }
+  }
+
+  function reportSymbol(
+    symbol: ts.Symbol | undefined,
+    kind: string,
+    resolving: Set<ts.Node>,
+  ) {
+    if (!symbol || (symbol.flags & ts.SymbolFlags.Alias) !== 0) return;
+
+    for (const declaration of symbol.declarations ?? []) {
+      // The copy guard deliberately scans product-facing TSX. Do not pull
+      // protocol/data constants in from imported TS modules as a side effect.
+      if (declaration.getSourceFile() !== sourceFile || resolving.has(declaration)) {
+        continue;
+      }
+      resolving.add(declaration);
+      try {
+        if (
+          (ts.isVariableDeclaration(declaration)
+            || ts.isParameter(declaration)
+            || ts.isPropertyDeclaration(declaration)
+            || ts.isPropertyAssignment(declaration)
+            || ts.isEnumMember(declaration))
+          && declaration.initializer
+        ) {
+          reportPresentationExpression(declaration.initializer, kind, resolving);
+        } else if (ts.isShorthandPropertyAssignment(declaration)) {
+          reportPresentationExpression(declaration.name, kind, resolving);
+        } else if (ts.isBindingElement(declaration)) {
+          reportBindingSource(declaration, kind, resolving);
+        }
+      } finally {
+        resolving.delete(declaration);
+      }
+    }
+  }
+
+  function reportPropertyFromExpression(
+    rawNode: ts.Expression,
+    name: string,
+    kind: string,
+    resolving: Set<ts.Node>,
+  ) {
+    const node = unwrapExpression(rawNode);
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (propertyNameText(property.name) !== name) continue;
+        if (ts.isPropertyAssignment(property)) {
+          reportPresentationExpression(property.initializer, kind, resolving);
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          reportPresentationExpression(property.name, kind, resolving);
+        }
+      }
+      return;
+    }
+    if (ts.isIdentifier(node)) {
+      const symbol = checker.getSymbolAtLocation(node);
+      for (const declaration of symbol?.declarations ?? []) {
+        if (
+          declaration.getSourceFile() !== sourceFile
+          || resolving.has(declaration)
+          || !ts.isVariableDeclaration(declaration)
+          || !declaration.initializer
+        ) continue;
+        resolving.add(declaration);
+        try {
+          reportPropertyFromExpression(
+            declaration.initializer,
+            name,
+            kind,
+            resolving,
+          );
+        } finally {
+          resolving.delete(declaration);
+        }
+      }
+    }
+  }
+
+  function reportElementFromExpression(
+    rawNode: ts.Expression,
+    index: number,
+    kind: string,
+    resolving: Set<ts.Node>,
+  ) {
+    const node = unwrapExpression(rawNode);
+    if (ts.isArrayLiteralExpression(node)) {
+      const element = node.elements[index];
+      if (element && ts.isExpression(element)) {
+        reportPresentationExpression(element, kind, resolving);
+      }
+      return;
+    }
+    if (ts.isIdentifier(node)) {
+      const symbol = checker.getSymbolAtLocation(node);
+      for (const declaration of symbol?.declarations ?? []) {
+        if (
+          declaration.getSourceFile() !== sourceFile
+          || resolving.has(declaration)
+          || !ts.isVariableDeclaration(declaration)
+          || !declaration.initializer
+        ) continue;
+        resolving.add(declaration);
+        try {
+          reportElementFromExpression(
+            declaration.initializer,
+            index,
+            kind,
+            resolving,
+          );
+        } finally {
+          resolving.delete(declaration);
+        }
+      }
+    }
+  }
+
+  function reportPresentationExpression(
+    node: ts.Expression,
+    kind: string,
+    resolving = new Set<ts.Node>(),
+  ) {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       report(node, kind, node.text);
       return;
@@ -231,7 +422,7 @@ export function findHardcodedCopy(
       return;
     }
     if (ts.isParenthesizedExpression(node)) {
-      reportPresentationExpression(node.expression, kind);
+      reportPresentationExpression(node.expression, kind, resolving);
       return;
     }
     if (
@@ -240,29 +431,64 @@ export function findHardcodedCopy(
       || ts.isNonNullExpression(node)
       || ts.isTypeAssertionExpression(node)
     ) {
-      reportPresentationExpression(node.expression, kind);
+      reportPresentationExpression(node.expression, kind, resolving);
+      return;
+    }
+    if (ts.isIdentifier(node)) {
+      reportSymbol(checker.getSymbolAtLocation(node), kind, resolving);
       return;
     }
     if (ts.isConditionalExpression(node)) {
-      reportPresentationExpression(node.whenTrue, kind);
-      reportPresentationExpression(node.whenFalse, kind);
+      reportPresentationExpression(node.whenTrue, kind, resolving);
+      reportPresentationExpression(node.whenFalse, kind, resolving);
       return;
     }
     if (ts.isArrayLiteralExpression(node)) {
       for (const element of node.elements) {
-        reportPresentationExpression(element, kind);
+        reportPresentationExpression(element, kind, resolving);
       }
       return;
     }
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      reportPresentationExpression(node.expression, kind);
+    if (ts.isPropertyAccessExpression(node)) {
+      const symbol = checker.getSymbolAtLocation(node.name);
+      if (symbol?.declarations?.some((declaration) => declaration.getSourceFile() === sourceFile)) {
+        reportSymbol(symbol, kind, resolving);
+      } else {
+        reportPropertyFromExpression(
+          node.expression,
+          node.name.text,
+          kind,
+          resolving,
+        );
+      }
+      return;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression;
+      if (argument && (ts.isStringLiteral(argument) || ts.isNumericLiteral(argument))) {
+        if (ts.isStringLiteral(argument)) {
+          reportPropertyFromExpression(
+            node.expression,
+            argument.text,
+            kind,
+            resolving,
+          );
+        } else {
+          reportElementFromExpression(
+            node.expression,
+            Number(argument.text),
+            kind,
+            resolving,
+          );
+        }
+      }
       return;
     }
     if (ts.isCallExpression(node)) {
       if (ts.isPropertyAccessExpression(node.expression)) {
         const method = node.expression.name.text;
         if (method === "join") {
-          reportPresentationExpression(node.expression.expression, kind);
+          reportPresentationExpression(node.expression.expression, kind, resolving);
         }
         if (method === "map" || method === "flatMap") {
           for (const argument of node.arguments) {
@@ -271,7 +497,7 @@ export function findHardcodedCopy(
             const callbackBody = callback.body;
             reportMappedValues(node.expression.expression, callback, kind);
             if (!ts.isBlock(callbackBody)) {
-              reportPresentationExpression(callbackBody, kind);
+              reportPresentationExpression(callbackBody, kind, resolving);
               continue;
             }
             function visitReturns(candidate: ts.Node) {
@@ -280,7 +506,7 @@ export function findHardcodedCopy(
                 && (ts.isArrowFunction(candidate) || ts.isFunctionExpression(candidate))
               ) return;
               if (ts.isReturnStatement(candidate) && candidate.expression) {
-                reportPresentationExpression(candidate.expression, kind);
+                reportPresentationExpression(candidate.expression, kind, resolving);
                 return;
               }
               ts.forEachChild(candidate, visitReturns);
@@ -299,8 +525,8 @@ export function findHardcodedCopy(
         || operator === ts.SyntaxKind.QuestionQuestionToken
         || operator === ts.SyntaxKind.PlusToken
       ) {
-        reportPresentationExpression(node.left, kind);
-        reportPresentationExpression(node.right, kind);
+        reportPresentationExpression(node.left, kind, resolving);
+        reportPresentationExpression(node.right, kind, resolving);
       }
     }
   }

@@ -100,6 +100,37 @@ describe("hard-coded interface copy guard", () => {
     ]);
   });
 
+  it("resolves local constants, aliases, properties, and destructured values", () => {
+    const violations = findHardcodedCopy(`
+      export function Example() {
+        const heading = "Account overview";
+        const copy = {
+          body: "Review monthly spending",
+          action: "Save this plan",
+        };
+        const alias = copy;
+        const { action } = alias;
+        const first = ["Nothing recorded yet"];
+        const [empty] = first;
+        const cycleA = cycleB;
+        const cycleB = cycleA;
+        return <section aria-label={heading}>
+          <p>{alias.body}</p>
+          <button>{action}</button>
+          <span>{empty}</span>
+          <span>{cycleA}</span>
+        </section>;
+      }
+    `);
+
+    expect(violations.map((item) => item.text)).toEqual(expect.arrayContaining([
+      "Account overview",
+      "Review monthly spending",
+      "Save this plan",
+      "Nothing recorded yet",
+    ]));
+  });
+
   it("rejects blank reasons and duplicate allowlist identities", async () => {
     const result = await checkHardcodedCopy([], [
       { file: "src/example.tsx", text: "LedgerLab", reason: " " },

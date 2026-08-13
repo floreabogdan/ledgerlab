@@ -890,6 +890,7 @@ describe("production backend integrity boundaries", () => {
     // Keep its directly relabelled legacy rows internally consistent; profile
     // changes in production never rewrite these native denominations.
     db.sqlite.prepare("UPDATE transactions SET currency = 'EUR' WHERE user_id = 'owner'").run();
+    db.sqlite.prepare("UPDATE planned_payments SET currency = 'EUR' WHERE user_id = 'owner'").run();
     db.sqlite.prepare("UPDATE budgets SET currency = 'EUR' WHERE user_id = 'owner'").run();
     const eurPlan = core.createPlannedPayment("owner", {
       name: "EUR plan",
