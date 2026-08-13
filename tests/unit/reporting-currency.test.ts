@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
 
 type DatabaseModule = typeof import("@/db");
 type FxModule = typeof import("@/server/fx");
 type InsightsModule = typeof import("@/server/insights");
 type ReportingModule = typeof import("@/server/reporting-currency");
+const workspace = workspaceContext("report-owner");
 
 describe("reporting-currency conversion", () => {
   let db: DatabaseModule;
@@ -22,25 +24,27 @@ describe("reporting-currency conversion", () => {
     insights = await import("@/server/insights");
     db.ensureDatabase();
 
-    db.sqlite.prepare(
-      `INSERT INTO users
-        (id, email, normalized_email, password_hash, display_name, default_currency, time_zone)
-       VALUES ('report-owner', 'report@example.test', 'report@example.test', 'unused', 'Report Owner', 'RON', 'Europe/Bucharest')`,
-    ).run();
+    insertTestUser(db.sqlite, {
+      id: "report-owner",
+      email: "report@example.test",
+      displayName: "Report Owner",
+      currency: "RON",
+      timeZone: "Europe/Bucharest",
+    });
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
         ('usd-cash', 'report-owner', 'USD cash', 'current', 'USD', 10000, '2026-01-01'),
         ('ron-cash', 'report-owner', 'RON cash', 'cash', 'RON', 10000, '2026-01-01')`,
     ).run();
     db.sqlite.prepare(
-      `INSERT INTO categories (id, user_id, name, kind)
+      `INSERT INTO categories (id, workspace_id, name, kind)
        VALUES ('report-category', 'report-owner', 'Reporting category', 'expense')`,
     ).run();
     db.sqlite.prepare(
       `INSERT INTO transactions
-        (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at, transfer_group_id)
+        (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at, transfer_group_id)
        VALUES
         ('usd-income', 'report-owner', 'usd-cash', 'income', 'cleared', 2000, 'USD', '2026-01-02', NULL),
         ('usd-expense', 'report-owner', 'usd-cash', 'expense', 'cleared', -1000, 'USD', '2026-01-16', NULL),
@@ -50,7 +54,7 @@ describe("reporting-currency conversion", () => {
     ).run();
     db.sqlite.prepare(
       `INSERT INTO planned_payments
-        (id, user_id, title, direction, expected_amount_minor, currency, due_date, account_id)
+        (id, workspace_id, title, direction, expected_amount_minor, currency, due_date, account_id)
        VALUES ('usd-plan', 'report-owner', 'USD plan', 'expense', 500, 'USD', '2026-01-20', 'usd-cash')`,
     ).run();
     db.sqlite.prepare(
@@ -78,7 +82,7 @@ describe("reporting-currency conversion", () => {
   });
 
   it("uses transaction-date rates, excludes transfers, and converts planned rows by due date", () => {
-    const result = insights.statistics("report-owner", 1, { from: "2026-01-01", to: "2026-01-31" });
+    const result = insights.statistics(workspace, 1, { from: "2026-01-01", to: "2026-01-31" });
 
     expect(result.currency).toBe("RON");
     expect(result.summary).toMatchObject({
@@ -98,7 +102,7 @@ describe("reporting-currency conversion", () => {
   });
 
   it("values account totals at the as-of rate while keeping native balances intact", () => {
-    const payload = insights.accountsPayload("report-owner");
+    const payload = insights.accountsPayload(workspace);
     const usd = payload.accounts.find((account) => account.id === "usd-cash");
 
     expect(usd).toMatchObject({
@@ -116,16 +120,19 @@ describe("reporting-currency conversion", () => {
     });
   });
 
-  it("re-expresses reports after a profile-currency change without rewriting ledger rows", () => {
-    db.sqlite.prepare("UPDATE users SET default_currency = 'USD' WHERE id = 'report-owner'").run();
-    const result = insights.statistics("report-owner", 1, { from: "2026-01-01", to: "2026-01-31" });
+  it("uses workspace currency, ignores personal regional settings, and never rewrites ledger rows", () => {
+    db.sqlite.prepare("UPDATE users SET default_currency = 'USD', locale = 'ro-RO' WHERE id = 'report-owner'").run();
+    expect(insights.statistics(workspace, 1, { from: "2026-01-01", to: "2026-01-31" }).currency).toBe("RON");
+
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'USD' WHERE id = 'report-owner'").run();
+    const result = insights.statistics(workspace, 1, { from: "2026-01-01", to: "2026-01-31" });
 
     expect(result.currency).toBe("USD");
     expect(result.summary.incomeMinor).toBe(2_000);
     expect(result.summary.spendingMinor).toBe(1_217);
     expect(db.sqlite.prepare("SELECT amount_minor FROM transactions WHERE id = 'ron-expense'").pluck().get()).toBe(-1_000);
 
-    db.sqlite.prepare("UPDATE users SET default_currency = 'RON' WHERE id = 'report-owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'RON' WHERE id = 'report-owner'").run();
   });
 
   it("never raw-sums currencies when a persisted quote is unavailable", () => {
@@ -140,7 +147,7 @@ describe("reporting-currency conversion", () => {
   });
 
   it("hydrates the annual pairs needed before synchronous report construction", async () => {
-    const result = await reporting.hydrateReportingRates("report-owner", {
+    const result = await reporting.hydrateReportingRates(workspace, {
       from: "2026-01-01",
       to: "2026-01-15",
       asOfDate: "2026-01-15",
@@ -158,54 +165,54 @@ describe("reporting-currency conversion", () => {
     ]);
   });
 
-  it("preserves budget and plan denominations when the profile currency changes", () => {
-    insights.saveBudget("report-owner", {
+  it("preserves budget and plan denominations when the workspace currency changes", () => {
+    insights.saveBudget(workspace, {
       month: "2026-01",
       categoryId: "report-category",
       amountMinor: 10_000,
     });
-    insights.savePlan("report-owner", {
+    insights.savePlan(workspace, {
       month: "2026-01",
       expectedIncomeMinor: 45_000,
     });
-    db.sqlite.prepare("UPDATE users SET default_currency = 'USD' WHERE id = 'report-owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'USD' WHERE id = 'report-owner'").run();
 
-    expect(insights.listBudgets("report-owner", "2026-01").budgets[0]).toMatchObject({
+    expect(insights.listBudgets(workspace, "2026-01").budgets[0]).toMatchObject({
       amountMinor: 2_222,
       currency: "USD",
       nativeAmountMinor: 10_000,
       nativeCurrency: "RON",
     });
-    expect(insights.planningWorkspace("report-owner", "2026-01").plan).toMatchObject({
+    expect(insights.planningWorkspace(workspace, "2026-01").plan).toMatchObject({
       expectedIncomeMinor: 10_000,
       currency: "USD",
       nativeExpectedIncomeMinor: 45_000,
       nativeCurrency: "RON",
     });
 
-    insights.saveBudget("report-owner", {
+    insights.saveBudget(workspace, {
       month: "2026-01",
       categoryId: "report-category",
       amountMinor: 3_000,
     });
-    insights.savePlan("report-owner", {
+    insights.savePlan(workspace, {
       month: "2026-01",
       expectedIncomeMinor: 11_000,
     });
     expect(db.sqlite.prepare(
-      "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE user_id = 'report-owner' AND month = '2026-01'",
+      "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE workspace_id = 'report-owner' AND month = '2026-01'",
     ).get()).toEqual({ amountMinor: 13_500, currency: "RON" });
     expect(db.sqlite.prepare(
-      "SELECT expected_income_minor AS amountMinor, currency FROM month_plans WHERE user_id = 'report-owner' AND month = '2026-01'",
+      "SELECT expected_income_minor AS amountMinor, currency FROM month_plans WHERE workspace_id = 'report-owner' AND month = '2026-01'",
     ).get()).toEqual({ amountMinor: 49_500, currency: "RON" });
 
-    db.sqlite.prepare("UPDATE users SET default_currency = 'RON' WHERE id = 'report-owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'RON' WHERE id = 'report-owner'").run();
   });
 
   it("converts cross-currency plan impacts into each account's native ledger", () => {
     db.sqlite.prepare(
       `INSERT INTO planned_payments
-        (id, user_id, title, direction, expected_amount_minor, currency, due_date, account_id)
+        (id, workspace_id, title, direction, expected_amount_minor, currency, due_date, account_id)
        VALUES ('ron-plan-to-usd', 'report-owner', 'RON bill from USD', 'expense', 4600, 'RON', '2026-09-10', 'usd-cash')`,
     ).run();
     db.sqlite.prepare(
@@ -214,8 +221,8 @@ describe("reporting-currency conversion", () => {
        VALUES ('ron-plan-to-usd-occurrence', 'ron-plan-to-usd', '2026-09-10', 4600, 'planned')`,
     ).run();
 
-    const workspace = insights.planningWorkspace("report-owner", "2026-09");
-    expect(workspace.accounts.find((account) => account.id === "usd-cash")).toMatchObject({
+    const planning = insights.planningWorkspace(workspace, "2026-09");
+    expect(planning.accounts.find((account) => account.id === "usd-cash")).toMatchObject({
       currency: "USD",
       expectedOpeningMinor: 10_000,
       forecastClosingMinor: 9_000,
@@ -226,9 +233,9 @@ describe("reporting-currency conversion", () => {
   });
 
   it("can copy a stored budget denomination without reinterpreting its minor units", () => {
-    db.sqlite.prepare("UPDATE users SET default_currency = 'USD' WHERE id = 'report-owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'USD' WHERE id = 'report-owner'").run();
 
-    insights.saveBudget("report-owner", {
+    insights.saveBudget(workspace, {
       month: "2026-02",
       categoryId: "report-category",
       amountMinor: 10_000,
@@ -236,22 +243,22 @@ describe("reporting-currency conversion", () => {
     });
 
     expect(db.sqlite.prepare(
-      "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE user_id = 'report-owner' AND month = '2026-02'",
+      "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE workspace_id = 'report-owner' AND month = '2026-02'",
     ).get()).toEqual({ amountMinor: 10_000, currency: "RON" });
-    expect(insights.listBudgets("report-owner", "2026-02").budgets[0]).toMatchObject({
+    expect(insights.listBudgets(workspace, "2026-02").budgets[0]).toMatchObject({
       amountMinor: 2_174,
       currency: "USD",
       nativeAmountMinor: 10_000,
       nativeCurrency: "RON",
     });
 
-    db.sqlite.prepare("UPDATE users SET default_currency = 'RON' WHERE id = 'report-owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'RON' WHERE id = 'report-owner'").run();
   });
 
   it("hydrates every intermediate annual feed needed by a multi-year account-history range", async () => {
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('dormant-usd-history', 'report-owner', 'Dormant USD history', 'savings', 'USD', 1000, '2021-01-01')`,
     ).run();
     const requestedYears: number[] = [];
@@ -270,7 +277,7 @@ describe("reporting-currency conversion", () => {
     }));
 
     try {
-      const result = await reporting.hydrateReportingRates("report-owner", {
+      const result = await reporting.hydrateReportingRates(workspace, {
         from: "2022-01-01",
         to: "2026-01-15",
         asOfDate: "2026-01-15",

@@ -108,6 +108,7 @@ codes:
   transactionTransferAccountsSame: Transfer accounts must be different.
   transactionTransferCategoryForbidden: Transfers cannot be assigned to income or expense categories.
   transactionTransferIncomplete: This transfer is incomplete and cannot be cleared safely.
+  transactionTransferKindImmutable: Convert between transfers and other transaction types by voiding and recreating the transaction.
   importCsvTooLarge: "CSV files must be smaller than {maxMegabytes, number} MB."
   importDestinationAccountRequired: Choose an active destination account.
   importCsvParseError: This CSV row could not be parsed.
@@ -168,9 +169,16 @@ codes:
   backupChecksumInvalid: Backup checksum validation failed.
   backupDatabaseIntegrityFailed: The backup database did not pass its integrity check.
   backupTablesMissing: The backup is missing required LedgerLab tables.
+  backupSchemaUpgradeFailed: The backup schema could not be upgraded safely.
+  backupSchemaVersionInvalid: The backup contains an invalid database schema version.
+  backupSchemaNewerThanApplication: This backup was created by a newer LedgerLab version. Upgrade LedgerLab before restoring it.
+  backupWorkspaceRelationshipInvalid: The backup contains an invalid cross-workspace relationship.
   backupRelationshipsInvalid: The backup contains broken relationships.
   backupOwnerCountInvalid: A full restore must contain exactly one local owner.
   backupOwnerMismatch: This backup belongs to a different local owner. The current database was not changed.
+  backupAdminMismatch: This backup belongs to a different installation administrator. The current database was not changed.
+  backupInstallationAdminRequired: Only the installation administrator can create or restore a full database backup.
+  installationAdminRequired: Installation administrator access is required for full backup and restore.
   backupCurrencyLedgerMismatch: The backup contains an invalid currency or a transaction whose currency does not match its account ledger.
   backupBudgetCurrencyInvalid: The backup contains an invalid budget currency.
   backupMonthPlanCurrencyInvalid: The backup contains an invalid monthly-plan currency.
@@ -246,6 +254,14 @@ codes:
   profileCurrencyInvalid: The user profile contains an unsupported default currency.
   profileRegionalSettingsInvalid: The user profile contains invalid regional settings.
   planningRecurrenceDidNotAdvance: Recurring payment rules must advance to a later date.
+  planningAmountInvalid: Planned amounts must be non-negative integers in minor units.
+  planningNameInvalid: Enter a planned-payment name.
+  planningStatusInvalid: An edited planned payment must be planned or scheduled.
+  planningRecurrenceFrequencyInvalid: Choose a valid recurrence frequency.
+  planningRecurrenceIntervalInvalid: Recurrence intervals must be positive integers.
+  planningRecurrenceHistoryConflict: Undo paid, skipped, or cancelled occurrences before changing the schedule.
+  planningCurrencyHistoryConflict: Undo recorded occurrence actions before changing the planned-payment currency.
+  planningDirectionHistoryConflict: Undo recorded occurrence actions before changing income to expense or expense to income.
   planningInitialStatusInvalid: New planned payments must start as planned or scheduled.
   planningCurrencyInvalid: Choose a supported ISO 4217 planned-payment currency.
   planningOccurrenceNotFound: Planned payment not found.
@@ -260,10 +276,13 @@ codes:
   planningPreparedCurrencyMismatch: The prepared original currency does not match the planned payment currency.
   planningCumulativeAmountTooLarge: Cumulative planned payments exceed the safe integer range.
   planningPaymentsUndoRequiredBeforeSkip: Undo recorded payments before skipping this occurrence.
+  planningCancelUndoRequiredBeforeSkip: Undo the cancelled occurrence before skipping it.
   planningPaymentsUndoRequiredBeforeCancel: Undo recorded payments before cancelling this occurrence.
   planningOccurrenceAlreadyCancelled: This occurrence is already cancelled.
   planningSkipUndoRequiredBeforeCancel: Undo the skipped occurrence before cancelling it.
   planningPaymentNotFound: Planned payment not found.
+  planningIdempotencyKeyInvalid: Idempotency keys must be between 1 and 128 characters.
+  planningIdempotencyKeyReused: This idempotency key was already used for a different payment request.
   liabilityAccountNotFound: Account not found.
   liabilityAccountRestoreRequired: Restore this account before changing its liability records.
   liabilityAccountTypeInvalid: This account is not a liability.
@@ -350,6 +369,7 @@ codes:
   attachmentStorageChecksumPathMismatch: Receipt storage is unavailable.
   attachmentStorageIntegrityFailed: The stored receipt failed its integrity check.
   attachmentTransactionNotFound: The transaction could not be found.
+  attachmentPlannedPaymentNotFound: The planned payment could not be found.
   attachmentFilenameLengthInvalid: "Receipt filenames must contain between {minCharacters, number} and {maxCharacters, number} characters."
   attachmentFilenameUnsafe: The receipt filename contains unsupported characters.
   attachmentContentLengthInvalid: The receipt size could not be verified.
@@ -375,6 +395,31 @@ codes:
   attachmentBackupEntryDuplicate: The backup contains a duplicate receipt entry.
   attachmentBackupMetadataMismatch: The backup receipt manifest does not match its database metadata.
   attachmentRestoreStorageConflict: Existing receipt storage conflicts with the restored backup.
+  attachmentStorageBusy: Attachment storage is busy. Retry after the current upload or restore finishes.
+  workspaceNameInvalid: Workspace names must contain between 1 and 80 characters.
+  workspaceCurrencyInvalid: Choose a supported workspace currency.
+  workspaceTimeZoneInvalid: Choose a valid workspace time zone.
+  workspaceRoleInvalid: Choose an owner or member role.
+  workspaceNotFound: The workspace could not be found or is not available to you.
+  workspaceEndpointNotFound: The requested workspace action is not available.
+  workspaceHouseholdRequired: This action is available only for household workspaces.
+  workspaceOwnerRequired: Only a household owner can do that.
+  workspaceMembershipRequired: No accessible workspace is available for this account.
+  workspaceContextChanged: Workspace access changed while this request was in progress. Retry from the current workspace.
+  workspaceMemberNotFound: The household member could not be found.
+  workspaceLastOwnerRequired: The household must retain an owner. Transfer ownership first.
+  workspaceTransferSelfInvalid: Choose another household member for the ownership transfer.
+  workspaceDeleteConfirmationInvalid: Enter the household name exactly to confirm deletion.
+  invitationEmailInvalid: Enter a valid invitation email address.
+  invitationNotFound: This invitation could not be found.
+  invitationAlreadyAccepted: This invitation has already been used.
+  invitationAlreadyMember: This person is already a household member.
+  invitationEmailMismatch: Use the email address that received this invitation.
+  invitationExpired: This invitation has expired. Ask a household owner for a new one.
+  invitationExpiryInvalid: Choose an invitation expiry between 5 minutes and 30 days.
+  invitationRevoked: This invitation was revoked.
+  invitationUserNotFound: The account for this invitation could not be found.
+  invitationUnavailable: This invitation is no longer available.
 auth:
   authenticationRequired: Sign in to continue.
   invalidCredentials: The email address or password is incorrect.

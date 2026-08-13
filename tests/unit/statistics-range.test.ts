@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type InsightsModule = typeof import("@/server/insights");
 
@@ -7,6 +9,7 @@ describe("selected-range statistics and planning baselines", () => {
   let databaseModule: DatabaseModule;
   let insights: InsightsModule;
   const originalDatabaseUrl = process.env.DATABASE_URL;
+  const rangeContext = workspaceContext("range-user");
 
   beforeAll(async () => {
     process.env.DATABASE_URL = ":memory:";
@@ -19,20 +22,17 @@ describe("selected-range statistics and planning baselines", () => {
     databaseModule.ensureDatabase();
     const sql = databaseModule.sqlite;
 
-    sql.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name)
-       VALUES ('range-user', 'range@example.test', 'range@example.test', 'unused', 'Range Test')`,
-    ).run();
+    insertTestUser(sql, { id: "range-user", email: "range@example.test", displayName: "Range Test" });
     sql.prepare(
       `INSERT INTO accounts
-         (id, user_id, name, type, opening_balance_minor, opening_balance_date, archived_at)
+         (id, workspace_id, name, type, opening_balance_minor, opening_balance_date, archived_at)
        VALUES
          ('archived', 'range-user', 'Archived history', 'current', 100000, '2026-01-01', '2026-03-15T10:00:00.000Z'),
          ('active', 'range-user', 'Active current', 'current', 50000, '2026-01-01', NULL)`,
     ).run();
     sql.prepare(
       `INSERT INTO transactions
-         (id, user_id, account_id, kind, status, amount_minor, occurred_at)
+         (id, workspace_id, account_id, kind, status, amount_minor, occurred_at)
        VALUES
          ('income', 'range-user', 'archived', 'income', 'cleared', 50000, '2026-01-05'),
          ('expense', 'range-user', 'archived', 'expense', 'cleared', -10000, '2026-01-10'),
@@ -43,7 +43,7 @@ describe("selected-range statistics and planning baselines", () => {
     ).run();
     sql.prepare(
       `INSERT INTO planned_payments
-         (id, user_id, title, direction, expected_amount_minor, due_date, account_id)
+         (id, workspace_id, title, direction, expected_amount_minor, due_date, account_id)
        VALUES
          ('jan-plan', 'range-user', 'January plan', 'expense', 15000, '2026-01-10', 'active'),
          ('future-plan', 'range-user', 'Future plan', 'expense', 10000, '2099-08-10', 'active')`,
@@ -66,7 +66,7 @@ describe("selected-range statistics and planning baselines", () => {
   });
 
   it("nets refunds across the exact range and excludes adjustments from cash flow", () => {
-    const result = insights.statistics("range-user", 12, {
+    const result = insights.statistics(rangeContext, 12, {
       from: "2026-01-01",
       to: "2026-02-28",
     });
@@ -85,7 +85,7 @@ describe("selected-range statistics and planning baselines", () => {
   });
 
   it("preserves an archived account in snapshots from before it was archived", () => {
-    const result = insights.statistics("range-user", 12, {
+    const result = insights.statistics(rangeContext, 12, {
       from: "2026-01-01",
       to: "2026-02-28",
     });
@@ -97,7 +97,7 @@ describe("selected-range statistics and planning baselines", () => {
   });
 
   it("does not grade plans whose selected month has not happened", () => {
-    const result = insights.statistics("range-user", 12, {
+    const result = insights.statistics(rangeContext, 12, {
       from: "2099-08-01",
       to: "2099-08-31",
     });
@@ -110,7 +110,7 @@ describe("selected-range statistics and planning baselines", () => {
   });
 
   it("uses the month-opening actual balance and then honors saved opening scenarios", () => {
-    const reconciled = insights.accountsPayload("range-user", {
+    const reconciled = insights.accountsPayload(rangeContext, {
       from: "2026-01-01",
       to: "2026-01-31",
     });
@@ -118,13 +118,13 @@ describe("selected-range statistics and planning baselines", () => {
       currentBalanceMinor: 45_000,
     });
 
-    const initial = insights.planningWorkspace("range-user", "2026-02");
+    const initial = insights.planningWorkspace(rangeContext, "2026-02");
     expect(initial.expectedOpeningMinor).toBe(45_000);
     expect(initial.accounts).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "active", expectedOpeningMinor: 45_000 }),
     ]));
 
-    const saved = insights.savePlan("range-user", {
+    const saved = insights.savePlan(rangeContext, {
       month: "2026-02",
       openingBalances: [{ accountId: "active", amountMinor: 70_000 }],
     });

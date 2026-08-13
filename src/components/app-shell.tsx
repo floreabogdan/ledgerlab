@@ -13,6 +13,7 @@ import {
   DatabaseBackup,
   FileUp,
   FolderTree,
+  House,
   LayoutDashboard,
   Landmark,
   LogOut,
@@ -21,6 +22,8 @@ import {
   Settings2,
   Store,
   Tags,
+  UserRound,
+  UsersRound,
   WalletCards,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -48,6 +51,7 @@ type NavigationId =
   | "tags"
   | "merchants"
   | "importTransactions"
+  | "workspaces"
   | "profileSettings"
   | "dataBackups";
 
@@ -80,6 +84,7 @@ const MANAGE_NAVIGATION: NavigationDefinition[] = [
 ];
 
 const UTILITY_NAVIGATION: NavigationDefinition[] = [
+  { id: "workspaces", href: "/workspaces", icon: UsersRound },
   { id: "profileSettings", href: "/settings", icon: Settings2 },
   { id: "dataBackups", href: "/import-export", icon: DatabaseBackup },
 ];
@@ -96,6 +101,7 @@ const NAVIGATION_MESSAGE_KEYS = {
   tags: ["common.navigation.pages.tags.label", "common.navigation.pages.tags.shortLabel"],
   merchants: ["common.navigation.pages.merchants.label", "common.navigation.pages.merchants.shortLabel"],
   importTransactions: ["common.navigation.pages.importTransactions.label", "common.navigation.pages.importTransactions.shortLabel"],
+  workspaces: ["common.navigation.pages.workspaces.label", "common.navigation.pages.workspaces.shortLabel"],
   profileSettings: ["common.navigation.pages.profileSettings.label", "common.navigation.pages.profileSettings.shortLabel"],
   dataBackups: ["common.navigation.pages.dataBackups.label", "common.navigation.pages.dataBackups.shortLabel"],
 } as const;
@@ -122,7 +128,7 @@ function localizeNavigation(
   });
 }
 
-const authPaths = ["/login", "/register"];
+const authPaths = ["/login", "/register", "/invite"];
 
 interface ShellUser {
   displayName: string;
@@ -132,7 +138,23 @@ interface ShellUser {
   timeZone: string;
 }
 
-type OpenPopover = "desktop-range" | "desktop-account" | "mobile-range" | "mobile-account" | null;
+interface ShellWorkspace {
+  id: string;
+  type: "personal" | "household";
+  name: string;
+  role: "owner" | "member";
+  defaultCurrency: string;
+  timeZone: string;
+}
+
+type OpenPopover =
+  | "desktop-range"
+  | "desktop-account"
+  | "desktop-workspace"
+  | "mobile-range"
+  | "mobile-account"
+  | "mobile-workspace"
+  | null;
 
 const fallbackUser: ShellUser = {
   displayName: "",
@@ -141,6 +163,34 @@ const fallbackUser: ShellUser = {
   locale: DEFAULT_LOCALE,
   timeZone: DEFAULT_TIME_ZONE,
 };
+
+const fallbackWorkspace: ShellWorkspace = {
+  id: "",
+  type: "personal",
+  name: "",
+  role: "owner",
+  defaultCurrency: DEFAULT_CURRENCY,
+  timeZone: DEFAULT_TIME_ZONE,
+};
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function shellWorkspace(value: unknown): ShellWorkspace | null {
+  const item = objectValue(value);
+  if (typeof item.id !== "string" || typeof item.name !== "string") return null;
+  return {
+    id: item.id,
+    name: item.name,
+    type: item.type === "household" ? "household" : "personal",
+    role: item.role === "member" ? "member" : "owner",
+    defaultCurrency: typeof item.defaultCurrency === "string" ? item.defaultCurrency : DEFAULT_CURRENCY,
+    timeZone: typeof item.timeZone === "string" ? item.timeZone : DEFAULT_TIME_ZONE,
+  };
+}
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
@@ -152,6 +202,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [user, setUser] = useState<ShellUser>(fallbackUser);
+  const [workspaces, setWorkspaces] = useState<ShellWorkspace[]>([]);
+  const [activeWorkspace, setActiveWorkspace] = useState<ShellWorkspace>(fallbackWorkspace);
   const [openPopover, setOpenPopover] = useState<OpenPopover>(null);
   const authPage = authPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   const { primaryNavigation, manageNavigation, utilityNavigation } = useMemo(
@@ -174,6 +226,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     ...user,
     displayName: user.displayName || t("common.app.personalWorkspace"),
     email: user.email || t("common.app.localAccount"),
+    defaultCurrency: activeWorkspace.defaultCurrency || user.defaultCurrency,
+    timeZone: activeWorkspace.timeZone || user.timeZone,
+  };
+  const displayWorkspace = {
+    ...activeWorkspace,
+    name: activeWorkspace.name || t("common.app.personalWorkspace"),
+    defaultCurrency: activeWorkspace.defaultCurrency || user.defaultCurrency,
+    timeZone: activeWorkspace.timeZone || user.timeZone,
   };
 
   function openCommandPalette() {
@@ -205,12 +265,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     const loadAccountContext = () => {
       controller?.abort();
       controller = new AbortController();
-      void fetch("/api/settings", { signal: controller.signal, headers: { Accept: "application/json" } })
-        .then(async (response) => response.ok
-          ? response.json() as Promise<{ user?: Partial<ShellUser>; preferences?: { compactTables?: boolean } }>
-          : null)
-        .then((payload) => {
-          if (!payload?.user) return;
+      void Promise.all([
+        fetch("/api/settings", { signal: controller.signal, headers: { Accept: "application/json" } })
+          .then(async (response) => response.ok
+            ? response.json() as Promise<{ user?: Partial<ShellUser>; preferences?: { compactTables?: boolean } }>
+            : null),
+        fetch("/api/workspaces", { signal: controller.signal, headers: { Accept: "application/json" }, cache: "no-store" })
+          .then(async (response) => response.ok ? response.json() as Promise<unknown> : null),
+      ])
+        .then(([payload, workspacePayload]) => {
+          if (payload?.user) {
           setUser({
             displayName: payload.user.displayName || fallbackUser.displayName,
             email: payload.user.email || fallbackUser.email,
@@ -218,12 +282,37 @@ export function AppShell({ children }: { children: ReactNode }) {
             locale: payload.user.locale || fallbackUser.locale,
             timeZone: payload.user.timeZone || fallbackUser.timeZone,
           });
-          document.documentElement.dataset.currency = payload.user.defaultCurrency || fallbackUser.defaultCurrency;
           document.documentElement.dataset.locale = payload.user.locale || fallbackUser.locale;
-          document.documentElement.dataset.timeZone = payload.user.timeZone || fallbackUser.timeZone;
           document.documentElement.dataset.tableDensity = payload.preferences?.compactTables === false
             ? "comfortable"
             : "compact";
+          }
+          const workspaceEnvelope = objectValue(workspacePayload);
+          const workspaceData = objectValue(workspaceEnvelope.data);
+          const rawWorkspaces = Array.isArray(workspaceEnvelope.workspaces)
+            ? workspaceEnvelope.workspaces
+            : Array.isArray(workspaceData.workspaces)
+              ? workspaceData.workspaces
+              : [];
+          const available = rawWorkspaces.flatMap((item) => {
+            const parsed = shellWorkspace(item);
+            return parsed ? [parsed] : [];
+          });
+          const explicitActive = shellWorkspace(
+            workspaceEnvelope.activeWorkspace ?? workspaceData.activeWorkspace,
+          );
+          const selected = explicitActive
+            ?? available.find((item) => objectValue(rawWorkspaces.find((raw) => objectValue(raw).id === item.id)).active === true)
+            ?? null;
+          if (available.length) setWorkspaces(available);
+          if (selected) {
+            setActiveWorkspace(selected);
+            document.documentElement.dataset.currency = selected.defaultCurrency;
+            document.documentElement.dataset.timeZone = selected.timeZone;
+          } else if (payload?.user) {
+            document.documentElement.dataset.currency = payload.user.defaultCurrency || fallbackUser.defaultCurrency;
+            document.documentElement.dataset.timeZone = payload.user.timeZone || fallbackUser.timeZone;
+          }
         })
         .catch((error: unknown) => {
           if (!(error instanceof DOMException && error.name === "AbortError")) console.error("account_context_load_failed", error);
@@ -244,7 +333,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <DateRangeProvider locale={user.locale} timeZone={user.timeZone}>
+    <DateRangeProvider locale={user.locale} timeZone={displayWorkspace.timeZone}>
       <div className="app-shell">
       <a className="skip-link" href="#main-content">{t("common.shell.skipToContent")}</a>
       <aside className="app-sidebar" aria-label={t("common.navigation.primaryAria")}>
@@ -255,6 +344,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="brand-context">{t("common.app.brandContext")}</span>
           </span>
         </Link>
+
+        <WorkspaceSwitcher
+          activeWorkspace={displayWorkspace}
+          workspaces={workspaces.length ? workspaces : [displayWorkspace]}
+          open={openPopover === "desktop-workspace"}
+          onOpenChange={(open) => setOpenPopover(open ? "desktop-workspace" : null)}
+        />
 
         <nav className="sidebar-nav">
           <NavigationSection id="workspace" label={t("common.navigation.sections.workspace")} items={primaryNavigation} pathname={pathname} />
@@ -269,6 +365,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="brand-mark" aria-hidden="true">L</span>
             {t("common.app.name")}
           </Link>
+          <WorkspaceSwitcher
+            compact
+            activeWorkspace={displayWorkspace}
+            workspaces={workspaces.length ? workspaces : [displayWorkspace]}
+            open={openPopover === "mobile-workspace"}
+            onOpenChange={(open) => setOpenPopover(open ? "mobile-workspace" : null)}
+          />
           <div className="cluster">
             <IconButton label={t("common.shell.searchAndNavigate")} onClick={openCommandPalette}>
               <Search size={17} aria-hidden="true" />
@@ -276,6 +379,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <AccountMenu
               compact
               user={displayUser}
+              workspace={displayWorkspace}
               open={openPopover === "mobile-account"}
               onOpenChange={(open) => setOpenPopover(open ? "mobile-account" : null)}
             />
@@ -310,6 +414,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
             <AccountMenu
               user={displayUser}
+              workspace={displayWorkspace}
               open={openPopover === "desktop-account"}
               onOpenChange={(open) => setOpenPopover(open ? "desktop-account" : null)}
             />
@@ -392,6 +497,158 @@ function focusByKey(
       : event.key === "ArrowDown" ? (currentIndex + 1 + items.length) % items.length
         : (currentIndex - 1 + items.length) % items.length;
   items[nextIndex]?.focus();
+}
+
+function WorkspaceSwitcher({
+  activeWorkspace,
+  workspaces,
+  open,
+  onOpenChange,
+  compact = false,
+}: {
+  activeWorkspace: ShellWorkspace;
+  workspaces: ShellWorkspace[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  compact?: boolean;
+}) {
+  const t = useTranslations();
+  const menuId = useId();
+  const errorId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const ActiveIcon = activeWorkspace.type === "household" ? House : UserRound;
+
+  usePopoverDismiss(open, containerRef, triggerRef, onOpenChange);
+
+  function openAndFocus(position: "first" | "last") {
+    setError(null);
+    onOpenChange(true);
+    requestAnimationFrame(() => {
+      const items = containerRef.current?.querySelectorAll<HTMLElement>(
+        "[role='menuitemradio'], [role='menuitem']",
+      );
+      if (!items?.length) return;
+      items[position === "first" ? 0 : items.length - 1]?.focus();
+    });
+  }
+
+  async function chooseWorkspace(workspace: ShellWorkspace) {
+    if (workspace.id === activeWorkspace.id) {
+      onOpenChange(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    setSwitchingId(workspace.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/activate`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("workspace_switch_failed");
+      window.location.reload();
+    } catch {
+      setError(t("common.workspaceSwitcher.switchFailed"));
+      setSwitchingId(null);
+    }
+  }
+
+  return (
+    <div
+      className={`workspace-switcher ${compact ? "workspace-switcher-compact" : ""}`}
+      ref={containerRef}
+    >
+      <button
+        ref={triggerRef}
+        className="workspace-switcher-trigger"
+        type="button"
+        aria-label={t("common.workspaceSwitcher.triggerAria", { name: activeWorkspace.name })}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={() => {
+          if (!open) setError(null);
+          onOpenChange(!open);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            openAndFocus(event.key === "ArrowDown" ? "first" : "last");
+          }
+        }}
+      >
+        <span className="workspace-switcher-mark" aria-hidden="true">
+          <ActiveIcon size={16} />
+        </span>
+        <span className="workspace-switcher-copy">
+          <small>{t(`common.workspaceSwitcher.types.${activeWorkspace.type}`)}</small>
+          <strong>{activeWorkspace.name}</strong>
+        </span>
+        <ChevronDown className="workspace-switcher-chevron" size={14} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div
+          className="workspace-switcher-popover"
+          id={menuId}
+          role="menu"
+          aria-label={t("common.workspaceSwitcher.menuAria")}
+          aria-describedby={error ? errorId : undefined}
+          onKeyDown={(event) => focusByKey(event, "[role='menuitemradio'], [role='menuitem']")}
+        >
+          <div className="workspace-switcher-header">
+            <strong>{t("common.workspaceSwitcher.heading")}</strong>
+            <span>{t("common.workspaceSwitcher.description")}</span>
+          </div>
+          <div className="workspace-switcher-options">
+            {workspaces.map((workspace) => {
+              const selected = workspace.id === activeWorkspace.id;
+              const Icon = workspace.type === "household" ? House : UserRound;
+              const switching = switchingId === workspace.id;
+              return (
+                <button
+                  key={workspace.id}
+                  className="workspace-switcher-option"
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selected}
+                  disabled={switchingId !== null}
+                  onClick={() => void chooseWorkspace(workspace)}
+                >
+                  <span className="workspace-switcher-option-mark" aria-hidden="true"><Icon size={16} /></span>
+                  <span className="workspace-switcher-option-copy">
+                    <strong>{workspace.name}</strong>
+                    <small>
+                      {t(`common.workspaceSwitcher.types.${workspace.type}`)}
+                      {" · "}
+                      {t(`common.workspaceSwitcher.roles.${workspace.role}`)}
+                    </small>
+                  </span>
+                  {switching ? (
+                    <span className="workspace-switcher-status">{t("common.workspaceSwitcher.switching")}</span>
+                  ) : selected ? <Check size={16} aria-hidden="true" /> : null}
+                </button>
+              );
+            })}
+          </div>
+          {error ? <p className="workspace-switcher-error" id={errorId} role="alert">{error}</p> : null}
+          <div className="workspace-switcher-separator" role="separator" />
+          <Link
+            className="workspace-switcher-manage"
+            href="/workspaces"
+            role="menuitem"
+            onClick={() => onOpenChange(false)}
+          >
+            <UsersRound size={16} aria-hidden="true" />
+            {t("common.workspaceSwitcher.manage")}
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const DATE_RANGE_QUICK_PICK_KEYS = {
@@ -560,11 +817,13 @@ function userInitials(user: ShellUser) {
 
 function AccountMenu({
   user,
+  workspace,
   open,
   onOpenChange,
   compact = false,
 }: {
   user: ShellUser;
+  workspace: ShellWorkspace;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   compact?: boolean;
@@ -627,10 +886,14 @@ function AccountMenu({
             </span>
           </div>
           <div className="account-menu-context">
-            <span>{t("common.app.personalWorkspace")}</span>
-            <strong>{t("common.app.workspaceDetails", { currency: user.defaultCurrency, timeZone: user.timeZone })}</strong>
+            <span>{workspace.name}</span>
+            <strong>{t("common.app.workspaceDetails", { currency: workspace.defaultCurrency, timeZone: workspace.timeZone })}</strong>
           </div>
           <div className="account-menu-separator" role="separator" />
+          <Link className="account-menu-item" href="/workspaces" role="menuitem" onClick={() => onOpenChange(false)}>
+            <UsersRound size={16} aria-hidden="true" />
+            {t("common.navigation.pages.workspaces.label")}
+          </Link>
           <Link className="account-menu-item" href="/settings" role="menuitem" onClick={() => onOpenChange(false)}>
             <Settings2 size={16} aria-hidden="true" />
             {t("common.navigation.pages.profileSettings.label")}

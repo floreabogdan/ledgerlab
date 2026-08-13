@@ -28,6 +28,6 @@ export const getRequestI18nContext = cache(async () => {
   return {
     ...getI18nPagePayload(language),
     formattingLocale: session?.user.locale ?? DEFAULT_LOCALE,
-    timeZone: session?.user.timeZone ?? DEFAULT_TIME_ZONE,
+    timeZone: session?.workspace.timeZone ?? DEFAULT_TIME_ZONE,
   };
 });

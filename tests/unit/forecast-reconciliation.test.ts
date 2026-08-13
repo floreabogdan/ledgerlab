@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type CoreModule = typeof import("@/server/core");
 type InsightsModule = typeof import("@/server/insights");
@@ -27,12 +29,8 @@ describe("production monthly cash forecast reconciliation", () => {
     insights = await import("@/server/insights");
     format = await import("@/lib/format");
     db.ensureDatabase();
-    db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-       VALUES
-         ('past-user', 'past@example.test', 'past@example.test', 'unused', 'Past', 'RON'),
-         ('future-user', 'future@example.test', 'future@example.test', 'unused', 'Future', 'RON')`,
-    ).run();
+    insertTestUser(db.sqlite, { id: "past-user", email: "past@example.test", displayName: "Past", currency: "RON" });
+    insertTestUser(db.sqlite, { id: "future-user", email: "future@example.test", displayName: "Future", currency: "RON" });
   });
 
   afterAll(() => {
@@ -45,21 +43,22 @@ describe("production monthly cash forecast reconciliation", () => {
   it("adds cleared historical cash activity and excludes still-unpaid old obligations", () => {
     const pastMonth = shiftMonth(format.monthKey(), -1);
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('past-cash', 'past-user', 'Past cash', 'current', 'RON', 100000, ?)`,
     ).run(`${pastMonth}-01`);
-    core.createTransaction("past-user", {
+    const pastContext = workspaceContext("past-user");
+    core.createTransaction(pastContext, {
       kind: "expense", accountId: "past-cash", amountMinor: 20_000, date: `${pastMonth}-10`,
     });
-    core.createTransaction("past-user", {
+    core.createTransaction(pastContext, {
       kind: "income", accountId: "past-cash", amountMinor: 5_000, date: `${pastMonth}-11`,
     });
-    core.createPlannedPayment("past-user", {
+    core.createPlannedPayment(pastContext, {
       name: "Unpaid old plan", expectedAmountMinor: 30_000, dueDate: `${pastMonth}-20`,
       type: "expense", accountId: "past-cash",
     });
 
-    const workspace = insights.planningWorkspace("past-user", pastMonth);
+    const workspace = insights.planningWorkspace(pastContext, pastMonth);
     expect(workspace).toMatchObject({
       expectedOpeningMinor: 100_000,
       actualCashActivityMinor: -15_000,
@@ -77,25 +76,26 @@ describe("production monthly cash forecast reconciliation", () => {
     const futureMonth = shiftMonth(format.monthKey(), 1);
     const openingDate = `${format.monthKey()}-01`;
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
          ('future-cash', 'future-user', 'Future cash', 'current', 'RON', 100000, ?),
          ('future-investment', 'future-user', 'Future investment', 'investment', 'RON', 50000, ?)`,
     ).run(openingDate, openingDate);
-    core.createPlannedPayment("future-user", {
+    const futureContext = workspaceContext("future-user");
+    core.createPlannedPayment(futureContext, {
       name: "Salary", expectedAmountMinor: 40_000, dueDate: `${futureMonth}-10`,
       type: "income", accountId: "future-cash",
     });
-    core.createPlannedPayment("future-user", {
+    core.createPlannedPayment(futureContext, {
       name: "Investment distribution", expectedAmountMinor: 10_000, dueDate: `${futureMonth}-12`,
       type: "income", accountId: "future-investment",
     });
-    core.createPlannedPayment("future-user", {
+    core.createPlannedPayment(futureContext, {
       name: "Rent", expectedAmountMinor: 30_000, dueDate: `${futureMonth}-15`,
       type: "expense", accountId: "future-cash",
     });
 
-    const workspace = insights.planningWorkspace("future-user", futureMonth);
+    const workspace = insights.planningWorkspace(futureContext, futureMonth);
     expect(workspace).toMatchObject({
       expectedOpeningMinor: 100_000,
       outstandingIncomeMinor: 50_000,

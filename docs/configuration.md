@@ -11,24 +11,26 @@ LedgerLab deliberately has a small runtime configuration surface. Keep configura
 | `HOSTNAME` | Next.js default | Address used by the production Next.js server. Containers set this to `0.0.0.0`. |
 | `PORT` | `3000` | HTTP port used by `next start` or the standalone server. |
 | `NEXT_TELEMETRY_DISABLED` | unset | Set to `1` to disable Next.js framework telemetry for the process. The published Docker image sets it. |
-| `ATTACHMENTS_DIR` | `attachments` beside the database | Local directory for uploaded receipt files. Use a persistent local path. |
-| `ATTACHMENT_MAX_FILE_BYTES` | `10485760` | Maximum bytes per uploaded receipt (10 MiB by default). |
-| `ATTACHMENT_USER_QUOTA_BYTES` | `262144000` | Maximum stored receipt bytes per user (250 MiB by default). |
-| `ATTACHMENT_MAX_FILES_PER_TRANSACTION` | `10` | Maximum uploaded receipts linked to one transaction. |
+| `ATTACHMENTS_DIR` | `attachments` beside the database | Local directory for uploaded receipt and planned-invoice files. Use a persistent local path. |
+| `ATTACHMENT_MAX_FILE_BYTES` | `10485760` | Maximum bytes per uploaded receipt or planned invoice (10 MiB by default). |
+| `ATTACHMENT_USER_QUOTA_BYTES` | `262144000` | Maximum stored attachment bytes per workspace (250 MiB by default; the variable name is retained for compatibility). |
+| `ATTACHMENT_MAX_FILES_PER_TRANSACTION` | `10` | Maximum files linked to one transaction or planned payment (the variable name is retained for compatibility). |
 
 `DATABASE_URL` must point to a local, persistent, writable filesystem. LedgerLab creates its parent directory when necessary and enables SQLite foreign keys, a busy timeout, and WAL mode.
 
 Do not put the database on NFS, SMB, object storage, or an ephemeral container filesystem. Run one LedgerLab application instance per database; horizontal replicas are not supported.
 
-The published container configures `DATABASE_URL=/app/data/ledgerlab.db`. Keep `/app/data` mounted to a named volume or an explicitly managed local bind mount. The default attachment directory is then `/app/data/attachments`, so one persistent mount covers both the database and receipt files.
+The published container configures `DATABASE_URL=/app/data/ledgerlab.db`. Keep `/app/data` mounted to a named volume or an explicitly managed local bind mount. The default attachment directory is then `/app/data/attachments`, so one persistent mount covers both the database and attachment files.
 
 ### Registration policy
 
-- `first-user` allows registration only while the database has no users. The first successful account becomes the initial owner and registration then closes. This is the default and the recommended mode for a personal installation.
-- `open` allows anyone who can reach the registration page to create a user. Use it only for an intentionally shared installation. Once more than one user exists, sole-owner full-database backup/restore is intentionally unavailable; each user can still use user-scoped exports.
-- `closed` disables new registration even when the database is empty. Existing users can still sign in.
+- `first-user` allows ordinary registration only while the database has no users. The first successful account becomes the installation administrator and owner of its personal workspace, then ordinary registration closes. This is the default and recommended mode.
+- `open` allows anyone who can reach the registration page to create a user and personal workspace. It does not grant membership in an existing household and does not grant installation-administrator authority.
+- `closed` disables ordinary registration even when the database is empty. Existing users can still sign in.
 
-Keep a brand-new `first-user` deployment on a trusted network or loopback address until you create its owner. Otherwise, the first visitor could claim the installation. Changing the mode does not delete users or sessions.
+An unexpired household invitation is a separate, email-bound admission path. A person with the link can create the matching account even when ordinary registration is `first-user` or `closed`, or sign in with an existing matching account and accept it. LedgerLab does not verify control of an email inbox; protect the bearer link as the proof for a new invitee. This path lets an owner add household members without opening public registration.
+
+Keep a brand-new `first-user` deployment on a trusted network or loopback address until you create its installation administrator. Otherwise, the first visitor could claim that authority. Changing the mode does not delete users, workspaces, memberships, invitations, or sessions.
 
 ## Command-only and test variables
 
@@ -64,14 +66,25 @@ The checked-in [.env.example](../.env.example) is documentation, not a productio
 
 For Docker, pass runtime settings with `--env` or an environment file kept outside the repository. Do not bake passwords, private URLs, databases, receipts, or user-specific settings into an image.
 
-## Regional preferences
+## Workspace and personal regional settings
 
-Reporting currency, locale, and time zone belong to each LedgerLab user rather than the server environment. Set them during onboarding and review them in Profile settings. USD is preselected only for a new signup; it is not forced on accounts or existing workspaces.
+Financial settings belong to the active workspace, while presentation settings belong to the signed-in user. They are stored in SQLite rather than server environment variables.
 
-- Each account has an immutable native currency. The profile currency only controls cross-account reporting and may be changed without rewriting ledger history.
+| Setting | Scope | Effect |
+| --- | --- | --- |
+| Reporting currency | Workspace | Canonical currency for cross-account totals, forecasts, and reports |
+| Financial time zone | Workspace | Canonical calendar boundaries for shared dates, months, plans, and reporting |
+| Locale | User | Number and date formatting for that person |
+| Interface language | User | Translated application copy for that person |
+
+The signup choices initialize the new personal workspace and that user's presentation. Creating a household asks for its own currency and time zone. A household owner can later change those canonical settings; the change affects every member's shared calculations. A member cannot override them locally.
+
+- Each account has an immutable native currency. Workspace currency only controls cross-account reporting and may be changed without rewriting ledger history.
 - Currency values use three-letter ISO codes and currency-specific integer minor units.
-- Locale controls display formatting; it does not translate the interface.
-- Time zone controls local calendar boundaries. Use an IANA identifier such as `America/New_York`, `Asia/Tokyo`, or `Europe/Bucharest`.
+- Locale and interface language may differ between household members without changing shared data. Names and notes entered by users remain as entered.
+- Time zones use IANA identifiers such as `America/New_York`, `Asia/Tokyo`, or `Europe/Bucharest`.
+
+There is no environment variable that establishes a default household, membership, role, currency, or time zone for every user. Those are application records and must be administered through authenticated workflows.
 
 ## Network behavior
 

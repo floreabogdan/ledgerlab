@@ -106,3 +106,161 @@ data:
     warning: This replaces current LedgerLab data.
     warningHelp: Create a fresh backup first if you may need to recover the current state. Sessions for other browser tabs may become stale.
     acknowledgement: I understand that current finance data will be replaced by the selected backup.
+workspaces:
+  eyebrow: Access & sharing
+  title: Workspaces
+  description: Keep your private ledger separate, or share a household ledger with people you trust.
+  current:
+    personalDescription: Your private financial data. Only you can access this workspace.
+    householdDescription: Shared financial data for this household and all of its members.
+    type: Type
+    role: Your role
+    financialContext: Currency & time zone
+  types:
+    personal: Personal workspace
+    household: Household workspace
+  roles:
+    owner: Owner
+    member: Member
+  personal:
+    title: Start a shared household
+    description: Create a separate ledger for shared accounts, expenses, invoices, and plans.
+    help: Your personal workspace stays private. Household members see only the household data you create or move into that workspace.
+  members:
+    title: Household members
+    description: Owners manage invitations and membership. Every member can use the shared financial data.
+    tableLabel: Household members
+    person: Person
+    role: Role
+    joined: Joined
+    you: (you)
+    promote: Make owner
+    demote: Make member
+    transfer: Transfer ownership
+    remove: Remove
+    removeConfirm: "Remove {name} from this household?"
+    transferConfirm: "Transfer ownership to {name}? You will become a member."
+  invitations:
+    title: Invitations
+    description: Invitation links are email-bound, expire after seven days, and can be used only once.
+    action: Invite someone
+    linkReady: Copy this link now. It will not be shown again.
+    copy: Copy link
+    tableLabel: Household invitations
+    email: Email address
+    role: Role
+    status: Status
+    expires: Expires
+    revoke: Revoke
+    empty: No invitations have been created.
+    dialogTitle: Invite a household member
+    dialogDescription: The recipient must sign in or register with this exact email address.
+    creating: Creating…
+    submit: Create invitation
+  invitationStatus:
+    pending: Pending
+    accepted: Accepted
+    revoked: Revoked
+    expired: Expired
+  activity:
+    title: Household activity
+    description: Recent shared changes identify who acted, what changed, and when. Sensitive values and invitation links are never shown here.
+    tableLabel: Recent household activity
+    actor: Member
+    action: Action
+    entity: Item
+    time: Time
+    deletedActor: Former member
+    empty: No household activity has been recorded yet.
+    actions:
+      create: Created
+      createDefault: Created default
+      update: Updated
+      archive: Archived
+      restore: Restored
+      clear: Cleared
+      void: Voided
+      pay: Paid
+      partialPay: Partially paid
+      skip: Skipped
+      cancel: Cancelled
+      undo: Undid
+      upload: Uploaded
+      delete: Deleted
+      save: Saved
+      copy: Copied
+      promote: Promoted
+      demote: Demoted
+      transferOwnership: Transferred ownership
+      remove: Removed
+      leave: Left
+      accept: Accepted
+      revoke: Revoked
+      other: Changed
+    entities:
+      workspace: Workspace
+      invitation: Invitation
+      member: Member
+      account: Account
+      category: Category
+      tag: Tag
+      merchant: Merchant
+      transaction: Transaction
+      plannedPayment: Planned payment
+      plannedOccurrence: Planned occurrence
+      attachment: Document
+      budget: Budget
+      monthPlan: Month plan
+      monthPlanScenario: Plan scenario
+      creditCard: Credit card
+      creditCardStatement: Card statement
+      creditCardPayment: Card payment
+      loan: Loan
+      loanRate: Loan rate
+      loanPayment: Loan payment
+      loanDisbursement: Loan disbursement
+      settings: Settings
+      other: Shared item
+  danger:
+    title: Household access
+    description: Leaving or deleting a household does not change your private workspace.
+    deleteTitle: Delete this household
+    deleteHelp: Permanently deletes the household ledger for every member. This cannot be undone.
+    leaveTitle: Leave this household
+    leaveHelp: You will lose access to its shared financial data. A household must always retain an owner.
+    deleteAction: Delete household
+    leaveAction: Leave household
+  create:
+    action: Create household
+    title: Create a household workspace
+    description: Choose the shared ledger's name and financial defaults. You can invite members after creation.
+    name: Household name
+    currency: Reporting currency
+    timeZone: Time zone
+    timeZoneHelp: Use an IANA time zone such as Europe/Bucharest.
+    creating: Creating…
+    submit: Create household
+  messages:
+    actionFailed: The workspace action could not be completed.
+    created: Household created.
+    invitationCreated: Invitation created.
+    invitationRevoked: Invitation revoked.
+    linkCopied: Invitation link copied.
+    promoted: "{name} is now an owner."
+    demoted: "{name} is now a member."
+    removed: "{name} was removed from the household."
+    transferred: "Ownership was transferred to {name}."
+    deleted: Household deleted.
+    left: You left the household.
+  leaveDialog:
+    title: Leave household?
+    description: "You are about to leave {name}."
+    help: You will be returned to your personal workspace. If you are the last owner, transfer ownership first.
+    confirm: Leave household
+  deleteDialog:
+    title: Permanently delete household?
+    description: "This permanently deletes {name} and all of its shared financial data for every member."
+    field: "Type {name} to confirm"
+    help: The name must match exactly.
+    deleting: Deleting…
+    confirm: Delete permanently

@@ -1,6 +1,7 @@
 metadata:
   loginTitle: Sign in
   registerTitle: Create account
+  invitationTitle: Join a household
 layout:
   homeAria: LedgerLab home
   footnote: Local workspace · multi-currency · your regional settings
@@ -54,5 +55,22 @@ validation:
   emailInvalid: Enter a valid email address.
   passwordMinimum: "Password must contain at least {count} characters."
   passwordsMismatch: Passwords do not match.
+invitation:
+  loading: Checking your invitation…
+  unavailableTitle: This invitation is unavailable
+  joinedTitle: You joined the household
+  joinedDescription: "Opening {name}…"
+  title: "Join {name}"
+  description: "This single-use invitation is for {email}. Sign in or create your LedgerLab account with that email address."
+  acceptSignedIn: Accept invitation
+  accountChoice: Choose whether to sign in or create an account
+  existingAccount: I have an account
+  newAccount: Create an account
+  emailHelp: Use the exact email address that received the invitation.
+  signInAndAccept: Sign in & accept
+  registerAndAccept: Create account & accept
+  errors:
+    loadFailed: This invitation could not be loaded. It may be invalid, expired, revoked, or already used.
+    acceptFailed: The invitation could not be accepted. Try again.
 errors:
   requestFailed: We could not complete that request. Please try again.

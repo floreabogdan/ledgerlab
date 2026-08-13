@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type InsightsModule = typeof import("@/server/insights");
 
@@ -7,6 +9,7 @@ describe("monthly forecast canonical inputs", () => {
   let databaseModule: DatabaseModule;
   let insights: InsightsModule;
   const originalDatabaseUrl = process.env.DATABASE_URL;
+  const forecastContext = workspaceContext("forecast-user");
 
   beforeAll(async () => {
     process.env.DATABASE_URL = ":memory:";
@@ -19,22 +22,18 @@ describe("monthly forecast canonical inputs", () => {
     databaseModule.ensureDatabase();
     const sql = databaseModule.sqlite;
 
-    sql.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name)
-       VALUES
-         ('forecast-user', 'forecast@example.test', 'forecast@example.test', 'unused', 'Forecast Test'),
-         ('other-user', 'other@example.test', 'other@example.test', 'unused', 'Other Test')`,
-    ).run();
+    insertTestUser(sql, { id: "forecast-user", email: "forecast@example.test", displayName: "Forecast Test" });
+    insertTestUser(sql, { id: "other-user", email: "other@example.test", displayName: "Other Test" });
     sql.prepare(
       `INSERT INTO accounts
-         (id, user_id, name, type, opening_balance_minor, opening_balance_date)
+         (id, workspace_id, name, type, opening_balance_minor, opening_balance_date)
        VALUES
          ('current', 'forecast-user', 'Current', 'current', 100000, '2026-08-01'),
          ('foreign-account', 'other-user', 'Foreign', 'current', 1, '2026-08-01')`,
     ).run();
     sql.prepare(
       `INSERT INTO month_plans
-         (id, user_id, month, name, expected_income_minor)
+         (id, workspace_id, month, name, expected_income_minor)
        VALUES ('aug-plan', 'forecast-user', '2026-08', 'Legacy plan', 999999)`,
     ).run();
     sql.prepare(
@@ -49,7 +48,7 @@ describe("monthly forecast canonical inputs", () => {
     ).run();
     sql.prepare(
       `INSERT INTO planned_payments
-         (id, user_id, title, direction, expected_amount_minor, due_date, account_id)
+         (id, workspace_id, title, direction, expected_amount_minor, due_date, account_id)
        VALUES
          ('rent', 'forecast-user', 'Rent', 'expense', 40000, '2026-08-10', 'current'),
          ('salary', 'forecast-user', 'Salary', 'income', 200000, '2026-08-15', 'current'),
@@ -78,7 +77,7 @@ describe("monthly forecast canonical inputs", () => {
   });
 
   it("always uses occurrences despite legacy monthly items and projects only unpaid residuals", () => {
-    const result = insights.planningWorkspace("forecast-user", "2026-08");
+    const result = insights.planningWorkspace(forecastContext, "2026-08");
 
     expect(result.items.map((item) => item.id)).toEqual([
       "rent-occ",
@@ -105,7 +104,7 @@ describe("monthly forecast canonical inputs", () => {
   });
 
   it("keeps opening assumptions and hypothetical scenarios separate from canonical lines", () => {
-    const scenario = insights.savePlan("forecast-user", {
+    const scenario = insights.savePlan(forecastContext, {
       action: "save-scenario",
       month: "2026-08",
       scenarioName: "Working scenario",
@@ -125,10 +124,10 @@ describe("monthly forecast canonical inputs", () => {
       expect.objectContaining({ title: "What-if holiday", amountMinor: 12345 }),
     ]);
     expect(scenario.items).toHaveLength(4);
-    expect(databaseModule.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions WHERE user_id = 'forecast-user'").get()).toEqual({ count: 0 });
-    expect(databaseModule.sqlite.prepare("SELECT COUNT(*) AS count FROM planned_payments WHERE user_id = 'forecast-user'").get()).toEqual({ count: 5 });
+    expect(databaseModule.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions WHERE workspace_id = 'forecast-user'").get()).toEqual({ count: 0 });
+    expect(databaseModule.sqlite.prepare("SELECT COUNT(*) AS count FROM planned_payments WHERE workspace_id = 'forecast-user'").get()).toEqual({ count: 5 });
 
-    const saved = insights.savePlan("forecast-user", {
+    const saved = insights.savePlan(forecastContext, {
       action: "save-assumptions",
       month: "2026-08",
       openingBalances: [{ accountId: "current", amountMinor: 150000 }],
@@ -147,16 +146,16 @@ describe("monthly forecast canonical inputs", () => {
       expect.objectContaining({ id: "legacy-line" }),
     ]);
 
-    expect(() => insights.savePlan("forecast-user", {
+    expect(() => insights.savePlan(forecastContext, {
       action: "save-assumptions",
       month: "2026-08",
       openingBalances: [{ accountId: "foreign-account", amountMinor: 1 }],
     })).toThrow("belongs to your profile");
-    expect(insights.planningWorkspace("forecast-user", "2026-08").expectedOpeningMinor).toBe(150000);
+    expect(insights.planningWorkspace(forecastContext, "2026-08").expectedOpeningMinor).toBe(150000);
   });
 
   it("copies assumptions and scenarios without copying obligations or legacy plan items", () => {
-    const copied = insights.savePlan("forecast-user", {
+    const copied = insights.savePlan(forecastContext, {
       action: "copy-assumptions",
       month: "2026-09",
       copyFromMonth: "2026-08",
@@ -170,7 +169,7 @@ describe("monthly forecast canonical inputs", () => {
       expect.objectContaining({ title: "What-if holiday", expectedDate: "2026-09-25" }),
     ]);
     const targetPlan = databaseModule.sqlite
-      .prepare("SELECT id FROM month_plans WHERE user_id = 'forecast-user' AND month = '2026-09'")
+      .prepare("SELECT id FROM month_plans WHERE workspace_id = 'forecast-user' AND month = '2026-09'")
       .get() as { id: string };
     expect(databaseModule.sqlite.prepare("SELECT id FROM month_plan_items WHERE month_plan_id = ?").all(targetPlan.id)).toEqual([]);
   });

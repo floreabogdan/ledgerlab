@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type AuthModule = typeof import("@/lib/auth");
 type CoreModule = typeof import("@/server/core");
 type DatabaseModule = typeof import("@/db");
@@ -14,6 +16,8 @@ let db: DatabaseModule;
 let route: RouteModule;
 let ownerToken: string;
 let otherToken: string;
+const owner = workspaceContext("owner");
+const other = workspaceContext("other");
 
 function routeContext(...segments: string[]) {
   return { params: Promise.resolve({ path: segments }) };
@@ -44,15 +48,11 @@ beforeEach(async () => {
   core = await import("@/server/core");
   route = await import("@/app/api/[...path]/route");
   db.ensureDatabase();
-  db.sqlite.prepare(
-    `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-     VALUES
-       ('owner', 'owner@example.test', 'owner@example.test', 'unused', 'Owner', 'USD'),
-       ('other', 'other@example.test', 'other@example.test', 'unused', 'Other', 'USD')`,
-  ).run();
+  insertTestUser(db.sqlite, { id: "owner", displayName: "Owner" });
+  insertTestUser(db.sqlite, { id: "other", displayName: "Other" });
   db.sqlite.prepare(
     `INSERT INTO accounts
-       (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+       (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
      VALUES ('account', 'owner', 'Current', 'current', 'USD', 0, '2026-01-01')`,
   ).run();
   ownerToken = auth.createSession("owner").token;
@@ -68,14 +68,14 @@ afterEach(() => {
 
 describe("category hierarchy", () => {
   it("supports deep trees with deterministic depth-first ordering and path metadata", () => {
-    const work = core.createCategory("owner", { name: "Work", kind: "income" })!;
-    const home = core.createCategory("owner", { name: "Home", kind: "expense" })!;
-    const repairs = core.createCategory("owner", { name: "Repairs", parentId: home.id, kind: "expense" })!;
-    const appliances = core.createCategory("owner", { name: "Appliances", parentId: home.id, kind: "expense" })!;
-    const kitchen = core.createCategory("owner", { name: "Kitchen", parentId: appliances.id, kind: "expense" })!;
-    const coffee = core.createCategory("owner", { name: "Coffee machine", parentId: kitchen.id, kind: "expense" })!;
+    const work = core.createCategory(owner, { name: "Work", kind: "income" })!;
+    const home = core.createCategory(owner, { name: "Home", kind: "expense" })!;
+    const repairs = core.createCategory(owner, { name: "Repairs", parentId: home.id, kind: "expense" })!;
+    const appliances = core.createCategory(owner, { name: "Appliances", parentId: home.id, kind: "expense" })!;
+    const kitchen = core.createCategory(owner, { name: "Kitchen", parentId: appliances.id, kind: "expense" })!;
+    const coffee = core.createCategory(owner, { name: "Coffee machine", parentId: kitchen.id, kind: "expense" })!;
 
-    const categories = core.listCategories("owner");
+    const categories = core.listCategories(owner);
     expect(categories.map((category) => category.id)).toEqual([
       home.id,
       appliances.id,
@@ -101,67 +101,67 @@ describe("category hierarchy", () => {
   });
 
   it("edits and moves subtrees while preventing cycles, foreign parents, duplicates, and incompatible kinds", () => {
-    const home = core.createCategory("owner", { name: "Home", kind: "expense" })!;
-    const repairs = core.createCategory("owner", { name: "Repairs", parentId: home.id, kind: "expense" })!;
-    const plumbing = core.createCategory("owner", { name: "Plumbing", parentId: repairs.id, kind: "expense" })!;
-    const salary = core.createCategory("owner", { name: "Salary", kind: "income" })!;
-    const foreign = core.createCategory("other", { name: "Private", kind: "expense" })!;
+    const home = core.createCategory(owner, { name: "Home", kind: "expense" })!;
+    const repairs = core.createCategory(owner, { name: "Repairs", parentId: home.id, kind: "expense" })!;
+    const plumbing = core.createCategory(owner, { name: "Plumbing", parentId: repairs.id, kind: "expense" })!;
+    const salary = core.createCategory(owner, { name: "Salary", kind: "income" })!;
+    const foreign = core.createCategory(other, { name: "Private", kind: "expense" })!;
 
-    expect(() => core.updateCategory("owner", home.id, { parentId: plumbing.id })).toThrow(/descendants/i);
-    expect(() => core.updateCategory("owner", repairs.id, { parentId: foreign.id })).toThrow(/parent category not found/i);
-    expect(() => core.updateCategory("owner", repairs.id, { parentId: salary.id })).toThrow(/cannot be nested/i);
-    expect(() => core.updateCategory("other", repairs.id, { name: "Stolen" })).toThrow(/not found/i);
-    expect(() => core.updateCategory("owner", home.id, { kind: "income" })).toThrow(/incompatible subcategories/i);
+    expect(() => core.updateCategory(owner, home.id, { parentId: plumbing.id })).toThrow(/descendants/i);
+    expect(() => core.updateCategory(owner, repairs.id, { parentId: foreign.id })).toThrow(/parent category not found/i);
+    expect(() => core.updateCategory(owner, repairs.id, { parentId: salary.id })).toThrow(/cannot be nested/i);
+    expect(() => core.updateCategory(other, repairs.id, { name: "Stolen" })).toThrow(/not found/i);
+    expect(() => core.updateCategory(owner, home.id, { kind: "income" })).toThrow(/incompatible subcategories/i);
 
-    const moved = core.updateCategory("owner", repairs.id, { name: "Maintenance", parentId: null });
+    const moved = core.updateCategory(owner, repairs.id, { name: "Maintenance", parentId: null });
     expect(moved).toMatchObject({ name: "Maintenance", parentId: null, depth: 0, path: "Maintenance" });
-    expect(core.listCategories("owner").find((category) => category.id === plumbing.id)).toMatchObject({
+    expect(core.listCategories(owner).find((category) => category.id === plumbing.id)).toMatchObject({
       depth: 1,
       path: "Maintenance › Plumbing",
       ancestorIds: [repairs.id],
     });
-    expect(() => core.createCategory("owner", { name: "maintenance", kind: "expense" })).toThrow(/already exists/i);
+    expect(() => core.createCategory(owner, { name: "maintenance", kind: "expense" })).toThrow(/already exists/i);
   });
 
   it("enforces archive and restore integrity across every descendant and ancestor", () => {
-    const root = core.createCategory("owner", { name: "Root", kind: "expense" })!;
-    const child = core.createCategory("owner", { name: "Child", parentId: root.id, kind: "expense" })!;
-    const grandchild = core.createCategory("owner", { name: "Grandchild", parentId: child.id, kind: "expense" })!;
+    const root = core.createCategory(owner, { name: "Root", kind: "expense" })!;
+    const child = core.createCategory(owner, { name: "Child", parentId: root.id, kind: "expense" })!;
+    const grandchild = core.createCategory(owner, { name: "Grandchild", parentId: child.id, kind: "expense" })!;
 
-    expect(() => core.setCategoryArchived("owner", root.id, true)).toThrow(/active subcategories/i);
-    expect(() => core.setCategoryArchived("owner", child.id, true)).toThrow(/active subcategories/i);
-    core.setCategoryArchived("owner", grandchild.id, true);
-    core.setCategoryArchived("owner", child.id, true);
-    core.setCategoryArchived("owner", root.id, true);
+    expect(() => core.setCategoryArchived(owner, root.id, true)).toThrow(/active subcategories/i);
+    expect(() => core.setCategoryArchived(owner, child.id, true)).toThrow(/active subcategories/i);
+    core.setCategoryArchived(owner, grandchild.id, true);
+    core.setCategoryArchived(owner, child.id, true);
+    core.setCategoryArchived(owner, root.id, true);
 
-    expect(() => core.setCategoryArchived("owner", grandchild.id, false)).toThrow(/parent categories/i);
-    core.setCategoryArchived("owner", root.id, false);
-    expect(() => core.setCategoryArchived("owner", grandchild.id, false)).toThrow(/parent categories/i);
-    core.setCategoryArchived("owner", child.id, false);
-    core.setCategoryArchived("owner", grandchild.id, false);
-    expect(core.listCategories("owner")).toHaveLength(3);
+    expect(() => core.setCategoryArchived(owner, grandchild.id, false)).toThrow(/parent categories/i);
+    core.setCategoryArchived(owner, root.id, false);
+    expect(() => core.setCategoryArchived(owner, grandchild.id, false)).toThrow(/parent categories/i);
+    core.setCategoryArchived(owner, child.id, false);
+    core.setCategoryArchived(owner, grandchild.id, false);
+    expect(core.listCategories(owner)).toHaveLength(3);
   });
 
   it("rejects transaction and planned-payment category kinds that do not match their direction", () => {
-    const expenses = core.createCategory("owner", { name: "Expenses", kind: "expense" })!;
-    const income = core.createCategory("owner", { name: "Income", kind: "income" })!;
-    const both = core.createCategory("owner", { name: "Shared", kind: "both" })!;
+    const expenses = core.createCategory(owner, { name: "Expenses", kind: "expense" })!;
+    const income = core.createCategory(owner, { name: "Income", kind: "income" })!;
+    const both = core.createCategory(owner, { name: "Shared", kind: "both" })!;
 
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "income",
       accountId: "account",
       amountMinor: 1_000,
       date: "2026-07-01",
       categoryId: expenses.id,
     })).toThrow(/income category/i);
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       accountId: "account",
       amountMinor: 1_000,
       date: "2026-07-01",
       categoryId: income.id,
     })).toThrow(/expense category/i);
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "transfer",
       accountId: "account",
       transferAccountId: "account",
@@ -169,7 +169,7 @@ describe("category hierarchy", () => {
       date: "2026-07-01",
       categoryId: both.id,
     })).toThrow(/transfer accounts must be different|transfers cannot be assigned/i);
-    expect(() => core.createPlannedPayment("owner", {
+    expect(() => core.createPlannedPayment(owner, {
       name: "Salary",
       expectedAmountMinor: 10_000,
       dueDate: "2026-08-10",
@@ -177,7 +177,7 @@ describe("category hierarchy", () => {
       categoryId: expenses.id,
     })).toThrow(/income category/i);
 
-    expect(core.createTransaction("owner", {
+    expect(core.createTransaction(owner, {
       kind: "income",
       accountId: "account",
       amountMinor: 1_000,

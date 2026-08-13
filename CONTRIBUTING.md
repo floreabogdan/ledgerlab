@@ -50,7 +50,7 @@ Do not run the seed command against a production database or an internet-accessi
 Read [docs/architecture.md](docs/architecture.md) before making a cross-cutting change. In short:
 
 - Keep reusable financial calculations pure in `src/lib/domain`.
-- Keep authenticated, user-scoped orchestration in `src/server`.
+- Keep authenticated, workspace-scoped orchestration and actor attribution in `src/server`.
 - Validate input at the API boundary with Zod.
 - Keep page and component code focused on interaction and presentation.
 - Change the Drizzle schema and checked-in migration together.

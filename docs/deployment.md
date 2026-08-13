@@ -7,11 +7,13 @@ LedgerLab is designed for one self-hosted application instance with a persistent
 - Read the [`AGPL-3.0-only` license](../LICENSE), [security policy](../SECURITY.md), and [backup guide](backups-and-recovery.md).
 - Keep the database and uploaded receipts on a persistent local volume with restricted access.
 - Use HTTPS through a trusted reverse proxy before sending credentials over an untrusted network.
-- Keep `REGISTRATION_MODE=first-user` unless registration is intentionally shared.
-- Claim the first account from a trusted network before making the installation publicly reachable.
-- Create a full backup and prove that you can restore it.
+- Keep `REGISTRATION_MODE=first-user`; household invitation links do not require opening ordinary registration.
+- Claim the installation-administrator account from a trusted network before making the installation publicly reachable.
+- Create a full-installation backup as that administrator and prove that you can restore it.
 
-The default `first-user` policy allows exactly the initial account and then closes registration. An unclaimed public installation can be claimed by its first visitor. After creating the owner, confirm that the registration page reports that signup is closed before widening network access.
+The default `first-user` policy allows exactly the initial ordinary registration and then closes it. That account becomes the installation administrator and owns its personal workspace. An unclaimed public installation can be claimed by its first visitor. After creating the account, confirm that the registration page reports that signup is closed before widening network access.
+
+Household owners can still issue email-bound invitation links while ordinary registration is closed. An invitation admits only its matching email address to that household; it does not grant installation-administrator authority or access to other workspaces.
 
 ## Docker
 
@@ -27,7 +29,7 @@ Open <http://localhost:3000>. The container runs as an unprivileged user and sto
 
 - `/app/data/ledgerlab.db` is the SQLite database.
 - `/app/data/ledgerlab.db-wal` and `/app/data/ledgerlab.db-shm` may exist while SQLite is running.
-- `/app/data/attachments` contains uploaded receipt files by default.
+- `/app/data/attachments` contains uploaded transaction receipts and planned-payment invoices by default.
 
 The `ledgerlab-data` named volume survives container replacement and image rebuilds. Inspect it with `docker volume inspect ledgerlab-data`. Never remove the volume as part of a routine deployment or upgrade.
 
@@ -53,7 +55,21 @@ The first number in `--publish` is the host port. This example exposes LedgerLab
 docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:8080:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
-Use `REGISTRATION_MODE=closed` to disable every new registration. Use `REGISTRATION_MODE=open` only for an intentionally shared installation where anyone who can reach the registration page may create an account. See [Configuration](configuration.md#registration-policy).
+Use `REGISTRATION_MODE=closed` to disable ordinary registration. Use `REGISTRATION_MODE=open` only for an intentionally shared installation where anyone who can reach the registration page may create an account. See [Configuration](configuration.md#registration-policy).
+
+Invitation-based registration remains available in `closed` and `first-user` modes. Owners should send invite links through a confidential channel, revoke unused links, and avoid placing them in logs or tickets.
+
+## Shared-installation boundary
+
+Workspace isolation is an application authorization boundary, not a substitute for host isolation:
+
+- Personal financial records are available only through their one-member personal workspace.
+- All members of a household can view and change all financial records and attachments in that household. Owner and member are administration roles, not separate financial visibility tiers.
+- Switching the active workspace changes one session and never merges records across workspaces.
+- The installation administrator alone can create or restore a full backup containing every user's authentication and financial data. A household owner does not gain that authority merely by owning a household.
+- Anyone with direct access to the database, attachment directory, process memory, or full backups is inside the operator trust boundary and can bypass application authorization.
+
+See the [security policy](../SECURITY.md#privacy-and-authorization-boundaries) before hosting unrelated or mutually distrustful people on one installation.
 
 ## Reverse proxy and HTTPS
 
@@ -89,7 +105,7 @@ If `ATTACHMENTS_DIR` points outside `/app/data`, mount that location separately 
 ## Upgrade
 
 1. Read [CHANGELOG.md](../CHANGELOG.md) and the release notes.
-2. Create and verify a full LedgerLab backup.
+2. As the installation administrator, create and verify a full LedgerLab backup.
 3. Pull the intended image tag or digest.
 4. Stop and remove the old container without removing `ledgerlab-data`.
 5. Start one replacement container with the same volume and environment settings.
@@ -104,7 +120,9 @@ docker rm ledgerlab
 docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
-Migrations move forward. Rolling back application code may require restoring the matching pre-upgrade database backup.
+Migrations move forward. The household migration creates one personal workspace per existing user, keeps its identifier equal to that user's identifier, moves that user's existing financial roots into it, selects it for existing sessions, and assigns installation-administrator authority to the earliest existing user.
+
+There is no supported in-place downgrade. Before the upgrade, preserve a versioned snapshot of the complete stopped data volume (database, SQLite sidecars, and attachments). To roll back, stop every LedgerLab process, restore that pre-upgrade snapshot as one unit, and start the matching older image. Do not run the older image against the migrated database; changes made after the snapshot will be lost. See [Backups and recovery](backups-and-recovery.md#upgrade-rollback).
 
 ## Not currently supported
 
@@ -114,3 +132,5 @@ Migrations move forward. Rolling back application code may require restoring the
 - Hosting the interface and API on different origins
 - Built-in TLS certificate management
 - Built-in SSO, two-factor authentication, or password recovery
+- Private records or per-account permissions inside a household
+- Automatic invitation email delivery

@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 
 import { UI_LANGUAGE_COOKIE_NAME } from "@/i18n/language";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type AuthModule = typeof import("@/lib/auth");
 type CoreModule = typeof import("@/server/core");
@@ -30,6 +32,8 @@ describe("production backend integrity boundaries", () => {
   let route: RouteModule;
   const originalDatabaseUrl = process.env.DATABASE_URL;
   const originalRegistrationMode = process.env.REGISTRATION_MODE;
+  const owner = workspaceContext("owner");
+  const other = workspaceContext("other");
 
   beforeAll(async () => {
     process.env.DATABASE_URL = ":memory:";
@@ -42,14 +46,10 @@ describe("production backend integrity boundaries", () => {
     route = await import("@/app/api/[...path]/route");
     db.ensureDatabase();
 
+    insertTestUser(db.sqlite, { id: "owner", displayName: "Owner", currency: "RON", locale: "ro-RO", timeZone: "Europe/Bucharest" });
+    insertTestUser(db.sqlite, { id: "other", displayName: "Other", currency: "RON", locale: "ro-RO", timeZone: "Europe/Bucharest" });
     db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency, locale, time_zone)
-       VALUES
-         ('owner', 'owner@example.test', 'owner@example.test', 'unused', 'Owner', 'RON', 'ro-RO', 'Europe/Bucharest'),
-         ('other', 'other@example.test', 'other@example.test', 'unused', 'Other', 'RON', 'ro-RO', 'Europe/Bucharest')`,
-    ).run();
-    db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
          ('owner-account', 'owner', 'Owner current', 'current', 'RON', 100000, '2026-07-01'),
          ('owner-savings', 'owner', 'Owner savings', 'savings', 'RON', 50000, '2026-07-01'),
@@ -58,7 +58,7 @@ describe("production backend integrity boundaries", () => {
          ('other-account', 'other', 'Other current', 'current', 'RON', 100000, '2026-07-01')`,
     ).run();
     db.sqlite.prepare(
-      `INSERT INTO categories (id, user_id, name, kind, spending_nature, spending_priority)
+      `INSERT INTO categories (id, workspace_id, name, kind, spending_nature, spending_priority)
        VALUES
          ('owner-category', 'owner', 'Owner expense', 'expense', 'variable', 'essential'),
          ('owner-split-category', 'owner', 'Owner split expense', 'expense', 'variable', 'essential'),
@@ -191,7 +191,7 @@ describe("production backend integrity boundaries", () => {
       uiLanguage: "en",
     });
 
-    const planned = core.createPlannedPayment(stored.id, {
+    const planned = core.createPlannedPayment(workspaceContext(stored.id), {
       name: "Localized recurring payment",
       expectedAmountMinor: 2_500,
       dueDate: "2026-09-01",
@@ -207,12 +207,9 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("creates a native foreign-currency account and posts an explicit cross-currency transfer", async () => {
+    insertTestUser(db.sqlite, { id: "currency-api-owner", email: "currency-api@example.test", displayName: "Currency API", currency: "RON", timeZone: "Europe/Bucharest" });
     db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency, locale, time_zone)
-       VALUES ('currency-api-owner', 'currency-api@example.test', 'currency-api@example.test', 'unused', 'Currency API', 'RON', 'en-US', 'Europe/Bucharest')`,
-    ).run();
-    db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('currency-api-ron', 'currency-api-owner', 'RON source', 'current', 'RON', 100000, '2026-07-01')`,
     ).run();
     const session = auth.createSession("currency-api-owner", {}, db.db);
@@ -270,12 +267,9 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("pays and undoes a foreign-currency planned occurrence through the API", async () => {
+    insertTestUser(db.sqlite, { id: "planned-fx-owner", email: "planned-fx@example.test", displayName: "Planned FX", currency: "RON", timeZone: "Europe/Bucharest" });
     db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency, locale, time_zone)
-       VALUES ('planned-fx-owner', 'planned-fx@example.test', 'planned-fx@example.test', 'unused', 'Planned FX', 'RON', 'en-US', 'Europe/Bucharest')`,
-    ).run();
-    db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('planned-fx-ron', 'planned-fx-owner', 'RON current', 'current', 'RON', 100000, '2026-07-01')`,
     ).run();
     const session = auth.createSession("planned-fx-owner", {}, db.db);
@@ -335,7 +329,7 @@ describe("production backend integrity boundaries", () => {
       fxRateScaled: 460_000_000,
       note: "USD subscription",
     });
-    expect(core.listTransactions("planned-fx-owner", { search: "USD subscription" }))
+    expect(core.listTransactions(workspaceContext("planned-fx-owner"), { search: "USD subscription" }))
       .toEqual([expect.objectContaining({ id: paid.result.transactionId, note: "USD subscription" })]);
     expect(db.sqlite.prepare(
       `SELECT o.paid_amount_minor AS paidAmountMinor, link.applied_amount_minor AS appliedAmountMinor
@@ -361,17 +355,13 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("uses each workspace time zone for calendar-day write guards", () => {
-    db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency, locale, time_zone)
-       VALUES
-         ('west-user', 'west@example.test', 'west@example.test', 'unused', 'West', 'USD', 'en-US', 'America/Los_Angeles'),
-         ('east-user', 'east@example.test', 'east@example.test', 'unused', 'East', 'USD', 'en-US', 'Europe/Bucharest')`,
-    ).run();
+    insertTestUser(db.sqlite, { id: "west-user", displayName: "West", timeZone: "America/Los_Angeles" });
+    insertTestUser(db.sqlite, { id: "east-user", displayName: "East", timeZone: "Europe/Bucharest" });
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-01T01:00:00.000Z"));
     try {
-      expect(() => core.createAccount("west-user", {
+      expect(() => core.createAccount(workspaceContext("west-user"), {
         name: "Future in Los Angeles",
         type: "current",
         currency: "USD",
@@ -379,7 +369,7 @@ describe("production backend integrity boundaries", () => {
         openingDate: "2026-08-01",
       })).toThrow(/future/i);
 
-      expect(core.createAccount("east-user", {
+      expect(core.createAccount(workspaceContext("east-user"), {
         name: "Already today in Bucharest",
         type: "current",
         currency: "USD",
@@ -392,15 +382,15 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("rejects another user's category on primary and split transaction writes", () => {
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       categoryId: "other-category",
       amountMinor: 1_000,
       date: "2026-08-01",
-    })).toThrow(/belongs to your profile/i);
+    })).toThrow(/belongs to this workspace/i);
 
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       amountMinor: 1_000,
@@ -409,14 +399,14 @@ describe("production backend integrity boundaries", () => {
         { categoryId: "owner-category", amountMinor: 500 },
         { categoryId: "other-category", amountMinor: 500 },
       ],
-    })).toThrow(/belongs to your profile/i);
+    })).toThrow(/belongs to this workspace/i);
 
-    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions WHERE user_id = 'owner'").get())
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions WHERE workspace_id = 'owner'").get())
       .toEqual({ count: 0 });
   });
 
   it("does not let skipping erase the state of a partially paid occurrence", () => {
-    const occurrence = core.createPlannedPayment("owner", {
+    const occurrence = core.createPlannedPayment(owner, {
       name: "Part-paid bill",
       expectedAmountMinor: 2_000,
       dueDate: "2026-08-10",
@@ -424,7 +414,7 @@ describe("production backend integrity boundaries", () => {
       accountId: "owner-account",
       categoryId: "owner-category",
     });
-    core.payPlannedOccurrence("owner", occurrence.id, {
+    core.payPlannedOccurrence(owner, occurrence.id, {
       amountMinor: 750,
       date: "2026-08-01",
       accountId: "owner-account",
@@ -434,9 +424,9 @@ describe("production backend integrity boundaries", () => {
     const linkedTransaction = db.sqlite.prepare(
       "SELECT transaction_id AS id FROM planned_payment_transactions WHERE occurrence_id = ?",
     ).get(occurrence.id) as { id: string };
-    expect(() => core.voidTransaction("owner", linkedTransaction.id)).toThrow(/planned-payment undo/i);
+    expect(() => core.voidTransaction(owner, linkedTransaction.id)).toThrow(/planned-payment undo/i);
 
-    expect(() => core.skipPlannedOccurrence("owner", occurrence.id, "Skip the rest"))
+    expect(() => core.skipPlannedOccurrence(owner, occurrence.id, "Skip the rest"))
       .toThrow(/undo recorded payments/i);
     expect(db.sqlite.prepare(
       "SELECT status, paid_amount_minor AS paidAmountMinor FROM planned_payment_occurrences WHERE id = ?",
@@ -447,7 +437,7 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("exposes external IDs without exposing another user's transactions", () => {
-    const created = core.createTransaction("owner", {
+    const created = core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       categoryId: "owner-category",
@@ -455,15 +445,15 @@ describe("production backend integrity boundaries", () => {
       date: "2026-07-11",
       externalId: "bank-row-42",
     });
-    expect(core.listTransactions("owner").find((row) => row.id === created.id)).toMatchObject({
+    expect(core.listTransactions(owner).find((row) => row.id === created.id)).toMatchObject({
       externalId: "bank-row-42",
       accountId: "owner-account",
     });
-    expect(core.listTransactions("other")).toEqual([]);
+    expect(core.listTransactions(other)).toEqual([]);
   });
 
   it("finds split transactions through either assigned split category", () => {
-    const created = core.createTransaction("owner", {
+    const created = core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       amountMinor: 1_000,
@@ -474,9 +464,9 @@ describe("production backend integrity boundaries", () => {
       ],
     });
 
-    expect(core.listTransactions("owner", { categoryId: "owner-split-category" }).map((row) => row.id))
+    expect(core.listTransactions(owner, { categoryId: "owner-split-category" }).map((row) => row.id))
       .toContain(created.id);
-    expect(core.listTransactionPage("owner", { search: "Owner split expense" }).transactions.map((row) => row.id))
+    expect(core.listTransactionPage(owner, { search: "Owner split expense" }).transactions.map((row) => row.id))
       .toContain(created.id);
   });
 
@@ -486,7 +476,7 @@ describe("production backend integrity boundaries", () => {
       ["owner-account", "owner-card"],
       ["owner-loan", "owner-account"],
     ]) {
-      expect(() => core.createTransaction("owner", {
+      expect(() => core.createTransaction(owner, {
         kind: "transfer",
         accountId,
         transferAccountId,
@@ -495,7 +485,7 @@ describe("production backend integrity boundaries", () => {
       })).toThrow(/dedicated loan or credit-card workflow/i);
     }
     for (const accountId of ["owner-loan", "owner-card"]) {
-      expect(() => core.createTransaction("owner", {
+      expect(() => core.createTransaction(owner, {
         kind: "adjustment",
         accountId,
         amountMinor: 1_000,
@@ -511,13 +501,13 @@ describe("production backend integrity boundaries", () => {
       { kind: "expense" as const, amountMinor: 2_000 },
       { kind: "refund" as const, amountMinor: 300 },
     ]) {
-      core.createTransaction("owner", {
+      core.createTransaction(owner, {
         ...transaction,
         accountId: "owner-account",
         date: "2026-07-14",
       });
     }
-    const page = core.listTransactionPage("owner", {
+    const page = core.listTransactionPage(owner, {
       from: "2026-07-14",
       to: "2026-07-14",
       limit: 1,
@@ -548,12 +538,12 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("requires one owned account before applying native-currency amount filters", async () => {
-    expect(() => core.listTransactionPage("owner", { minMinor: 100 }))
+    expect(() => core.listTransactionPage(owner, { minMinor: 100 }))
       .toThrow(/choose one account before filtering by amount/i);
-    expect(() => core.listTransactionPage("owner", { accountId: "other-account", maxMinor: 10_000 }))
-      .toThrow(/belongs to your profile/i);
+    expect(() => core.listTransactionPage(owner, { accountId: "other-account", maxMinor: 10_000 }))
+      .toThrow(/belongs to this workspace/i);
 
-    expect(core.listTransactionPage("owner", {
+    expect(core.listTransactionPage(owner, {
       accountId: "owner-account",
       minMinor: 100,
     })).toMatchObject({ summary: { currency: "RON" } });
@@ -572,7 +562,7 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("clears both pending transfer legs atomically and enforces ownership", async () => {
-    const pending = core.createTransaction("owner", {
+    const pending = core.createTransaction(owner, {
       kind: "transfer",
       status: "pending",
       accountId: "owner-account",
@@ -580,7 +570,7 @@ describe("production backend integrity boundaries", () => {
       amountMinor: 2_000,
       date: "2026-08-01",
     });
-    expect(() => core.clearPendingTransaction("other", pending.id)).toThrow(/not found/i);
+    expect(() => core.clearPendingTransaction(other, pending.id)).toThrow(/not found/i);
     const session = auth.createSession("owner", {}, db.db);
     const response = await route.POST(
       new NextRequest(`http://localhost:3000/api/transactions/${pending.id}/clear`, {
@@ -603,17 +593,17 @@ describe("production backend integrity boundaries", () => {
   it("rejects future transactions across direct and planned-payment posting paths", () => {
     const tomorrow = addDays(bucharestToday(), 1);
     const transactionCount = db.sqlite.prepare(
-      "SELECT COUNT(*) AS count FROM transactions WHERE user_id = ?",
+      "SELECT COUNT(*) AS count FROM transactions WHERE workspace_id = ?",
     ).get("owner") as { count: number };
 
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       amountMinor: 8_701,
       date: tomorrow,
     })).toThrow(/transactions cannot be dated in the future.*planned payments/i);
 
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       status: "pending",
       accountId: "owner-account",
@@ -621,13 +611,13 @@ describe("production backend integrity boundaries", () => {
       date: tomorrow,
     })).toThrow(/transactions cannot be dated in the future.*planned payments/i);
 
-    const occurrence = core.createPlannedPayment("owner", {
+    const occurrence = core.createPlannedPayment(owner, {
       name: "Tomorrow's guarded payment",
       expectedAmountMinor: 8_703,
       dueDate: tomorrow,
       accountId: "owner-account",
     });
-    expect(() => core.payPlannedOccurrence("owner", occurrence.id, {
+    expect(() => core.payPlannedOccurrence(owner, occurrence.id, {
       amountMinor: 8_703,
       date: tomorrow,
       accountId: "owner-account",
@@ -639,7 +629,7 @@ describe("production backend integrity boundaries", () => {
       "SELECT COUNT(*) AS count FROM planned_payment_transactions WHERE occurrence_id = ?",
     ).get(occurrence.id)).toEqual({ count: 0 });
     expect(db.sqlite.prepare(
-      "SELECT COUNT(*) AS count FROM transactions WHERE user_id = ?",
+      "SELECT COUNT(*) AS count FROM transactions WHERE workspace_id = ?",
     ).get("owner")).toEqual({ count: transactionCount.count });
   });
 
@@ -647,11 +637,11 @@ describe("production backend integrity boundaries", () => {
     const tomorrow = addDays(bucharestToday(), 1);
     db.sqlite.prepare(
       `INSERT INTO transactions
-        (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at)
+        (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
        VALUES ('legacy-future-pending', 'owner', 'owner-account', 'expense', 'pending', -8704, 'RON', ?)`,
     ).run(tomorrow);
 
-    expect(() => core.clearPendingTransaction("owner", "legacy-future-pending"))
+    expect(() => core.clearPendingTransaction(owner, "legacy-future-pending"))
       .toThrow(/cannot be cleared before/i);
     expect(db.sqlite.prepare("SELECT status FROM transactions WHERE id = ?").get("legacy-future-pending"))
       .toEqual({ status: "pending" });
@@ -659,16 +649,16 @@ describe("production backend integrity boundaries", () => {
 
   it("rejects future opening dates when creating or updating an account", () => {
     const tomorrow = addDays(bucharestToday(), 1);
-    expect(() => core.createAccount("owner", {
+    expect(() => core.createAccount(owner, {
       name: "Future opening account",
       type: "cash",
       openingDate: tomorrow,
     })).toThrow(/opening date cannot be in the future/i);
     expect(db.sqlite.prepare(
-      "SELECT COUNT(*) AS count FROM accounts WHERE user_id = ? AND name = ?",
+      "SELECT COUNT(*) AS count FROM accounts WHERE workspace_id = ? AND name = ?",
     ).get("owner", "Future opening account")).toEqual({ count: 0 });
 
-    expect(() => core.updateAccount("owner", "owner-account", { openingDate: tomorrow }))
+    expect(() => core.updateAccount(owner, "owner-account", { openingDate: tomorrow }))
       .toThrow(/opening date cannot be in the future/i);
     expect(db.sqlite.prepare(
       "SELECT opening_balance_date AS openingDate FROM accounts WHERE id = ?",
@@ -676,16 +666,16 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("returns voided transactions only when explicitly requested", () => {
-    const created = core.createTransaction("owner", {
+    const created = core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       amountMinor: 444,
       date: "2026-07-16",
     });
-    core.voidTransaction("owner", created.id);
+    core.voidTransaction(owner, created.id);
 
-    expect(core.listTransactionPage("owner", { from: "2026-07-16", to: "2026-07-16" }).total).toBe(0);
-    const voided = core.listTransactionPage("owner", {
+    expect(core.listTransactionPage(owner, { from: "2026-07-16", to: "2026-07-16" }).total).toBe(0);
+    const voided = core.listTransactionPage(owner, {
       from: "2026-07-16",
       to: "2026-07-16",
       status: "void",
@@ -695,7 +685,7 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("materializes a requested occurrence beyond 600 on the first list call", () => {
-    const created = core.createPlannedPayment("owner", {
+    const created = core.createPlannedPayment(owner, {
       name: "Long-running daily plan",
       expectedAmountMinor: 100,
       dueDate: "2024-01-01",
@@ -705,19 +695,19 @@ describe("production backend integrity boundaries", () => {
       "UPDATE recurrence_rules SET occurrence_count = 605 WHERE id = (SELECT recurrence_rule_id FROM planned_payments WHERE id = ?)",
     ).run(created.plannedPaymentId);
 
-    expect(core.listPlannedPayments("owner", { from: "2025-08-27", to: "2025-08-27" }))
+    expect(core.listPlannedPayments(owner, { from: "2025-08-27", to: "2025-08-27" }))
       .toEqual([expect.objectContaining({ plannedPaymentId: created.plannedPaymentId, dueDate: "2025-08-27" })]);
     expect(db.sqlite.prepare(
       "SELECT COUNT(*) AS count, MAX(due_date) AS latest FROM planned_payment_occurrences WHERE planned_payment_id = ?",
     ).get(created.plannedPaymentId)).toEqual({ count: 605, latest: "2025-08-27" });
-    core.materializePlannedOccurrences("owner", "2030-12-31");
+    core.materializePlannedOccurrences(owner, "2030-12-31");
     expect(db.sqlite.prepare(
       "SELECT COUNT(*) AS count FROM planned_payment_occurrences WHERE planned_payment_id = ?",
     ).get(created.plannedPaymentId)).toEqual({ count: 605 });
   });
 
   it("preserves archived owned metadata for a planned-payment workflow only", () => {
-    const created = core.createPlannedPayment("owner", {
+    const created = core.createPlannedPayment(owner, {
       name: "Archived metadata plan",
       expectedAmountMinor: 900,
       dueDate: "2026-08-20",
@@ -729,14 +719,14 @@ describe("production backend integrity boundaries", () => {
     const merchant = db.sqlite.prepare(
       "SELECT merchant_id AS merchantId FROM planned_payments WHERE id = ?",
     ).get(created.plannedPaymentId) as { merchantId: string };
-    core.setCategoryArchived("owner", "owner-workflow-category", true);
-    core.setMerchantArchived("owner", merchant.merchantId, true);
-    core.materializePlannedOccurrences("owner", "2026-08-21");
+    core.setCategoryArchived(owner, "owner-workflow-category", true);
+    core.setMerchantArchived(owner, merchant.merchantId, true);
+    core.materializePlannedOccurrences(owner, "2026-08-21");
     const occurrence = db.sqlite.prepare(
       "SELECT id FROM planned_payment_occurrences WHERE planned_payment_id = ? AND due_date = '2026-08-21'",
     ).get(created.plannedPaymentId) as { id: string };
 
-    const paid = core.payPlannedOccurrence("owner", occurrence.id, {
+    const paid = core.payPlannedOccurrence(owner, occurrence.id, {
       amountMinor: 900,
       date: "2026-08-01",
       accountId: "owner-account",
@@ -747,13 +737,13 @@ describe("production backend integrity boundaries", () => {
       categoryId: "owner-workflow-category",
       merchantId: merchant.merchantId,
     });
-    expect(core.listPlannedPayments("owner", { from: "2026-08-21", to: "2026-08-21" }))
+    expect(core.listPlannedPayments(owner, { from: "2026-08-21", to: "2026-08-21" }))
       .toEqual([expect.objectContaining({
         plannedPaymentId: created.plannedPaymentId,
         spendingNature: "fixed",
         spendingPriority: "essential",
       })]);
-    expect(() => core.createTransaction("owner", {
+    expect(() => core.createTransaction(owner, {
       kind: "expense",
       accountId: "owner-account",
       categoryId: "owner-workflow-category",
@@ -763,7 +753,7 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("cancels an unpaid planned occurrence through the API and undo restores it", async () => {
-    const occurrence = core.createPlannedPayment("owner", {
+    const occurrence = core.createPlannedPayment(owner, {
       name: "Cancelable plan",
       expectedAmountMinor: 700,
       dueDate: "2026-08-23",
@@ -786,13 +776,13 @@ describe("production backend integrity boundaries", () => {
     expect(db.sqlite.prepare(
       "SELECT status, cancelled_at AS cancelledAt FROM planned_payment_occurrences WHERE id = ?",
     ).get(occurrence.id)).toEqual({ status: "cancelled", cancelledAt: expect.any(String) });
-    expect(() => core.payPlannedOccurrence("owner", occurrence.id, {
+    expect(() => core.payPlannedOccurrence(owner, occurrence.id, {
       amountMinor: 700,
       date: "2026-08-01",
       accountId: "owner-account",
     })).toThrow(/cancelled payment cannot be paid/i);
 
-    core.undoPlannedOccurrence("owner", occurrence.id);
+    core.undoPlannedOccurrence(owner, occurrence.id);
     expect(db.sqlite.prepare(
       "SELECT status, skipped_at AS skippedAt, cancelled_at AS cancelledAt FROM planned_payment_occurrences WHERE id = ?",
     ).get(occurrence.id)).toEqual({ status: "planned", skippedAt: null, cancelledAt: null });
@@ -828,23 +818,19 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("changes reporting currency without relabeling accountless planned payments or budgets", async () => {
+    insertTestUser(db.sqlite, { id: "plan-currency-lock", email: "plan-lock@example.test", displayName: "Plan Lock", currency: "RON" });
+    insertTestUser(db.sqlite, { id: "budget-currency-lock", email: "budget-lock@example.test", displayName: "Budget Lock", currency: "RON" });
     db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-       VALUES
-         ('plan-currency-lock', 'plan-lock@example.test', 'plan-lock@example.test', 'unused', 'Plan Lock', 'RON'),
-         ('budget-currency-lock', 'budget-lock@example.test', 'budget-lock@example.test', 'unused', 'Budget Lock', 'RON')`,
-    ).run();
-    db.sqlite.prepare(
-      `INSERT INTO categories (id, user_id, name, kind)
+      `INSERT INTO categories (id, workspace_id, name, kind)
        VALUES ('budget-lock-category', 'budget-currency-lock', 'Budget category', 'expense')`,
     ).run();
-    const planned = core.createPlannedPayment("plan-currency-lock", {
+    const planned = core.createPlannedPayment(workspaceContext("plan-currency-lock"), {
       name: "Accountless plan",
       expectedAmountMinor: 1_000,
       dueDate: "2026-09-01",
     });
     db.sqlite.prepare(
-      `INSERT INTO budgets (id, user_id, month, category_id, amount_minor, currency)
+      `INSERT INTO budgets (id, workspace_id, month, category_id, amount_minor, currency)
        VALUES ('budget-lock-row', 'budget-currency-lock', '2026-09', 'budget-lock-category', 1000, 'RON')`,
     ).run();
 
@@ -861,9 +847,9 @@ describe("production backend integrity boundaries", () => {
           body: JSON.stringify({
             action: "preferences",
             displayName: "Currency Lock",
-            currency: "EUR",
+            workspaceCurrency: "EUR",
             locale: "en-RO",
-            timeZone: "Europe/Bucharest",
+            workspaceTimeZone: "Europe/Bucharest",
             compactTables: true,
           }),
         }),
@@ -871,9 +857,9 @@ describe("production backend integrity boundaries", () => {
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
-        user: { defaultCurrency: "EUR" },
+        preferences: { currency: "EUR", timeZone: "Europe/Bucharest" },
       });
-      expect(db.sqlite.prepare("SELECT default_currency AS currency FROM users WHERE id = ?").get(userId))
+      expect(db.sqlite.prepare("SELECT default_currency AS currency FROM workspaces WHERE id = ?").get(userId))
         .toEqual({ currency: "EUR" });
     }
 
@@ -884,15 +870,15 @@ describe("production backend integrity boundaries", () => {
   });
 
   it("returns workspace currency from planned and budget API payloads", async () => {
-    db.sqlite.prepare("UPDATE users SET default_currency = 'EUR' WHERE id = 'owner'").run();
-    db.sqlite.prepare("UPDATE accounts SET currency = 'EUR' WHERE user_id = 'owner'").run();
+    db.sqlite.prepare("UPDATE workspaces SET default_currency = 'EUR' WHERE id = 'owner'").run();
+    db.sqlite.prepare("UPDATE accounts SET currency = 'EUR' WHERE workspace_id = 'owner'").run();
     // This fixture is checking response envelopes rather than FX conversion.
     // Keep its directly relabelled legacy rows internally consistent; profile
     // changes in production never rewrite these native denominations.
-    db.sqlite.prepare("UPDATE transactions SET currency = 'EUR' WHERE user_id = 'owner'").run();
-    db.sqlite.prepare("UPDATE planned_payments SET currency = 'EUR' WHERE user_id = 'owner'").run();
-    db.sqlite.prepare("UPDATE budgets SET currency = 'EUR' WHERE user_id = 'owner'").run();
-    const eurPlan = core.createPlannedPayment("owner", {
+    db.sqlite.prepare("UPDATE transactions SET currency = 'EUR' WHERE workspace_id = 'owner'").run();
+    db.sqlite.prepare("UPDATE planned_payments SET currency = 'EUR' WHERE workspace_id = 'owner'").run();
+    db.sqlite.prepare("UPDATE budgets SET currency = 'EUR' WHERE workspace_id = 'owner'").run();
+    const eurPlan = core.createPlannedPayment(owner, {
       name: "EUR plan",
       expectedAmountMinor: 2_500,
       dueDate: "2026-08-20",
@@ -902,7 +888,7 @@ describe("production backend integrity boundaries", () => {
     expect(eurPlan.currency).toBe("EUR");
     expect(db.sqlite.prepare("SELECT currency FROM planned_payments WHERE id = ?").get(eurPlan.plannedPaymentId))
       .toEqual({ currency: "EUR" });
-    expect(core.listPlannedPayments("owner", { from: "2026-08-20", to: "2026-08-20" }))
+    expect(core.listPlannedPayments(owner, { from: "2026-08-20", to: "2026-08-20" }))
       .toEqual(expect.arrayContaining([expect.objectContaining({ plannedPaymentId: eurPlan.plannedPaymentId, currency: "EUR" })]));
     const session = auth.createSession("owner", {}, db.db);
     const headers = { cookie: `${auth.SESSION_COOKIE_NAME}=${session.token}` };
@@ -943,7 +929,7 @@ describe("production backend integrity boundaries", () => {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toEqual({ error: { code: "CROSS_ORIGIN_FORBIDDEN" } });
     }
-    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM tags WHERE user_id = 'owner'").get())
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM tags WHERE workspace_id = 'owner'").get())
       .toEqual({ count: 0 });
   });
 
@@ -978,7 +964,7 @@ describe("production backend integrity boundaries", () => {
       { params: Promise.resolve({ path: ["tags"] }) },
     );
     expect(declaredResponse.status).toBe(413);
-    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM tags WHERE user_id = 'owner'").get())
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM tags WHERE workspace_id = 'owner'").get())
       .toEqual({ count: 0 });
   });
 });

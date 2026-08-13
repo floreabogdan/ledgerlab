@@ -13,7 +13,7 @@ import {
   readSessionToken,
   revokeSession,
   serializeExpiredSessionCookie,
-  validateSessionToken,
+  validateWorkspaceSessionToken,
   verifyPassword,
 } from "@/lib/auth";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@/i18n/language";
 import { createServerTranslator } from "@/i18n/server";
 import { HttpError, jsonError, readJson } from "@/lib/api-response";
+import { requireWorkspaceOwner } from "@/lib/workspace-context";
 import { clearRateLimit, consumeRateLimit, opaqueRateLimitKey } from "@/lib/rate-limit";
 import {
   COMMON_CURRENCY_CODES,
@@ -62,7 +63,6 @@ import {
   clearPendingTransaction,
   createAccount,
   createCategory,
-  createDefaultCategories,
   createPlannedPayment,
   createTag,
   createTransaction,
@@ -83,7 +83,9 @@ import {
   updateAccount,
   updateCategory,
   updateMerchant,
+  updatePlannedPayment,
   updateTag,
+  updateTransaction,
   voidTransaction,
 } from "@/server/core";
 import {
@@ -114,16 +116,35 @@ import {
   previewImport,
   restoreBackup,
 } from "@/server/portability";
-import { getUserCalendarContext, getUserRegionalSettings } from "@/server/user-settings";
+import { getWorkspaceCalendarContext, getWorkspaceFinancialSettings } from "@/server/user-settings";
 import { prepareTransactionFx, prepareTransferFx, resolveBnrQuote } from "@/server/fx";
 import { hydrateReportingRates, toReportingMinor } from "@/server/reporting-currency";
 import {
   attachmentContentDisposition,
   attachmentDownload,
   deleteAttachment,
+  listPlannedPaymentAttachments,
   listTransactionAttachments,
+  uploadPlannedPaymentAttachment,
   uploadTransactionAttachment,
 } from "@/server/attachments";
+import {
+  acceptWorkspaceInvitation,
+  activateWorkspace,
+  createHouseholdWorkspace,
+  createWorkspaceInvitation,
+  deleteHouseholdWorkspace,
+  hashWorkspaceInvitationToken,
+  inspectWorkspaceInvitation,
+  leaveWorkspace,
+  listUserWorkspaces,
+  removeWorkspaceMember,
+  resolveInvitationRegistrationClaim,
+  revokeWorkspaceInvitation,
+  setWorkspaceMemberRole,
+  transferWorkspaceOwnership,
+  workspaceManagement,
+} from "@/server/workspaces";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -250,7 +271,7 @@ function assertSameOrigin(request: NextRequest) {
 function sessionFromRequest(request: NextRequest) {
   ensureDatabase();
   const token = readSessionToken(request.headers.get("cookie"));
-  const valid = validateSessionToken(token);
+  const valid = validateWorkspaceSessionToken(token);
   if (!valid) {
     throw new HttpError(401, {
       code: "AUTHENTICATION_REQUIRED",
@@ -260,6 +281,43 @@ function sessionFromRequest(request: NextRequest) {
   return { ...valid, token };
 }
 
+/**
+ * Re-resolve authorization after an awaited body read, password hash, or
+ * network lookup. A concurrent workspace switch, membership removal, or role
+ * change invalidates the in-flight request instead of letting it finish with a
+ * stale WorkspaceContext.
+ */
+function revalidateRequestWorkspace(
+  request: NextRequest,
+  expected: ReturnType<typeof sessionFromRequest>,
+) {
+  const current = sessionFromRequest(request);
+  if (
+    current.session.id !== expected.session.id
+    || current.context.workspaceId !== expected.context.workspaceId
+    || current.context.role !== expected.context.role
+  ) {
+    throw new HttpError(409, {
+      code: "WORKSPACE_CONTEXT_CHANGED",
+      message: "Workspace access changed while this request was in progress. Retry from the current workspace",
+    });
+  }
+  return current;
+}
+
+function requireInstallationAdministrator(userId: string) {
+  const administrator = one<{ isInstallationAdmin: number }>(
+    "SELECT is_installation_admin AS isInstallationAdmin FROM users WHERE id = ?",
+    [userId],
+  );
+  if (!administrator?.isInstallationAdmin) {
+    throw new HttpError(403, {
+      code: "INSTALLATION_ADMIN_REQUIRED",
+      message: "Installation administrator access is required for full backup and restore",
+    });
+  }
+}
+
 function clientMetadata(request: NextRequest) {
   return {
     userAgent: request.headers.get("user-agent")?.slice(0, 500) || undefined,
@@ -267,8 +325,15 @@ function clientMetadata(request: NextRequest) {
   };
 }
 
-function authResponse(user: SafeUser, token: string, expiresAt: Date, request: NextRequest, status = 200) {
-  const response = NextResponse.json({ user }, { status });
+function authResponse(
+  user: SafeUser,
+  token: string,
+  expiresAt: Date,
+  request: NextRequest,
+  status = 200,
+  extra: Record<string, unknown> = {},
+) {
+  const response = NextResponse.json({ user, ...extra }, { status });
   const secure = requestProtocol(request) === "https:";
   response.cookies.set(SESSION_COOKIE_NAME, token, {
     expires: expiresAt,
@@ -304,6 +369,11 @@ async function authRoute(request: NextRequest, segments: string[]) {
       maxAttempts: 10,
     }]);
     try {
+      const translator = createServerTranslator({
+        language: resolveConfiguredUiLanguage(input.uiLanguage),
+        formattingLocale: input.locale,
+        timeZone: input.timeZone,
+      });
       const user = await createUser({
         email: input.email,
         password: input.password,
@@ -312,17 +382,58 @@ async function authRoute(request: NextRequest, segments: string[]) {
         locale: input.locale,
         timeZone: input.timeZone,
         uiLanguage: input.uiLanguage,
-      }, appDb, { requireEmptyDatabase: registration.mode === "first-user" });
-      createDefaultCategories(user.id, createServerTranslator({
-        language: resolveConfiguredUiLanguage(user.uiLanguage),
-        formattingLocale: user.locale,
-        timeZone: user.timeZone,
-      }));
+      }, appDb, {
+        requireEmptyDatabase: registration.mode === "first-user",
+        defaultCategoryTranslator: translator,
+      });
       const session = createSession(user.id, clientMetadata(request));
       return authResponse(user, session.token, session.expiresAt, request, 201);
     } catch (error) {
       if (error instanceof AuthError) {
         const status = error.code === "EMAIL_TAKEN" ? 409 : error.code === "REGISTRATION_CLOSED" ? 403 : 422;
+        throw new HttpError(status, { code: error.code, message: error.message });
+      }
+      throw error;
+    }
+  }
+  if (request.method === "POST" && action === "invitation-register") {
+    const raw = object(await readJson(request, AUTH_JSON_BODY_BYTES));
+    const input = registerInput.parse(raw);
+    const invitationToken = text(raw.invitationToken);
+    enforceRateLimits([
+      { key: opaqueRateLimitKey("invite-register-address", clientAddress(request)), maxAttempts: 20 },
+      { key: opaqueRateLimitKey("invite-register-token", invitationToken), maxAttempts: 10 },
+    ]);
+    const claim = resolveInvitationRegistrationClaim(invitationToken, input.email);
+    try {
+      const translator = createServerTranslator({
+        language: resolveConfiguredUiLanguage(input.uiLanguage),
+        formattingLocale: input.locale,
+        timeZone: input.timeZone,
+      });
+      const user = await createUser({
+        email: input.email,
+        password: input.password,
+        displayName: input.name,
+        currency: input.currency,
+        locale: input.locale,
+        timeZone: input.timeZone,
+        uiLanguage: input.uiLanguage,
+      }, appDb, {
+        defaultCategoryTranslator: translator,
+        invitation: {
+          id: claim.invitationId,
+          tokenHash: hashWorkspaceInvitationToken(invitationToken),
+          workspaceId: claim.workspaceId,
+          role: claim.role,
+        },
+      });
+      const session = createSession(user.id, clientMetadata(request));
+      const workspace = activateWorkspace(user.id, session.sessionId, claim.workspaceId);
+      return authResponse(user, session.token, session.expiresAt, request, 201, { workspace });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        const status = error.code === "EMAIL_TAKEN" || error.code === "INVITATION_UNAVAILABLE" ? 409 : 422;
         throw new HttpError(status, { code: error.code, message: error.message });
       }
       throw error;
@@ -358,7 +469,13 @@ async function authRoute(request: NextRequest, segments: string[]) {
     return response;
   }
   if (request.method === "GET" && (action === "session" || action === "me")) {
-    return NextResponse.json({ user: sessionFromRequest(request).user });
+    const current = sessionFromRequest(request);
+    return NextResponse.json({
+      user: current.user,
+      workspace: current.workspace,
+      role: current.context.role,
+      workspaces: listUserWorkspaces(current.user.id, current.workspace.id),
+    });
   }
   throw new HttpError(404, {
     code: "AUTH_ENDPOINT_NOT_FOUND",
@@ -462,8 +579,20 @@ async function getRoute(request: NextRequest, segments: string[]) {
     });
   }
   if (segments[0] === "auth") return authRoute(request, segments);
-  const { user } = sessionFromRequest(request);
+  if (segments[0] === "invitations" && segments[1]) {
+    return NextResponse.json({ invitation: inspectWorkspaceInvitation(segments[1]) });
+  }
+  const currentSession = sessionFromRequest(request);
+  const { user, context, workspace } = currentSession;
   const endpoint = segments[0];
+
+  if (endpoint === "workspaces") {
+    if (segments[1] === "current") {
+      return NextResponse.json(workspaceManagement(context));
+    }
+    const workspaces = listUserWorkspaces(user.id, workspace.id);
+    return NextResponse.json({ workspaces, activeWorkspace: workspaces.find((item) => item.active) ?? null });
+  }
 
   if (endpoint === "fx" && segments[1] === "quote") {
     const date = queryDate(request, "date");
@@ -475,22 +604,26 @@ async function getRoute(request: NextRequest, segments: string[]) {
         message: "FX quotes require date, from, and to query parameters",
       });
     }
-    return NextResponse.json({ quote: await resolveBnrQuote(date, from, to) }, {
+    const quote = await resolveBnrQuote(date, from, to);
+    revalidateRequestWorkspace(request, currentSession);
+    return NextResponse.json({ quote }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   }
   if (endpoint === "dashboard") {
-    await hydrateReportingRates(user.id);
-    return NextResponse.json(dashboard(user.id, queryRange(request)));
+    await hydrateReportingRates(context);
+    revalidateRequestWorkspace(request, currentSession);
+    return NextResponse.json(dashboard(context, queryRange(request)));
   }
   if (endpoint === "accounts") {
-    await hydrateReportingRates(user.id);
-    return NextResponse.json(accountsPayload(user.id, queryRange(request)));
+    await hydrateReportingRates(context);
+    revalidateRequestWorkspace(request, currentSession);
+    return NextResponse.json(accountsPayload(context, queryRange(request)));
   }
   if (endpoint === "liabilities") {
     const accountId = segments[1];
-    if (accountId) return NextResponse.json(liabilityAccountDetail(user.id, accountId));
-    return NextResponse.json({ obligations: listLiabilityObligations(user.id, {
+    if (accountId) return NextResponse.json(liabilityAccountDetail(context, accountId));
+    return NextResponse.json({ obligations: listLiabilityObligations(context, {
       from: queryDate(request, "from"),
       to: queryDate(request, "to"),
       status: request.nextUrl.searchParams.get("status") ?? undefined,
@@ -498,7 +631,7 @@ async function getRoute(request: NextRequest, segments: string[]) {
   }
   if (endpoint === "categories") {
     const includeArchived = request.nextUrl.searchParams.get("archived") === "all";
-    const categories = listCategories(user.id, includeArchived).map((category) => ({
+    const categories = listCategories(context, includeArchived).map((category) => ({
       ...category,
       spendingType: category.spendingNature,
       essential: category.spendingPriority === "essential",
@@ -506,19 +639,22 @@ async function getRoute(request: NextRequest, segments: string[]) {
     return NextResponse.json({ categories });
   }
   if (endpoint === "tags") {
-    return NextResponse.json({ tags: listTags(user.id, request.nextUrl.searchParams.get("archived") === "all") });
+    return NextResponse.json({ tags: listTags(context, request.nextUrl.searchParams.get("archived") === "all") });
   }
   if (endpoint === "merchants") {
     return NextResponse.json({
-      merchants: listMerchants(user.id, request.nextUrl.searchParams.get("archived") === "all"),
-      categories: listCategories(user.id),
+      merchants: listMerchants(context, request.nextUrl.searchParams.get("archived") === "all"),
+      categories: listCategories(context),
     });
   }
   if (endpoint === "transactions" && segments[1] && segments[2] === "attachments") {
-    return NextResponse.json({ attachments: listTransactionAttachments(user.id, segments[1]) });
+    return NextResponse.json({ attachments: listTransactionAttachments(context, segments[1]) });
+  }
+  if (endpoint === "planned" && segments[1] && segments[2] === "attachments") {
+    return NextResponse.json({ attachments: listPlannedPaymentAttachments(context, segments[1]) });
   }
   if (endpoint === "attachments" && segments[1] && segments[2] === "download") {
-    const attachment = attachmentDownload(user.id, segments[1]);
+    const attachment = attachmentDownload(context, segments[1]);
     return new Response(attachment.content, {
       headers: {
         "Content-Type": attachment.mimeType || "application/octet-stream",
@@ -530,10 +666,11 @@ async function getRoute(request: NextRequest, segments: string[]) {
     });
   }
   if (endpoint === "transactions") {
-    await hydrateReportingRates(user.id, {
+    await hydrateReportingRates(context, {
       from: queryDate(request, "from"),
       to: queryDate(request, "to"),
     });
+    revalidateRequestWorkspace(request, currentSession);
     const minMinor = queryInteger(request, "minMinor");
     const maxMinor = queryInteger(request, "maxMinor");
     const accountId = request.nextUrl.searchParams.get("account") ?? request.nextUrl.searchParams.get("accountId") ?? undefined;
@@ -570,7 +707,7 @@ async function getRoute(request: NextRequest, segments: string[]) {
         message: "Choose one account before filtering by amount; native account currencies cannot be compared directly",
       });
     }
-    const page = listTransactionPage(user.id, {
+    const page = listTransactionPage(context, {
       from: queryDate(request, "from"),
       to: queryDate(request, "to"),
       accountId,
@@ -585,25 +722,26 @@ async function getRoute(request: NextRequest, segments: string[]) {
       limit,
       offset,
     });
-    const accountPayload = accountsPayload(user.id);
-    const merchants = database().prepare("SELECT id, name FROM merchants WHERE user_id = ? AND archived_at IS NULL ORDER BY name").all(user.id);
-    const tags = database().prepare("SELECT id, name, color FROM tags WHERE user_id = ? AND archived_at IS NULL ORDER BY name").all(user.id);
+    const accountPayload = accountsPayload(context);
+    const merchants = database().prepare("SELECT id, name FROM merchants WHERE workspace_id = ? AND archived_at IS NULL ORDER BY name").all(context.workspaceId);
+    const tags = database().prepare("SELECT id, name, color FROM tags WHERE workspace_id = ? AND archived_at IS NULL ORDER BY name").all(context.workspaceId);
     return NextResponse.json({
       ...page,
       currency: accountPayload.defaultCurrency,
-      categories: listCategories(user.id),
+      categories: listCategories(context),
       accounts: accountPayload.accounts.filter((account) => !account.archivedAt),
       merchants,
       tags,
     });
   }
   if (endpoint === "planned") {
-    await hydrateReportingRates(user.id);
+    await hydrateReportingRates(context);
+    revalidateRequestWorkspace(request, currentSession);
     const range = queryRange(request);
-    const accountPayload = accountsPayload(user.id);
+    const accountPayload = accountsPayload(context);
     const reportingCurrency = accountPayload.defaultCurrency;
     const accountCurrencyById = new Map(accountPayload.accounts.map((account) => [account.id, account.currency]));
-    const nativeOccurrences = listPlannedPayments(user.id, {
+    const nativeOccurrences = listPlannedPayments(context, {
       from: range?.from,
       to: range?.to,
       status: request.nextUrl.searchParams.get("status") ?? undefined,
@@ -635,7 +773,7 @@ async function getRoute(request: NextRequest, segments: string[]) {
         reportingPrincipalAmountMinor: 0,
       };
     });
-    const nativeLiabilityObligations = listLiabilityObligations(user.id, {
+    const nativeLiabilityObligations = listLiabilityObligations(context, {
       from: range?.from,
       to: range?.to,
       status: request.nextUrl.searchParams.get("status") ?? undefined,
@@ -678,34 +816,37 @@ async function getRoute(request: NextRequest, segments: string[]) {
       occurrences: combined,
       liabilityObligations,
       currency: reportingCurrency,
-      categories: listCategories(user.id),
+      categories: listCategories(context),
       accounts: accountPayload.accounts.filter((account) => !account.archivedAt),
     });
   }
   if (endpoint === "budgets") {
-    await hydrateReportingRates(user.id);
+    await hydrateReportingRates(context);
+    revalidateRequestWorkspace(request, currentSession);
     const requestedMonth = request.nextUrl.searchParams.get("month") ?? undefined;
     const month = requestedMonth ? monthKeyInput.parse(requestedMonth) : undefined;
-    return NextResponse.json({ ...listBudgets(user.id, month), categories: listCategories(user.id) });
+    return NextResponse.json({ ...listBudgets(context, month), categories: listCategories(context) });
   }
   if (endpoint === "plans") {
-    await hydrateReportingRates(user.id);
+    await hydrateReportingRates(context);
+    revalidateRequestWorkspace(request, currentSession);
     const requestedMonth = request.nextUrl.searchParams.get("month") ?? undefined;
-    return NextResponse.json(planningWorkspace(user.id, requestedMonth ? monthKeyInput.parse(requestedMonth) : undefined));
+    return NextResponse.json(planningWorkspace(context, requestedMonth ? monthKeyInput.parse(requestedMonth) : undefined));
   }
   if (endpoint === "statistics") {
     const period = request.nextUrl.searchParams.get("period");
-    const calendar = getUserCalendarContext(user.id);
+    const calendar = getWorkspaceCalendarContext(context);
     const periodMonths = period === "3m" ? 3 : period === "6m" ? 6 : period === "24m" ? 24 : period === "all" ? 60 : period === "ytd" ? Number(calendar.month.slice(-2)) : 12;
     const months = Math.min(Math.max(queryInteger(request, "months") ?? periodMonths, 3), 60);
     const requestedRange = queryRange(request);
     const hydrationRange = requestedRange ?? rollingMonthHydrationRange(calendar.month, calendar.today, months);
-    await hydrateReportingRates(user.id, hydrationRange);
-    return NextResponse.json(statistics(user.id, months, requestedRange));
+    await hydrateReportingRates(context, hydrationRange);
+    revalidateRequestWorkspace(request, currentSession);
+    return NextResponse.json(statistics(context, months, requestedRange));
   }
   if (endpoint === "export") {
     const requested = request.nextUrl.searchParams.get("format") === "csv" ? "csv" : "json";
-    const exported = exportData(user.id, requested);
+    const exported = exportData(context, requested);
     return new NextResponse(exported.body, {
       headers: {
         "Content-Type": exported.contentType,
@@ -728,7 +869,7 @@ async function getRoute(request: NextRequest, segments: string[]) {
     const saved = (action: string) => {
       const value = one<{ after: string | null }>(
         `SELECT after FROM audit_logs
-          WHERE user_id = ? AND entity_type = 'user_settings' AND action = ?
+          WHERE actor_user_id = ? AND entity_type = 'user_settings' AND action = ?
           ORDER BY created_at DESC, rowid DESC LIMIT 1`,
         [user.id, action],
       )?.after;
@@ -744,6 +885,8 @@ async function getRoute(request: NextRequest, segments: string[]) {
     };
     return NextResponse.json({
       user: { ...user, name: user.displayName },
+      workspace: { ...workspace, role: context.role },
+      workspaces: listUserWorkspaces(user.id, workspace.id),
       preferences: { compactTables: true, ...saved("preferences") },
       reminders: { dueSoon: true, overdue: true, budgetWarnings: true, daysBefore: 3, ...saved("reminders") },
     });
@@ -774,7 +917,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
   assertSameOrigin(request);
   if (segments[0] === "auth") return authRoute(request, segments);
   const currentSession = sessionFromRequest(request);
-  const { user } = currentSession;
+  const { user, context, workspace } = currentSession;
   const endpoint = segments[0];
   if (endpoint === "transactions" && segments[1] && segments[2] === "attachments") {
     if (request.method !== "POST") {
@@ -783,20 +926,97 @@ async function postRoute(request: NextRequest, segments: string[]) {
         message: "Method not allowed",
       });
     }
-    const attachment = await uploadTransactionAttachment(user.id, segments[1], {
+    const attachment = await uploadTransactionAttachment(context, segments[1], {
       fileName: request.nextUrl.searchParams.get("filename") ?? "",
       claimedMimeType: request.headers.get("content-type"),
       contentLength: request.headers.get("content-length"),
       body: request.body,
-    });
+    }, () => revalidateRequestWorkspace(request, currentSession));
     return NextResponse.json({ attachment }, { status: 201 });
+  }
+  if (endpoint === "planned" && segments[1] && segments[2] === "attachments") {
+    const attachment = await uploadPlannedPaymentAttachment(context, segments[1], {
+      fileName: request.nextUrl.searchParams.get("filename") ?? "",
+      claimedMimeType: request.headers.get("content-type"),
+      contentLength: request.headers.get("content-length"),
+      body: request.body,
+    }, () => revalidateRequestWorkspace(request, currentSession));
+    return NextResponse.json({ attachment }, { status: 201 });
+  }
+  if (endpoint === "backup") {
+    // Reject non-administrators before allocating or parsing the much larger
+    // restore envelope. restoreBackup repeats this check as defense in depth.
+    requireInstallationAdministrator(user.id);
   }
   const maxBodyBytes = endpoint === "backup"
     ? BACKUP_RESTORE_JSON_BODY_BYTES
     : endpoint === "import"
       ? CSV_IMPORT_JSON_BODY_BYTES
       : DEFAULT_JSON_BODY_BYTES;
-  const body = object(await readJson(request, maxBodyBytes));
+  const body = request.body
+    ? object(await readJson(request, maxBodyBytes))
+    : {};
+  revalidateRequestWorkspace(request, currentSession);
+
+  if (endpoint === "invitations" && segments[1] && segments[2] === "accept") {
+    enforceRateLimits([{
+      key: opaqueRateLimitKey("invitation-accept", `${clientAddress(request)}:${segments[1]}`),
+      maxAttempts: 20,
+    }]);
+    const accepted = acceptWorkspaceInvitation(segments[1], user.id);
+    const activeWorkspace = activateWorkspace(user.id, currentSession.session.id, accepted.workspace.id);
+    return NextResponse.json({ ...accepted, activeWorkspace });
+  }
+
+  if (endpoint === "workspaces") {
+    const translator = createServerTranslator({
+      language: resolveConfiguredUiLanguage(user.uiLanguage),
+      formattingLocale: user.locale,
+      timeZone: workspace.timeZone,
+    });
+    if (!segments[1]) {
+      const created = createHouseholdWorkspace(context, {
+        name: text(body.name),
+        defaultCurrency: text(body.currency, workspace.defaultCurrency),
+        timeZone: text(body.timeZone, workspace.timeZone),
+      }, translator);
+      const activeWorkspace = activateWorkspace(user.id, currentSession.session.id, created.id);
+      return NextResponse.json({ workspace: { ...created, role: "owner", active: true }, activeWorkspace }, { status: 201 });
+    }
+    if (segments[2] === "activate") {
+      return NextResponse.json({ activeWorkspace: activateWorkspace(user.id, currentSession.session.id, segments[1]) });
+    }
+    if (segments[1] !== "current") {
+      throw new HttpError(404, { code: "WORKSPACE_ENDPOINT_NOT_FOUND", message: "Workspace endpoint not found" });
+    }
+    if (segments[2] === "invitations" && !segments[3]) {
+      const email = text(body.email);
+      enforceRateLimits([
+        { key: opaqueRateLimitKey("invitation-create-actor", user.id), maxAttempts: 30 },
+        { key: opaqueRateLimitKey("invitation-create-email", `${context.workspaceId}:${email}`), maxAttempts: 5 },
+      ]);
+      const result = createWorkspaceInvitation(context, {
+        email,
+        role: body.role === "owner" ? "owner" : "member",
+      });
+      const inviteUrl = new URL(`/invite/${encodeURIComponent(result.token)}`, request.url).toString();
+      return NextResponse.json({ invitation: result.invitation, inviteUrl }, { status: 201 });
+    }
+    if (segments[2] === "members" && segments[3]) {
+      return NextResponse.json({ member: setWorkspaceMemberRole(
+        context,
+        segments[3],
+        body.role === "owner" ? "owner" : "member",
+      ) });
+    }
+    if (segments[2] === "transfer") {
+      return NextResponse.json(transferWorkspaceOwnership(context, text(body.userId)));
+    }
+    if (segments[2] === "leave") {
+      return NextResponse.json(leaveWorkspace(context));
+    }
+    throw new HttpError(404, { code: "WORKSPACE_ENDPOINT_NOT_FOUND", message: "Workspace endpoint not found" });
+  }
 
   if (endpoint === "accounts") {
     if (body.action === "archive" || body.action === "restore") {
@@ -807,10 +1027,10 @@ async function postRoute(request: NextRequest, segments: string[]) {
           message: "Account id is required",
         });
       }
-      const account = updateAccount(user.id, id, { archived: body.action === "archive" });
+      const account = updateAccount(context, id, { archived: body.action === "archive" });
       return NextResponse.json({ account });
     }
-    const workspaceCurrency = getUserRegionalSettings(user.id).currency;
+    const workspaceCurrency = getWorkspaceFinancialSettings(context).currency;
     const normalized = accountInput.parse({
       ...body,
       type: body.type === "current_account" ? "current" : body.type,
@@ -819,7 +1039,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       openingDate: body.openingDate ?? body.openingBalanceDate,
     });
     const result = database().transaction(() => {
-      const account = createAccount(user.id, normalized);
+      const account = createAccount(context, normalized);
       if (!account) {
         throw new HttpError(500, {
           code: "ACCOUNT_CREATE_FAILED",
@@ -833,11 +1053,11 @@ async function postRoute(request: NextRequest, segments: string[]) {
           ...creditCard,
           creditLimitMinor: creditCard.creditLimitMinor ?? normalized.creditLimitMinor ?? 0,
         });
-        return saveCreditCardProfile(user.id, account.id, profile).account;
+        return saveCreditCardProfile(context, account.id, profile).account;
       }
       if (normalized.type === "loan" && Object.keys(loan).length) {
         const profile = loanProfileInput.parse(loan);
-        return saveLoanProfile(user.id, account.id, profile).account.account;
+        return saveLoanProfile(context, account.id, profile).account.account;
       }
       return account;
     })();
@@ -852,7 +1072,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
           message: "Choose a liability payment to undo",
         });
       }
-      return NextResponse.json(undoLiabilityPayment(user.id, paymentId));
+      return NextResponse.json(undoLiabilityPayment(context, paymentId));
     }
     const accountId = segments[1] ?? text(body.accountId);
     if (!accountId) {
@@ -863,24 +1083,24 @@ async function postRoute(request: NextRequest, segments: string[]) {
     }
     const action = segments[2] ?? text(body.action);
     if (action === "card-profile") {
-      return NextResponse.json(saveCreditCardProfile(user.id, accountId, creditCardProfileInput.parse(body)));
+      return NextResponse.json(saveCreditCardProfile(context, accountId, creditCardProfileInput.parse(body)));
     }
     if (action === "loan-profile") {
-      return NextResponse.json(saveLoanProfile(user.id, accountId, loanProfileInput.parse(body)));
+      return NextResponse.json(saveLoanProfile(context, accountId, loanProfileInput.parse(body)));
     }
     if (action === "statements") {
-      return NextResponse.json(createCreditCardStatement(user.id, accountId, creditCardStatementInput.parse(body)), { status: 201 });
+      return NextResponse.json(createCreditCardStatement(context, accountId, creditCardStatementInput.parse(body)), { status: 201 });
     }
     if (action === "rates") {
-      return NextResponse.json(addLoanRatePeriod(user.id, accountId, loanRateInput.parse(body)), { status: 201 });
+      return NextResponse.json(addLoanRatePeriod(context, accountId, loanRateInput.parse(body)), { status: 201 });
     }
     if (action === "payments") {
       const kind = text(body.kind);
       if (kind === "card_payment") {
-        return NextResponse.json(recordCreditCardPayment(user.id, accountId, creditCardPaymentInput.parse(body)), { status: 201 });
+        return NextResponse.json(recordCreditCardPayment(context, accountId, creditCardPaymentInput.parse(body)), { status: 201 });
       }
       if (kind === "loan_payment") {
-        return NextResponse.json(recordLoanPayment(user.id, accountId, loanPaymentInput.parse(body)), { status: 201 });
+        return NextResponse.json(recordLoanPayment(context, accountId, loanPaymentInput.parse(body)), { status: 201 });
       }
       throw new HttpError(422, {
         code: "LIABILITY_PAYMENT_KIND_INVALID",
@@ -889,7 +1109,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
     }
     if (action === "disburse") {
       return NextResponse.json(
-        disburseLoan(user.id, accountId, loanDisbursementInput.parse(body)),
+        disburseLoan(context, accountId, loanDisbursementInput.parse(body)),
         { status: 201 },
       );
     }
@@ -908,7 +1128,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
           message: "Category id is required",
         });
       }
-      return NextResponse.json({ category: setCategoryArchived(user.id, categoryId, action === "archive") });
+      return NextResponse.json({ category: setCategoryArchived(context, categoryId, action === "archive") });
     }
     const categoryPayload = {
       ...body,
@@ -920,7 +1140,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
     };
     if (action === "create") {
       const normalized = categoryInput.parse(categoryPayload);
-      return NextResponse.json({ category: createCategory(user.id, normalized) }, { status: 201 });
+      return NextResponse.json({ category: createCategory(context, normalized) }, { status: 201 });
     }
     if (action === "update" || action === "edit") {
       const categoryId = text(body.id);
@@ -931,7 +1151,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
         });
       }
       const normalized = categoryUpdateInput.parse(categoryPayload);
-      return NextResponse.json({ category: updateCategory(user.id, categoryId, normalized) });
+      return NextResponse.json({ category: updateCategory(context, categoryId, normalized) });
     }
     throw new HttpError(422, {
       code: "CATEGORY_ACTION_INVALID",
@@ -960,9 +1180,9 @@ async function postRoute(request: NextRequest, segments: string[]) {
         message: "Tag colour must be a six-digit hex value",
       });
     }
-    if (action === "create") return NextResponse.json({ tag: createTag(user.id, { name: text(body.name), color }) }, { status: 201 });
-    if (action === "rename" || action === "update") return NextResponse.json({ tag: updateTag(user.id, id, { name: text(body.name), color }) });
-    if (action === "archive" || action === "restore") return NextResponse.json({ tag: setTagArchived(user.id, id, action === "archive") });
+    if (action === "create") return NextResponse.json({ tag: createTag(context, { name: text(body.name), color }) }, { status: 201 });
+    if (action === "rename" || action === "update") return NextResponse.json({ tag: updateTag(context, id, { name: text(body.name), color }) });
+    if (action === "archive" || action === "restore") return NextResponse.json({ tag: setTagArchived(context, id, action === "archive") });
     throw new HttpError(422, {
       code: "TAG_ACTION_INVALID",
       message: "Unknown tag action",
@@ -979,7 +1199,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
     }
     if (action === "rename" || action === "update") {
       return NextResponse.json({
-        merchant: updateMerchant(user.id, id, {
+        merchant: updateMerchant(context, id, {
           name: text(body.name),
           defaultCategoryId: Object.prototype.hasOwnProperty.call(body, "defaultCategoryId")
             ? body.defaultCategoryId === null ? null : text(body.defaultCategoryId) || null
@@ -988,7 +1208,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       });
     }
     if (action === "archive" || action === "restore") {
-      return NextResponse.json({ merchant: setMerchantArchived(user.id, id, action === "archive") });
+      return NextResponse.json({ merchant: setMerchantArchived(context, id, action === "archive") });
     }
     throw new HttpError(422, {
       code: "MERCHANT_ACTION_INVALID",
@@ -1005,7 +1225,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
           message: "Transaction id is required",
         });
       }
-      return NextResponse.json(clearPendingTransaction(user.id, transactionId));
+      return NextResponse.json(clearPendingTransaction(context, transactionId));
     }
     const rawAmount = integer(body.amountMinor);
     const kind = text(body.kind ?? body.type) as "income" | "expense" | "transfer" | "refund" | "adjustment";
@@ -1030,7 +1250,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
     });
     const preparedFx = normalized.kind === "transfer"
       ? await prepareTransferFx(
-        user.id,
+        context,
         normalized.accountId,
         normalized.transferAccountId as string,
         normalized.amountMinor,
@@ -1038,15 +1258,19 @@ async function postRoute(request: NextRequest, segments: string[]) {
         normalized,
       )
       : await prepareTransactionFx(
-        user.id,
+        context,
         normalized.accountId,
         normalized.kind,
         normalized.amountMinor,
         normalized.date,
         normalized,
       );
-    const result = createTransaction(user.id, { ...normalized, ...preparedFx });
-    return NextResponse.json({ transaction: result }, { status: 201 });
+    revalidateRequestWorkspace(request, currentSession);
+    const transactionId = segments[1] ?? text(body.id ?? body.transactionId);
+    const result = ["update", "edit"].includes(transactionAction)
+      ? updateTransaction(context, transactionId, { ...normalized, ...preparedFx })
+      : createTransaction(context, { ...normalized, ...preparedFx });
+    return NextResponse.json({ transaction: result }, { status: transactionId ? 200 : 201 });
   }
   if (endpoint === "planned") {
     const action = segments[2] ?? segments[1] ?? text(body.action);
@@ -1067,22 +1291,24 @@ async function postRoute(request: NextRequest, segments: string[]) {
         referenceFxRateDate: body.referenceFxRateDate ?? body.reference_fx_rate_date,
         partial: body.partial ?? body.status === "partial",
         note: body.note ?? body.notes,
+        idempotencyKey: body.idempotencyKey ?? request.headers.get("idempotency-key") ?? undefined,
       });
-      const prepared = await preparePlannedOccurrencePayment(user.id, occurrenceId, normalized);
-      return NextResponse.json({ result: payPlannedOccurrence(user.id, occurrenceId, prepared) });
+      const prepared = await preparePlannedOccurrencePayment(context, occurrenceId, normalized);
+      revalidateRequestWorkspace(request, currentSession);
+      return NextResponse.json({ result: payPlannedOccurrence(context, occurrenceId, prepared) });
     }
     if (action === "skip") {
       const normalized = plannedSkipInput.parse({ reason: body.reason ?? body.notes });
-      return NextResponse.json(skipPlannedOccurrence(user.id, occurrenceId, normalized.reason));
+      return NextResponse.json(skipPlannedOccurrence(context, occurrenceId, normalized.reason));
     }
     if (action === "cancel") {
       const normalized = plannedSkipInput.parse({ reason: body.reason ?? body.notes });
-      return NextResponse.json(cancelPlannedOccurrence(user.id, occurrenceId, normalized.reason));
+      return NextResponse.json(cancelPlannedOccurrence(context, occurrenceId, normalized.reason));
     }
-    if (action === "undo") return NextResponse.json(undoPlannedOccurrence(user.id, occurrenceId));
+    if (action === "undo") return NextResponse.json(undoPlannedOccurrence(context, occurrenceId));
     if (action === "archive" || action === "restore") {
       const paymentId = text(body.plannedPaymentId ?? body.id ?? segments[1]);
-      return NextResponse.json(archivePlannedPayment(user.id, paymentId, action === "archive"));
+      return NextResponse.json(archivePlannedPayment(context, paymentId, action === "archive"));
     }
     const recurrence = object(body.recurrence);
     const normalized = plannedInput.parse({
@@ -1096,16 +1322,20 @@ async function postRoute(request: NextRequest, segments: string[]) {
         endDate: recurrence.endDate ?? body.endDate ?? null,
       } : body.frequency ? { frequency: body.frequency, interval: body.interval ?? 1, endDate: body.endDate ?? null } : null,
     });
-    return NextResponse.json({ occurrence: createPlannedPayment(user.id, normalized) }, { status: 201 });
+    const paymentId = segments[1] ?? text(body.plannedPaymentId ?? body.id);
+    if (["update", "edit"].includes(action) && paymentId) {
+      return NextResponse.json({ occurrence: updatePlannedPayment(context, paymentId, normalized) });
+    }
+    return NextResponse.json({ occurrence: createPlannedPayment(context, normalized) }, { status: 201 });
   }
   if (endpoint === "budgets") {
     if (body.action === "copy") {
       const sourceMonth = monthKeyInput.parse(body.sourceMonth);
       const targetMonth = monthKeyInput.parse(body.targetMonth ?? body.month);
       database().transaction(() => {
-        const source = database().prepare("SELECT category_id AS categoryId, amount_minor AS amountMinor, currency, rollover, notes FROM budgets WHERE user_id = ? AND month = ?").all(user.id, sourceMonth) as Array<{ categoryId: string; amountMinor: number; currency: string; rollover: number; notes: string | null }>;
+        const source = database().prepare("SELECT category_id AS categoryId, amount_minor AS amountMinor, currency, rollover, notes FROM budgets WHERE workspace_id = ? AND month = ?").all(context.workspaceId, sourceMonth) as Array<{ categoryId: string; amountMinor: number; currency: string; rollover: number; notes: string | null }>;
         for (const item of source) {
-          saveBudget(user.id, {
+          saveBudget(context, {
             month: targetMonth,
             categoryId: item.categoryId,
             amountMinor: item.amountMinor,
@@ -1114,7 +1344,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
           });
         }
       })();
-      return NextResponse.json(listBudgets(user.id, targetMonth));
+      return NextResponse.json(listBudgets(context, targetMonth));
     }
     const normalized = budgetInput.parse({
       month: body.month,
@@ -1122,7 +1352,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       amountMinor: Math.abs(integer(body.amountMinor ?? body.budgetMinor)),
       rollover: body.rollover ?? false,
     });
-    return NextResponse.json({ budget: saveBudget(user.id, normalized) });
+    return NextResponse.json({ budget: saveBudget(context, normalized) });
   }
   if (endpoint === "plans") {
     const month = monthKeyInput.parse(body.month);
@@ -1152,7 +1382,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       openingBalances: Array.isArray(body.openingBalances) ? body.openingBalances : undefined,
       items: normalizedItems,
     };
-    return NextResponse.json(savePlan(user.id, payload));
+    return NextResponse.json(savePlan(context, payload));
   }
   if (endpoint === "import" && segments[1] === "preview") {
     const rawMapping = object(body.mapping);
@@ -1168,7 +1398,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       hasHeader: body.hasHeader ?? true,
       options: body.options,
     });
-    const result = previewImport(user.id, { ...normalized, accountId: text(body.accountId ?? body.defaultAccountId) || undefined });
+    const result = previewImport(context, { ...normalized, accountId: text(body.accountId ?? body.defaultAccountId) || undefined });
     return NextResponse.json({
       ...result,
       duplicates: result.rows.filter((row) => row.duplicate),
@@ -1198,7 +1428,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
         hasHeader: body.hasHeader ?? true,
         options: body.options,
       });
-      const preview = previewImport(user.id, { ...previewInput, accountId });
+      const preview = previewImport(context, { ...previewInput, accountId });
       const validRows = preview.rows.filter((row) => row.valid).map((row) => ({
         date: row.date!, amountMinor: row.amountMinor!, description: row.description,
         merchant: row.merchant, externalId: row.externalId, duplicate: row.duplicate, raw: row.raw,
@@ -1208,7 +1438,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
         fxRateSource: row.fxRateSource,
         fxRateDate: row.fxRateDate,
       }));
-      const result = commitImport(user.id, {
+      const result = commitImport(context, {
         accountId,
         rows: validRows,
         duplicateStrategy: body.duplicateHandling === "import" ? "import" : "skip",
@@ -1228,7 +1458,7 @@ async function postRoute(request: NextRequest, segments: string[]) {
       rows: body.rows,
       duplicateStrategy: body.duplicateStrategy ?? "skip",
     });
-    return NextResponse.json(commitImport(user.id, { ...normalized, fileName: text(body.fileName) || undefined, mapping: object(body.mapping) as Record<string, string> }));
+    return NextResponse.json(commitImport(context, { ...normalized, fileName: text(body.fileName) || undefined, mapping: object(body.mapping) as Record<string, string> }));
   }
   if (endpoint === "backup") {
     const backupValue = typeof body.backup === "string" ? body.backup : JSON.stringify(body.backup);
@@ -1238,27 +1468,50 @@ async function postRoute(request: NextRequest, segments: string[]) {
   if (endpoint === "settings") {
     const action = text(body.action, "preferences");
     if (action === "preferences") {
+      const workspaceSettingsRequested = body.workspaceCurrency !== undefined
+        || body.workspaceTimeZone !== undefined;
       const settings = profilePreferencesInput.parse({
         displayName: body.displayName ?? body.name ?? user.displayName,
-        currency: body.currency ?? user.defaultCurrency,
+        currency: body.workspaceCurrency ?? workspace.defaultCurrency,
         locale: body.locale ?? user.locale,
-        timeZone: body.timeZone ?? user.timeZone,
+        timeZone: body.workspaceTimeZone ?? workspace.timeZone,
         uiLanguage: body.uiLanguage ?? user.uiLanguage,
         compactTables: body.compactTables ?? true,
       });
+      const workspaceSettingsChanged = workspaceSettingsRequested && (
+        settings.currency !== workspace.defaultCurrency
+        || settings.timeZone !== workspace.timeZone
+      );
+      if (workspaceSettingsChanged) {
+        requireWorkspaceOwner(context);
+      }
       database().transaction(() => {
-        database().prepare("UPDATE users SET display_name = ?, locale = ?, default_currency = ?, time_zone = ?, ui_language = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-          .run(settings.displayName, settings.locale, settings.currency, settings.timeZone, settings.uiLanguage, user.id);
-        database().prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'user_settings', ?, 'preferences', ?)")
-          .run(crypto.randomUUID(), user.id, user.id, JSON.stringify(settings));
+        database().prepare("UPDATE users SET display_name = ?, locale = ?, ui_language = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(settings.displayName, settings.locale, settings.uiLanguage, user.id);
+        if (workspaceSettingsChanged) {
+          database().prepare("UPDATE workspaces SET default_currency = ?, time_zone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            .run(settings.currency, settings.timeZone, context.workspaceId);
+          database().prepare(
+            "INSERT INTO audit_logs (id, workspace_id, actor_user_id, entity_type, entity_id, action, before, after) VALUES (?, ?, ?, 'workspace_settings', ?, 'update', ?, ?)",
+          ).run(
+            crypto.randomUUID(),
+            context.workspaceId,
+            user.id,
+            context.workspaceId,
+            JSON.stringify({ defaultCurrency: workspace.defaultCurrency, timeZone: workspace.timeZone }),
+            JSON.stringify({ defaultCurrency: settings.currency, timeZone: settings.timeZone }),
+          );
+        }
+        // Personal display/formatting preferences remain actor-scoped and are
+        // deliberately excluded from household activity and workspace export.
+        database().prepare("INSERT INTO audit_logs (id, workspace_id, actor_user_id, entity_type, entity_id, action, after) VALUES (?, ?, ?, 'user_settings', ?, 'preferences', ?)")
+          .run(crypto.randomUUID(), null, user.id, user.id, JSON.stringify(settings));
       })();
       const response = NextResponse.json({
         user: {
           ...user,
           displayName: settings.displayName,
-          defaultCurrency: settings.currency,
           locale: settings.locale,
-          timeZone: settings.timeZone,
           uiLanguage: settings.uiLanguage,
         },
         preferences: settings,
@@ -1275,8 +1528,8 @@ async function postRoute(request: NextRequest, segments: string[]) {
     }
     if (action === "reminders") {
       const reminders = reminderSettingsInput.parse(body);
-      database().prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'user_settings', ?, 'reminders', ?)")
-        .run(crypto.randomUUID(), user.id, user.id, JSON.stringify(reminders));
+      database().prepare("INSERT INTO audit_logs (id, workspace_id, actor_user_id, entity_type, entity_id, action, after) VALUES (?, ?, ?, 'user_settings', ?, 'reminders', ?)")
+        .run(crypto.randomUUID(), null, user.id, user.id, JSON.stringify(reminders));
       return NextResponse.json({ reminders });
     }
     if (action === "password-change") {
@@ -1288,7 +1541,9 @@ async function postRoute(request: NextRequest, segments: string[]) {
           message: "Current password is incorrect",
         });
       }
+      revalidateRequestWorkspace(request, currentSession);
       const passwordHash = await hashPassword(passwordChange.newPassword);
+      revalidateRequestWorkspace(request, currentSession);
       database().transaction(() => {
         database().prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(passwordHash, user.id);
         database().prepare("DELETE FROM sessions WHERE user_id = ? AND id <> ?").run(user.id, currentSession.session.id);
@@ -1308,12 +1563,24 @@ async function postRoute(request: NextRequest, segments: string[]) {
 
 async function deleteRoute(request: NextRequest, segments: string[]) {
   assertSameOrigin(request);
-  const { user } = sessionFromRequest(request);
+  const currentSession = sessionFromRequest(request);
+  const { context } = currentSession;
+  if (segments[0] === "workspaces" && segments[1] === "current") {
+    if (segments[2] === "invitations" && segments[3]) {
+      return NextResponse.json(revokeWorkspaceInvitation(context, segments[3]));
+    }
+    if (segments[2] === "members" && segments[3]) {
+      return NextResponse.json(removeWorkspaceMember(context, segments[3]));
+    }
+    const body = object(await readJson(request, DEFAULT_JSON_BODY_BYTES));
+    revalidateRequestWorkspace(request, currentSession);
+    return NextResponse.json(deleteHouseholdWorkspace(context, text(body.confirmation)));
+  }
   if (segments[0] === "attachments" && segments[1]) {
-    return NextResponse.json(deleteAttachment(user.id, segments[1]));
+    return NextResponse.json(deleteAttachment(context, segments[1]));
   }
   if (segments[0] === "transactions" && segments[1]) {
-    return NextResponse.json(voidTransaction(user.id, segments[1]));
+    return NextResponse.json(voidTransaction(context, segments[1]));
   }
   throw new HttpError(404, {
     code: "API_ENDPOINT_NOT_FOUND",

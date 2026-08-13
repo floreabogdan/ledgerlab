@@ -6,11 +6,17 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  Download,
+  FileText,
   List,
+  Paperclip,
+  Pencil,
   RotateCcw,
   SkipForward,
+  Trash2,
   WalletCards,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDateRange } from "@/components/date-range-context";
@@ -60,6 +66,7 @@ import {
   useSubmit,
   ViewHeader,
   workspaceLocale,
+  featureStyles as kit,
 } from "../_components/feature-kit";
 import ui from "../_components/pages.module.css";
 import styles from "./planned.module.css";
@@ -85,6 +92,25 @@ type FxQuote = {
 function formatRate(value: number, rateScale = FX_RATE_SCALE) {
   return new Intl.NumberFormat(workspaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 8 })
     .format(value / rateScale);
+}
+
+async function uploadPlannedInvoice(plannedPaymentId: string, file: File, translator: ReturnType<typeof useTranslator>) {
+  const params = new URLSearchParams({ filename: file.name });
+  let response: Response;
+  try {
+    response = await fetch(`/api/planned/${encodeURIComponent(plannedPaymentId)}/attachments?${params.toString()}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+  } catch {
+    throw new Error(translator.translate("planning.plannedPayments.invoices.uploadFallback"));
+  }
+  const body = readRecord(await response.json().catch(() => null));
+  if (!response.ok) throw new Error(translateApiError(translator, parseApiError(body)));
 }
 
 function paymentName(row: Row, t: Translate) {
@@ -260,6 +286,8 @@ export default function PlannedPaymentsPage() {
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState(range.from.slice(0, 7));
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [documents, setDocuments] = useState<Row | null>(null);
   const [paying, setPaying] = useState<Row | null>(null);
   const [cancelling, setCancelling] = useState<Row | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -407,7 +435,7 @@ export default function PlannedPaymentsPage() {
             action={<AddButton onClick={() => setCreateOpen(true)}>{t("planning.plannedPayments.actions.planAPayment")}</AddButton>}
           >
             {view === "list" ? (
-              <PaymentList rows={filtered} accounts={accounts} reportingCurrency={currency} onPay={openPayment} onAction={occurrenceAction} onCancel={setCancelling} />
+              <PaymentList rows={filtered} accounts={accounts} reportingCurrency={currency} onPay={openPayment} onAction={occurrenceAction} onCancel={setCancelling} onEdit={setEditing} onDocuments={setDocuments} />
             ) : (
               <PaymentCalendar rows={occurrences} accounts={accounts} reportingCurrency={currency} month={month} setMonth={selectCalendarMonth} onSelect={openPayment} />
             )}
@@ -416,6 +444,8 @@ export default function PlannedPaymentsPage() {
       </Section>
 
       <PlannedForm key={`${createOpen ? "planned-form-open" : "planned-form-closed"}-${currency}`} open={createOpen} onClose={() => setCreateOpen(false)} onCreated={reload} reportingCurrency={currency} timeZone={timeZone} accounts={accounts} categories={categories} />
+      {editing ? <PlannedForm key={`planned-edit-${stringFrom(editing.plannedPaymentId ?? editing.id)}`} open onClose={() => setEditing(null)} onCreated={reload} reportingCurrency={currency} timeZone={timeZone} accounts={accounts} categories={categories} initial={editing} /> : null}
+      {documents ? <InvoiceManager key={stringFrom(documents.plannedPaymentId ?? documents.id)} occurrence={documents} onClose={() => setDocuments(null)} onChanged={reload} /> : null}
       {paying ? <PayForm key={`${String(paying.id)}-${currency}`} occurrence={paying} onClose={() => setPaying(null)} onPaid={reload} reportingCurrency={currency} accounts={accounts} /> : null}
       {cancelling ? (
         <Modal
@@ -464,7 +494,7 @@ function MoneyStack({
   );
 }
 
-function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCancel }: { rows: Row[]; accounts: Row[]; reportingCurrency: string; onPay: (row: Row) => void; onAction: (row: Row, action: "skip" | "cancel" | "undo") => Promise<void>; onCancel: (row: Row) => void }) {
+function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCancel, onEdit, onDocuments }: { rows: Row[]; accounts: Row[]; reportingCurrency: string; onPay: (row: Row) => void; onAction: (row: Row, action: "skip" | "cancel" | "undo") => Promise<void>; onCancel: (row: Row) => void; onEdit: (row: Row) => void; onDocuments: (row: Row) => void }) {
   const t = useTranslations();
   if (!rows.length) return <div className={`${ui.inlineNotice} ${ui.noticeInset}`}><Clock3 size={16} />{t("planning.plannedPayments.table.empty")}</div>;
   return (
@@ -501,6 +531,13 @@ function PaymentList({ rows, accounts, reportingCurrency, onPay, onAction, onCan
                   {!source && canPay && !paid ? <IconButton label={t("planning.plannedPayments.actions.cancelWithdrawn")} onClick={() => onCancel(row)}><Ban size={15} /></IconButton> : null}
                   {!source && (status === "paid" || paid > 0) ? <IconButton label={t("planning.plannedPayments.actions.undoPayment")} onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
                   {!source && !paid && ["skipped", "cancelled"].includes(status) ? <IconButton label={t("planning.plannedPayments.actions.restoreOccurrence")} onClick={() => void onAction(row, "undo")}><RotateCcw size={15} /></IconButton> : null}
+                  {!source ? <IconButton label={t("planning.plannedPayments.actions.editBill", { name: paymentName(row, t) })} onClick={() => onEdit(row)}><Pencil size={15} /></IconButton> : null}
+                  {!source ? <IconButton label={t("planning.plannedPayments.actions.manageInvoices", { count: numberFrom(row.attachmentCount) })} onClick={() => onDocuments(row)}><Paperclip size={15} /></IconButton> : null}
+                  {!source && row.linkedTransactionId ? (
+                    <Link className={`${kit.button} ${kit.button_ghost}`} href="/transactions">
+                      <FileText size={15} aria-hidden="true" /> {t("planning.plannedPayments.actions.viewActual")}
+                    </Link>
+                  ) : null}
                 </div>
               </td>
             </tr>
@@ -589,22 +626,24 @@ function PaymentCalendar({ rows, accounts, reportingCurrency, month, setMonth, o
   );
 }
 
-function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, accounts, categories }: { open: boolean; onClose: () => void; onCreated: () => Promise<void>; reportingCurrency: string; timeZone: string; accounts: Row[]; categories: Row[] }) {
+function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, accounts, categories, initial }: { open: boolean; onClose: () => void; onCreated: () => Promise<void>; reportingCurrency: string; timeZone: string; accounts: Row[]; categories: Row[]; initial?: Row }) {
   const t = useTranslations();
   const translator = useTranslator();
-  const [name, setName] = useState("");
-  const [direction, setDirection] = useState("expense");
-  const [expectedAmount, setExpectedAmount] = useState("");
-  const [dueDate, setDueDate] = useState(isoToday());
-  const [accountId, setAccountId] = useState("");
-  const [plannedCurrency, setPlannedCurrency] = useState(reportingCurrency);
+  const initialCurrency = stringFrom(initial?.nativeCurrency ?? initial?.currency, reportingCurrency).toUpperCase();
+  const initialRule = Boolean(initial?.recurrenceRuleId ?? initial?.ruleId);
+  const [name, setName] = useState(() => stringFrom(initial?.name ?? initial?.title));
+  const [direction, setDirection] = useState(() => stringFrom(initial?.direction ?? initial?.type, "expense"));
+  const [expectedAmount, setExpectedAmount] = useState(() => initial ? minorToInput(nativeExpectedMinor(initial), initialCurrency) : "");
+  const [dueDate, setDueDate] = useState(() => normalizeDate(initial?.dueDate) || isoToday());
+  const [accountId, setAccountId] = useState(() => stringFrom(initial?.accountId));
+  const [plannedCurrency, setPlannedCurrency] = useState(initialCurrency);
   const [currencyFollowsAccount, setCurrencyFollowsAccount] = useState(true);
-  const [categoryId, setCategoryId] = useState("");
-  const [recurring, setRecurring] = useState(false);
-  const [frequency, setFrequency] = useState("monthly");
-  const [interval, setInterval] = useState("1");
-  const [endDate, setEndDate] = useState("");
-  const [notes, setNotes] = useState("");
+  const [categoryId, setCategoryId] = useState(() => stringFrom(initial?.categoryId));
+  const [recurring, setRecurring] = useState(initialRule);
+  const [frequency, setFrequency] = useState(() => stringFrom(initial?.frequency, "monthly"));
+  const [interval, setInterval] = useState(() => String(Math.max(1, numberFrom(initial?.interval, 1))));
+  const [endDate, setEndDate] = useState(() => normalizeDate(initial?.recurrenceEndDate));
+  const [notes, setNotes] = useState(() => stringFrom(initial?.notes ?? initial?.note));
   const selectedAccount = readRecord(accounts.find((item) => stringFrom(readRecord(item).id) === accountId));
   const selectedAccountCurrency = stringFrom(selectedAccount.currency, reportingCurrency).toUpperCase();
   const normalizedPlannedCurrency = plannedCurrency.trim().toUpperCase();
@@ -616,7 +655,8 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
     if (!plannedCurrencyValid) throw new Error(t("planning.plannedPayments.form.currencyError"));
     if (expectedAmountMinor === null || expectedAmountMinor <= 0) throw new Error(t("planning.plannedPayments.form.positiveAmountError"));
     if (recurring && (!Number.isInteger(Number(interval)) || Number(interval) < 1)) throw new Error(t("planning.plannedPayments.form.intervalError"));
-    await requestJson("/api/planned", {
+    const plannedPaymentId = stringFrom(initial?.plannedPaymentId ?? initial?.id);
+    await requestJson(initial ? `/api/planned/${encodeURIComponent(plannedPaymentId)}/edit` : "/api/planned", {
       method: "POST",
       body: JSON.stringify({
         name: name.trim(),
@@ -643,10 +683,10 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
     <Modal
       open={open}
       onClose={() => { setSubmitError(null); onClose(); }}
-      title={t("planning.plannedPayments.form.title")}
-      description={t("planning.plannedPayments.form.description")}
+      title={initial ? t("planning.plannedPayments.form.editTitle") : t("planning.plannedPayments.form.title")}
+      description={initial ? t("planning.plannedPayments.form.editDescription") : t("planning.plannedPayments.form.description")}
       wide
-      footer={<><Button variant="ghost" onClick={onClose}>{t("planning.plannedPayments.form.cancel")}</Button><Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("planning.plannedPayments.form.planning") : t("planning.plannedPayments.form.create")}</Button></>}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("planning.plannedPayments.form.cancel")}</Button><Button disabled={submitting} onClick={() => void submit()}>{submitting ? t("planning.plannedPayments.form.planning") : initial ? t("planning.plannedPayments.form.save") : t("planning.plannedPayments.form.create")}</Button></>}
     >
       <form onSubmit={(event) => void submit(event)}>
         <div className={ui.formGrid}>
@@ -686,6 +726,125 @@ function PlannedForm({ open, onClose, onCreated, reportingCurrency, timeZone, ac
         <FormMessage error={submitError} />
         <button type="submit" hidden />
       </form>
+    </Modal>
+  );
+}
+
+function InvoiceManager({ occurrence, onClose, onChanged }: { occurrence: Row; onClose: () => void; onChanged: () => Promise<void> }) {
+  const translator = useTranslator();
+  const t = translator.translate;
+  const plannedPaymentId = stringFrom(occurrence.plannedPaymentId ?? occurrence.id);
+  const attachmentsUrl = `/api/planned/${encodeURIComponent(plannedPaymentId)}/attachments`;
+  const { data: raw, loading, error, reload } = useJson<Record<string, unknown>>(attachmentsUrl, {});
+  const attachments = readList<Row>(raw, "attachments");
+  const [file, setFile] = useState<File | null>(null);
+  const [inputKey, setInputKey] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function upload() {
+    if (!file || uploading) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setActionError(t("planning.plannedPayments.invoices.tooLarge"));
+      return;
+    }
+    setUploading(true);
+    setActionError(null);
+    try {
+      await uploadPlannedInvoice(plannedPaymentId, file, translator);
+      setFile(null);
+      setInputKey((current) => current + 1);
+      await Promise.all([reload(), onChanged()]);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : t("planning.plannedPayments.invoices.uploadFallback"));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function remove(attachmentId: string) {
+    if (deletingId) return;
+    setDeletingId(attachmentId);
+    setActionError(null);
+    try {
+      await requestJson(`/api/attachments/${encodeURIComponent(attachmentId)}`, { method: "DELETE" }, translator);
+      setConfirmDeleteId(null);
+      await Promise.all([reload(), onChanged()]);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : t("planning.plannedPayments.invoices.deleteFallback"));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t("planning.plannedPayments.invoices.title")}
+      description={t("planning.plannedPayments.invoices.description", { payment: paymentName(occurrence, t), date: formatDate(occurrence.dueDate) })}
+      footer={<Button variant="secondary" onClick={onClose}>{t("common.actions.close")}</Button>}
+    >
+      <div className={ui.receiptManager}>
+        <FormMessage error={actionError} />
+        <div className={ui.receiptUploadRow}>
+          <input
+            key={inputKey}
+            className="sr-only"
+            id={`planned-invoice-${plannedPaymentId}`}
+            type="file"
+            accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif,.pdf,.png,.jpg,.jpeg,.webp,.heic,.heif"
+            aria-describedby={`planned-invoice-${plannedPaymentId}-hint`}
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+          <label className={`${kit.button} ${kit.button_secondary} ${ui.attachmentPicker}`} htmlFor={`planned-invoice-${plannedPaymentId}`}>
+            <Paperclip size={15} aria-hidden="true" /> {file ? t("planning.plannedPayments.invoices.replaceSelection") : t("planning.plannedPayments.invoices.choose")}
+          </label>
+          <span id={`planned-invoice-${plannedPaymentId}-hint`}>{file ? t("planning.plannedPayments.invoices.fileSize", { name: file.name, size: new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(file.size / 1024) }) : t("planning.plannedPayments.invoices.hint")}</span>
+          <Button disabled={!file || uploading} onClick={() => void upload()}>{uploading ? t("planning.plannedPayments.invoices.uploading") : t("planning.plannedPayments.invoices.upload")}</Button>
+        </div>
+        <DataState
+          loading={loading}
+          error={error}
+          onRetry={reload}
+          empty={!attachments.length}
+          emptyTitle={t("planning.plannedPayments.invoices.emptyTitle")}
+          emptyDescription={t("planning.plannedPayments.invoices.emptyDescription")}
+        >
+          <div className={ui.receiptList}>
+            {attachments.map((item, index) => {
+              const row = readRecord(item);
+              const id = stringFrom(row.id, String(index));
+              const sizeBytes = numberFrom(row.sizeBytes);
+              return (
+                <div className={ui.receiptItem} key={id}>
+                  <span>
+                    <strong>{stringFrom(row.fileName, t("planning.plannedPayments.invoices.fileFallback"))}</strong>
+                    <small>{t("planning.plannedPayments.invoices.fileTypeSize", { type: stringFrom(row.mimeType, t("planning.plannedPayments.invoices.typeFallback")), size: new Intl.NumberFormat(workspaceLocale(), { maximumFractionDigits: 1 }).format(sizeBytes / 1024) })}</small>
+                  </span>
+                  <div className={ui.receiptActions}>
+                    <a className={`${kit.button} ${kit.button_ghost}`} href={`/api/attachments/${encodeURIComponent(id)}/download`}>
+                      <Download size={15} aria-hidden="true" /> {t("planning.plannedPayments.invoices.download")}
+                    </a>
+                    {confirmDeleteId === id ? (
+                      <>
+                        <Button variant="danger" disabled={deletingId === id} onClick={() => void remove(id)}>{deletingId === id ? t("planning.plannedPayments.invoices.deleting") : t("common.actions.delete")}</Button>
+                        <Button variant="ghost" onClick={() => setConfirmDeleteId(null)}>{t("common.actions.cancel")}</Button>
+                      </>
+                    ) : (
+                      <IconButton label={t("planning.plannedPayments.invoices.deleteAria", { name: stringFrom(row.fileName, t("planning.plannedPayments.invoices.fileFallback")) })} onClick={() => setConfirmDeleteId(id)}>
+                        <Trash2 size={15} />
+                      </IconButton>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DataState>
+      </div>
     </Modal>
   );
 }

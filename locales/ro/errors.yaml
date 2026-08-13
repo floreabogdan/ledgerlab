@@ -108,6 +108,7 @@ codes:
   transactionTransferAccountsSame: Conturile de transfer trebuie să fie diferite.
   transactionTransferCategoryForbidden: Transferurile nu pot fi asociate categoriilor de venituri sau cheltuieli.
   transactionTransferIncomplete: Acest transfer este incomplet și nu poate fi decontat în siguranță.
+  transactionTransferKindImmutable: Pentru a transforma un transfer în alt tip de tranzacție sau invers, anulează tranzacția și creează una nouă.
   importCsvTooLarge: "Fișierele CSV trebuie să fie mai mici de {maxMegabytes, number} MB."
   importDestinationAccountRequired: Alege un cont de destinație activ.
   importCsvParseError: Acest rând CSV nu a putut fi interpretat.
@@ -168,9 +169,16 @@ codes:
   backupChecksumInvalid: Validarea sumei de control a copiei de siguranță a eșuat.
   backupDatabaseIntegrityFailed: Baza de date din copia de siguranță nu a trecut verificarea integrității.
   backupTablesMissing: Copiei de siguranță îi lipsesc tabele LedgerLab obligatorii.
+  backupSchemaUpgradeFailed: Schema copiei de siguranță nu a putut fi actualizată în siguranță.
+  backupSchemaVersionInvalid: Copia de siguranță conține o versiune nevalidă a schemei bazei de date.
+  backupSchemaNewerThanApplication: Această copie de siguranță a fost creată de o versiune LedgerLab mai nouă. Actualizează LedgerLab înainte de restaurare.
+  backupWorkspaceRelationshipInvalid: Copia de siguranță conține o relație nevalidă între spații de lucru.
   backupRelationshipsInvalid: Copia de siguranță conține relații întrerupte.
   backupOwnerCountInvalid: O restaurare completă trebuie să conțină exact un proprietar local.
   backupOwnerMismatch: Această copie de siguranță aparține altui proprietar local. Baza de date curentă nu a fost modificată.
+  backupAdminMismatch: Această copie de siguranță aparține altui administrator al instalării. Baza de date curentă nu a fost modificată.
+  backupInstallationAdminRequired: Doar administratorul instalării poate crea sau restaura o copie de siguranță completă a bazei de date.
+  installationAdminRequired: Accesul administratorului instalării este necesar pentru copia de siguranță completă și restaurare.
   backupCurrencyLedgerMismatch: Copia de siguranță conține o monedă nevalidă sau o tranzacție a cărei monedă nu corespunde registrului contului.
   backupBudgetCurrencyInvalid: Copia de siguranță conține o monedă nevalidă pentru buget.
   backupMonthPlanCurrencyInvalid: Copia de siguranță conține o monedă nevalidă pentru planul lunar.
@@ -246,6 +254,14 @@ codes:
   profileCurrencyInvalid: Profilul utilizatorului conține o monedă implicită neacceptată.
   profileRegionalSettingsInvalid: Profilul utilizatorului conține setări regionale nevalide.
   planningRecurrenceDidNotAdvance: Regulile plății recurente trebuie să avanseze la o dată ulterioară.
+  planningAmountInvalid: Sumele planificate trebuie să fie numere întregi nenegative exprimate în unități monetare minore.
+  planningNameInvalid: Introdu un nume pentru plata planificată.
+  planningStatusInvalid: O plată planificată modificată trebuie să aibă starea planificată sau programată.
+  planningRecurrenceFrequencyInvalid: Alege o frecvență de recurență validă.
+  planningRecurrenceIntervalInvalid: Intervalele de recurență trebuie să fie numere întregi pozitive.
+  planningRecurrenceHistoryConflict: Anulează plățile, omiterile sau anulările înregistrate înainte de a modifica programul.
+  planningCurrencyHistoryConflict: Anulează acțiunile înregistrate pentru apariții înainte de a schimba moneda plății planificate.
+  planningDirectionHistoryConflict: Anulează acțiunile înregistrate pentru apariții înainte de a schimba venitul în cheltuială sau cheltuiala în venit.
   planningInitialStatusInvalid: Plățile planificate noi trebuie să înceapă cu starea planificată sau programată.
   planningCurrencyInvalid: Alege o monedă ISO 4217 acceptată pentru plata planificată.
   planningOccurrenceNotFound: Plata planificată nu a fost găsită.
@@ -260,10 +276,13 @@ codes:
   planningPreparedCurrencyMismatch: Moneda originală pregătită nu corespunde monedei plății planificate.
   planningCumulativeAmountTooLarge: Plățile planificate cumulate depășesc intervalul sigur pentru numere întregi.
   planningPaymentsUndoRequiredBeforeSkip: Anulează plățile înregistrate înainte de a omite această apariție.
+  planningCancelUndoRequiredBeforeSkip: Restaurează apariția anulată înainte de a o omite.
   planningPaymentsUndoRequiredBeforeCancel: Anulează plățile înregistrate înainte de a anula această apariție.
   planningOccurrenceAlreadyCancelled: Această apariție este deja anulată.
   planningSkipUndoRequiredBeforeCancel: Restaurează apariția omisă înainte de a o anula.
   planningPaymentNotFound: Plata planificată nu a fost găsită.
+  planningIdempotencyKeyInvalid: Cheile de idempotență trebuie să conțină între 1 și 128 de caractere.
+  planningIdempotencyKeyReused: Această cheie de idempotență a fost deja folosită pentru o altă cerere de plată.
   liabilityAccountNotFound: Contul nu a fost găsit.
   liabilityAccountRestoreRequired: Restaurează acest cont înainte de a-i modifica înregistrările de datorie.
   liabilityAccountTypeInvalid: Acest cont nu este un cont de datorie.
@@ -350,6 +369,7 @@ codes:
   attachmentStorageChecksumPathMismatch: Spațiul de stocare pentru bonuri nu este disponibil.
   attachmentStorageIntegrityFailed: Bonul stocat nu a trecut verificarea integrității.
   attachmentTransactionNotFound: Tranzacția nu a putut fi găsită.
+  attachmentPlannedPaymentNotFound: Plata planificată nu a putut fi găsită.
   attachmentFilenameLengthInvalid: "Numele fișierelor cu bonuri trebuie să conțină între {minCharacters, number} și {maxCharacters, number} caractere."
   attachmentFilenameUnsafe: Numele fișierului cu bonul conține caractere neacceptate.
   attachmentContentLengthInvalid: Dimensiunea bonului nu a putut fi verificată.
@@ -375,6 +395,31 @@ codes:
   attachmentBackupEntryDuplicate: Copia de siguranță conține o înregistrare duplicată pentru un bon.
   attachmentBackupMetadataMismatch: Manifestul bonurilor din copia de siguranță nu corespunde metadatelor din baza de date.
   attachmentRestoreStorageConflict: Spațiul de stocare existent pentru bonuri intră în conflict cu copia de siguranță restaurată.
+  attachmentStorageBusy: Spațiul de stocare pentru fișiere atașate este ocupat. Încearcă din nou după finalizarea încărcării sau restaurării curente.
+  workspaceNameInvalid: Numele spațiului trebuie să conțină între 1 și 80 de caractere.
+  workspaceCurrencyInvalid: Alege o monedă acceptată pentru spațiul de lucru.
+  workspaceTimeZoneInvalid: Alege un fus orar valid pentru spațiul de lucru.
+  workspaceRoleInvalid: Alege rolul de proprietar sau membru.
+  workspaceNotFound: Spațiul de lucru nu a fost găsit sau nu este disponibil pentru tine.
+  workspaceEndpointNotFound: Acțiunea solicitată pentru spațiul de lucru nu este disponibilă.
+  workspaceHouseholdRequired: Această acțiune este disponibilă doar pentru spațiile de familie.
+  workspaceOwnerRequired: Doar un proprietar al familiei poate face această acțiune.
+  workspaceMembershipRequired: Nu există niciun spațiu accesibil pentru acest cont.
+  workspaceContextChanged: Accesul la spațiul de lucru s-a schimbat în timpul acestei cereri. Încearcă din nou din spațiul curent.
+  workspaceMemberNotFound: Membrul familiei nu a fost găsit.
+  workspaceLastOwnerRequired: Familia trebuie să păstreze un proprietar. Transferă mai întâi proprietatea.
+  workspaceTransferSelfInvalid: Alege un alt membru al familiei pentru transferul proprietății.
+  workspaceDeleteConfirmationInvalid: Introdu exact numele familiei pentru a confirma ștergerea.
+  invitationEmailInvalid: Introdu o adresă de e-mail validă pentru invitație.
+  invitationNotFound: Invitația nu a fost găsită.
+  invitationAlreadyAccepted: Această invitație a fost deja folosită.
+  invitationAlreadyMember: Această persoană este deja membră a familiei.
+  invitationEmailMismatch: Folosește adresa de e-mail care a primit invitația.
+  invitationExpired: Invitația a expirat. Cere unui proprietar o invitație nouă.
+  invitationExpiryInvalid: Alege o expirare a invitației între 5 minute și 30 de zile.
+  invitationRevoked: Invitația a fost revocată.
+  invitationUserNotFound: Contul pentru această invitație nu a fost găsit.
+  invitationUnavailable: Această invitație nu mai este disponibilă.
 auth:
   authenticationRequired: Autentifică-te pentru a continua.
   invalidCredentials: Adresa de e-mail sau parola este incorectă.

@@ -102,6 +102,9 @@ plannedPayments:
     cancelWithdrawn: Anulează o obligație retrasă
     undoPayment: Anulează plata asociată
     restoreOccurrence: Restaurează această apariție
+    editBill: "Editează {name}"
+    manageInvoices: "Gestionează facturile ({count})"
+    viewActual: Vezi tranzacția efectivă
     keepOccurrence: Păstrează apariția
     cancelOccurrence: Anulează apariția
   feedback:
@@ -210,9 +213,12 @@ plannedPayments:
   form:
     title: Planifică o plată
     description: Creează o plată estimată fără a modifica soldul efectiv.
+    editTitle: Editează plata planificată
+    editDescription: Actualizează factura comună. Modificările se aplică doar dacă păstrează istoricul aparițiilor și plăților existente.
     cancel: Anulează
     planning: Se planifică…
     create: Creează plata planificată
+    save: Salvează modificările
     paymentName: Numele plății
     paymentNamePlaceholder: de ex. Factura de electricitate
     direction: Direcție
@@ -245,6 +251,26 @@ plannedPayments:
     currencyError: Alege o monedă ISO 4217 acceptată.
     positiveAmountError: Suma estimată trebuie să fie mai mare decât zero.
     intervalError: Intervalul de recurență trebuie să fie un număr întreg pozitiv.
+  invoices:
+    title: Documentele facturii
+    description: "{payment} · scadentă la {date}"
+    choose: Alege factura
+    replaceSelection: Alege alt fișier
+    hint: PDF sau imagine · maximum 10 MB · vizibilă tuturor membrilor spațiului
+    fileSize: "{name} · {size} KB"
+    upload: Încarcă
+    uploading: Se încarcă…
+    tooLarge: Factura nu poate depăși 10 MB.
+    uploadFallback: Factura nu a putut fi încărcată.
+    deleteFallback: Factura nu a putut fi ștearsă.
+    emptyTitle: Nu există documente pentru factură
+    emptyDescription: Încarcă factura de utilități sau alt document justificativ înainte ori după plată.
+    fileFallback: Factură
+    typeFallback: fișier
+    fileTypeSize: "{type} · {size} KB"
+    download: Descarcă
+    deleting: Se șterge…
+    deleteAria: "Șterge {name}"
   payment:
     title: Înregistrează plata efectivă
     description: "{name} · estimat {amount} în moneda nativă a planului"

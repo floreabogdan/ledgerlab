@@ -72,12 +72,29 @@ navigation:
     importTransactions:
       label: Importă tranzacții
       shortLabel: Import
+    workspaces:
+      label: Spații de lucru și partajare
+      shortLabel: Spații
     profileSettings:
       label: Setări de profil
       shortLabel: Setări
     dataBackups:
       label: Date și copii de siguranță
       shortLabel: Copii
+workspaceSwitcher:
+  triggerAria: "Deschide meniul spațiului de lucru {name}"
+  menuAria: Spații de lucru disponibile
+  heading: Schimbă spațiul de lucru
+  description: Alege datele financiare pe care vrei să le folosești.
+  types:
+    personal: Personal
+    household: Familie
+  roles:
+    owner: Proprietar
+    member: Membru
+  switching: Se schimbă…
+  switchFailed: Spațiul de lucru nu a putut fi schimbat. Încearcă din nou.
+  manage: Gestionează spațiile și partajarea
 shell:
   skipToContent: Sari la conținutul principal
   searchAndNavigate: Caută și navighează
