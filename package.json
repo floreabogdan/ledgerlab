@@ -91,7 +91,7 @@
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
-    "better-sqlite3@13.0.2": true,
+    "better-sqlite3@13.0.3": false,
     "sharp@0.35.3": true,
     "unrs-resolver@1.12.2": true
   }
