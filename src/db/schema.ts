@@ -26,6 +26,8 @@ export type RecurrenceFrequency = "daily" | "weekly" | "monthly" | "yearly";
 export type CategoryKind = "income" | "expense" | "both";
 export type SpendingNature = "fixed" | "variable";
 export type SpendingPriority = "essential" | "discretionary";
+export type WorkspaceType = "personal" | "household";
+export type WorkspaceRole = "owner" | "member";
 
 const timestamps = {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -40,13 +42,85 @@ export const users = sqliteTable(
     normalizedEmail: text("normalized_email").notNull(),
     passwordHash: text("password_hash").notNull(),
     displayName: text("display_name").notNull(),
+    uiLanguage: text("ui_language").notNull().default("en"),
     defaultCurrency: text("default_currency").notNull().default(DEFAULT_CURRENCY),
     locale: text("locale").notNull().default(DEFAULT_LOCALE),
     timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
     demoDataEnabled: integer("demo_data_enabled", { mode: "boolean" }).notNull().default(false),
+    isInstallationAdmin: integer("is_installation_admin", { mode: "boolean" }).notNull().default(false),
     ...timestamps,
   },
-  (table) => [uniqueIndex("users_normalized_email_unique").on(table.normalizedEmail)],
+  (table) => [
+    uniqueIndex("users_normalized_email_unique").on(table.normalizedEmail),
+    uniqueIndex("users_installation_admin_unique")
+      .on(table.isInstallationAdmin)
+      .where(sql`${table.isInstallationAdmin} = 1`),
+  ],
+);
+
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull().$type<WorkspaceType>(),
+    name: text("name").notNull(),
+    defaultCurrency: text("default_currency").notNull().default(DEFAULT_CURRENCY),
+    timeZone: text("time_zone").notNull().default(DEFAULT_TIME_ZONE),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (table) => [
+    index("workspaces_created_by_idx").on(table.createdByUserId),
+    check("workspaces_type_check", sql`${table.type} IN ('personal', 'household')`),
+    check("workspaces_name_nonempty", sql`length(trim(${table.name})) > 0`),
+  ],
+);
+
+export const workspaceMembers = sqliteTable(
+  "workspace_members",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("member").$type<WorkspaceRole>(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.userId] }),
+    index("workspace_members_user_idx").on(table.userId, table.workspaceId),
+    check("workspace_members_role_check", sql`${table.role} IN ('owner', 'member')`),
+  ],
+);
+
+export const workspaceInvitations = sqliteTable(
+  "workspace_invitations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    normalizedEmail: text("normalized_email").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    role: text("role").notNull().default("member").$type<WorkspaceRole>(),
+    expiresAt: text("expires_at").notNull(),
+    acceptedAt: text("accepted_at"),
+    revokedAt: text("revoked_at"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("workspace_invitations_token_hash_unique").on(table.tokenHash),
+    index("workspace_invitations_workspace_email_idx").on(table.workspaceId, table.normalizedEmail),
+    index("workspace_invitations_expiry_idx").on(table.expiresAt),
+    check("workspace_invitations_role_check", sql`${table.role} IN ('owner', 'member')`),
+    check(
+      "workspace_invitations_resolution_check",
+      sql`${table.acceptedAt} IS NULL OR ${table.revokedAt} IS NULL`,
+    ),
+  ],
 );
 
 export const sessions = sqliteTable(
@@ -56,6 +130,7 @@ export const sessions = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    activeWorkspaceId: text("active_workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
     tokenHash: text("token_hash").notNull(),
     expiresAt: text("expires_at").notNull(),
     lastSeenAt: text("last_seen_at").notNull(),
@@ -73,9 +148,9 @@ export const accounts = sqliteTable(
   "accounts",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     type: text("type").notNull().$type<AccountType>(),
     customType: text("custom_type"),
@@ -86,13 +161,14 @@ export const accounts = sqliteTable(
     institution: text("institution"),
     color: text("color"),
     icon: text("icon"),
+    holderLabel: text("holder_label"),
     displayOrder: integer("display_order").notNull().default(0),
     archivedAt: text("archived_at"),
     ...timestamps,
   },
   (table) => [
-    index("accounts_user_order_idx").on(table.userId, table.displayOrder),
-    uniqueIndex("accounts_user_name_unique").on(table.userId, table.name),
+    index("accounts_workspace_order_idx").on(table.workspaceId, table.displayOrder),
+    uniqueIndex("accounts_workspace_name_unique").on(table.workspaceId, table.name),
   ],
 );
 
@@ -117,9 +193,9 @@ export const categories = sqliteTable(
   "categories",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     parentId: text("parent_id").references((): AnySQLiteColumn => categories.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     kind: text("kind").notNull().default("expense").$type<CategoryKind>(),
@@ -132,8 +208,8 @@ export const categories = sqliteTable(
     ...timestamps,
   },
   (table) => [
-    index("categories_user_parent_idx").on(table.userId, table.parentId),
-    uniqueIndex("categories_user_parent_name_unique").on(table.userId, table.parentId, table.name),
+    index("categories_workspace_parent_idx").on(table.workspaceId, table.parentId),
+    uniqueIndex("categories_workspace_parent_name_unique").on(table.workspaceId, table.parentId, table.name),
   ],
 );
 
@@ -141,9 +217,9 @@ export const merchants = sqliteTable(
   "merchants",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     normalizedName: text("normalized_name").notNull(),
     defaultCategoryId: text("default_category_id").references(() => categories.id, { onDelete: "set null" }),
@@ -151,31 +227,31 @@ export const merchants = sqliteTable(
     archivedAt: text("archived_at"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("merchants_user_normalized_name_unique").on(table.userId, table.normalizedName)],
+  (table) => [uniqueIndex("merchants_workspace_normalized_name_unique").on(table.workspaceId, table.normalizedName)],
 );
 
 export const tags = sqliteTable(
   "tags",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     color: text("color"),
     archivedAt: text("archived_at"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("tags_user_name_unique").on(table.userId, table.name)],
+  (table) => [uniqueIndex("tags_workspace_name_unique").on(table.workspaceId, table.name)],
 );
 
 export const transactions = sqliteTable(
   "transactions",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     accountId: text("account_id")
       .notNull()
       .references(() => accounts.id, { onDelete: "restrict" }),
@@ -206,11 +282,11 @@ export const transactions = sqliteTable(
     ...timestamps,
   },
   (table) => [
-    index("transactions_user_date_idx").on(table.userId, table.occurredAt),
+    index("transactions_workspace_date_idx").on(table.workspaceId, table.occurredAt),
     index("transactions_account_date_idx").on(table.accountId, table.occurredAt),
     index("transactions_category_date_idx").on(table.categoryId, table.occurredAt),
     index("transactions_transfer_group_idx").on(table.transferGroupId),
-    index("transactions_fingerprint_idx").on(table.userId, table.duplicateFingerprint),
+    index("transactions_fingerprint_idx").on(table.workspaceId, table.duplicateFingerprint),
     check("transactions_transfer_group_check", sql`${table.kind} <> 'transfer' OR ${table.transferGroupId} IS NOT NULL`),
   ],
 );
@@ -285,9 +361,9 @@ export const recurrenceRules = sqliteTable(
   "recurrence_rules",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     frequency: text("frequency").notNull().$type<RecurrenceFrequency>(),
     interval: integer("interval").notNull().default(1),
     startDate: text("start_date").notNull(),
@@ -310,9 +386,9 @@ export const plannedPayments = sqliteTable(
   "planned_payments",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     direction: text("direction").notNull().default("expense").$type<"income" | "expense">(),
     expectedAmountMinor: integer("expected_amount_minor").notNull(),
@@ -330,7 +406,7 @@ export const plannedPayments = sqliteTable(
     ...timestamps,
   },
   (table) => [
-    index("planned_payments_user_due_idx").on(table.userId, table.dueDate),
+    index("planned_payments_workspace_due_idx").on(table.workspaceId, table.dueDate),
     check("planned_payments_amount_nonnegative", sql`${table.expectedAmountMinor} >= 0`),
   ],
 );
@@ -433,7 +509,7 @@ export const creditCardStatements = sqliteTable("credit_card_statements", {
 
 export const creditCardPayments = sqliteTable("credit_card_payments", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   accountId: text("account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
   sourceAccountId: text("source_account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
   statementId: text("statement_id").references(() => creditCardStatements.id, { onDelete: "set null" }),
@@ -531,7 +607,7 @@ export const loanScheduleEntries = sqliteTable("loan_schedule_entries", {
 
 export const loanPayments = sqliteTable("loan_payments", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   loanAccountId: text("loan_account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
   sourceAccountId: text("source_account_id").notNull().references(() => accounts.id, { onDelete: "restrict" }),
   scheduleEntryId: text("schedule_entry_id").references(() => loanScheduleEntries.id, { onDelete: "set null" }),
@@ -560,9 +636,9 @@ export const budgets = sqliteTable(
   "budgets",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
     currency: text("currency").notNull().default("USD"),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "cascade" }),
@@ -572,7 +648,7 @@ export const budgets = sqliteTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("budgets_user_month_category_unique").on(table.userId, table.month, table.categoryId),
+    uniqueIndex("budgets_workspace_month_category_unique").on(table.workspaceId, table.month, table.categoryId),
     check("budgets_amount_nonnegative", sql`${table.amountMinor} >= 0`),
   ],
 );
@@ -581,9 +657,9 @@ export const monthPlans = sqliteTable(
   "month_plans",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
     currency: text("currency").notNull().default("USD"),
     name: text("name"),
@@ -594,7 +670,7 @@ export const monthPlans = sqliteTable(
     notes: text("notes"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("month_plans_user_month_unique").on(table.userId, table.month)],
+  (table) => [uniqueIndex("month_plans_workspace_month_unique").on(table.workspaceId, table.month)],
 );
 
 export const monthPlanAccounts = sqliteTable(
@@ -674,9 +750,9 @@ export const attachments = sqliteTable(
   "attachments",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     transactionId: text("transaction_id").references(() => transactions.id, { onDelete: "cascade" }),
     plannedPaymentId: text("planned_payment_id").references(() => plannedPayments.id, { onDelete: "cascade" }),
     fileName: text("file_name").notNull(),
@@ -688,8 +764,13 @@ export const attachments = sqliteTable(
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
+    index("attachments_workspace_created_idx").on(table.workspaceId, table.createdAt),
     index("attachments_transaction_idx").on(table.transactionId),
-    check("attachments_owner_check", sql`${table.transactionId} IS NOT NULL OR ${table.plannedPaymentId} IS NOT NULL`),
+    index("attachments_planned_payment_idx").on(table.plannedPaymentId),
+    check(
+      "attachments_owner_check",
+      sql`(${table.transactionId} IS NOT NULL) <> (${table.plannedPaymentId} IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -697,9 +778,9 @@ export const importBatches = sqliteTable(
   "import_batches",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    workspaceId: text("workspace_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
     fileName: text("file_name").notNull(),
     status: text("status").notNull().default("preview").$type<"preview" | "imported" | "failed" | "cancelled">(),
@@ -708,11 +789,15 @@ export const importBatches = sqliteTable(
     importedRows: integer("imported_rows").notNull().default(0),
     duplicateRows: integer("duplicate_rows").notNull().default(0),
     invalidRows: integer("invalid_rows").notNull().default(0),
-    errors: text("errors", { mode: "json" }).$type<Array<{ row: number; message: string }>>(),
+    errors: text("errors", { mode: "json" }).$type<Array<{
+      row: number;
+      code: string;
+      params?: Record<string, string | number | boolean | null>;
+    }>>(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     completedAt: text("completed_at"),
   },
-  (table) => [index("import_batches_user_created_idx").on(table.userId, table.createdAt)],
+  (table) => [index("import_batches_workspace_created_idx").on(table.workspaceId, table.createdAt)],
 );
 
 export const importRecords = sqliteTable(
@@ -727,7 +812,10 @@ export const importRecords = sqliteTable(
     status: text("status").notNull().$type<"valid" | "invalid" | "duplicate" | "imported" | "skipped">(),
     duplicateOfTransactionId: text("duplicate_of_transaction_id").references(() => transactions.id, { onDelete: "set null" }),
     transactionId: text("transaction_id").references(() => transactions.id, { onDelete: "set null" }),
-    validationErrors: text("validation_errors", { mode: "json" }).$type<string[]>(),
+    validationErrors: text("validation_errors", { mode: "json" }).$type<Array<{
+      code: string;
+      params?: Record<string, string | number | boolean | null>;
+    }>>(),
   },
   (table) => [uniqueIndex("import_records_batch_row_unique").on(table.batchId, table.rowNumber)],
 );
@@ -736,7 +824,8 @@ export const auditLogs = sqliteTable(
   "audit_logs",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    workspaceId: text("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),
     action: text("action").notNull(),
@@ -745,11 +834,18 @@ export const auditLogs = sqliteTable(
     metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("audit_logs_entity_idx").on(table.entityType, table.entityId, table.createdAt)],
+  (table) => [
+    index("audit_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    index("audit_logs_actor_created_idx").on(table.actorUserId, table.createdAt),
+    index("audit_logs_entity_idx").on(table.entityType, table.entityId, table.createdAt),
+  ],
 );
 
 export const schema = {
   users,
+  workspaces,
+  workspaceMembers,
+  workspaceInvitations,
   sessions,
   accounts,
   balanceSnapshots,

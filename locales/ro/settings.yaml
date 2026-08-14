@@ -1,0 +1,266 @@
+title: Setări de profil
+page:
+  eyebrow: Cont local
+  description: Gestionează identitatea, setările regionale de afișare, mementourile din aplicație și parola locală. Listele financiare și instrumentele pentru date au secțiuni dedicate.
+  sectionsAria: Secțiunile setărilor de profil
+tabs:
+  profile: Profil și preferințe
+  reminders: Mementouri
+  security: Securitate
+messages:
+  actionFailed: Această setare nu a putut fi salvată
+preferences:
+  title: Profil și preferințe
+  description: Identitate, limba interfeței, moneda de raportare, formatarea regională și densitatea tabelelor
+  saved: Preferințele profilului au fost salvate.
+  profileGroup: Profil
+  displayName: Nume afișat
+  displayNamePlaceholder: Numele tău
+  email: E-mail
+  regionGroup: Raportare și regiune
+  reportingCurrency: Monedă de raportare
+  reportingCurrencyHelp: Este folosită pentru totalurile din toate conturile. Schimbarea ei recalculează rapoartele, dar nu schimbă moneda înregistrărilor istorice. Totalurile între monede necesită cursuri BNR pentru ambele monede.
+  locale: Setări regionale de formatare
+  localeHelp: Stabilesc modul de formatare a datelor, numerelor și monedelor. Nu schimbă limba interfeței.
+  localePlaceholder: de ex. en-US
+  localeNoMatches: Nicio setare regională uzuală nu corespunde. Poți păstra acest cod de localizare BCP 47 valid.
+  localeDescription: "{language} ({region})"
+  timeZone: Fus orar
+  timeZoneHelp: Stabilește ziua curentă, limitele lunare și starea scadentă sau restantă.
+  timeZonePlaceholder: de ex. Europe/Bucharest
+  timeZoneNoMatches: Niciun fus orar IANA nu corespunde. Poți păstra o valoare personalizată acceptată de mediul de execuție.
+  utcDescription: Timp universal coordonat
+  interfaceGroup: Interfață
+  interfaceLanguage: Limba interfeței
+  interfaceLanguageHelp: Schimbă textele, etichetele și mesajele afișate de LedgerLab. Setările regionale pentru date, numere și monede rămân separate.
+  compactTables: Tabele de date compacte
+  compactTablesHelp: Folosește rânduri mai înguste, păstrând lizibilitatea pe dispozitive mobile.
+  save: Salvează setările profilului
+  saving: Se salvează…
+reminders:
+  title: Mementouri în aplicație
+  description: Sunt afișate în LedgerLab; nu se trimit mesaje externe
+  saved: Preferințele pentru mementouri au fost salvate.
+  dueSoonWindow: Interval pentru scadențe apropiate
+  daysBefore: "{count, plural, one {cu # zi înainte} few {cu # zile înainte} other {cu # de zile înainte}}"
+  dueSoon: Facturi scadente în curând
+  dueSoonHelp: Evidențiază plățile planificate care se apropie de data scadenței.
+  overdue: Obligații restante
+  overdueHelp: Păstrează obligațiile neachitate după scadență vizibile în panoul de control.
+  budgetWarnings: Avertismente pentru bugete
+  budgetWarningsHelp: Semnalează cheltuielile efective apropiate de limita unei categorii sau care o depășesc.
+  save: Salvează mementourile
+  saving: Se salvează…
+security:
+  title: Securitatea contului local
+  description: Parola și opțiunile sesiunilor persistente
+  localUser: utilizator local
+  signedInAs: "Autentificat ca <identity>{identity}</identity>. Cookie-urile de sesiune sunt HttpOnly, iar tokenurile de sesiune stocate sunt păstrate sub formă de hash."
+  changeHeading: Schimbă parola
+  currentPassword: Parola curentă
+  newPassword: Parola nouă
+  newPasswordHelp: Cel puțin 10 caractere
+  confirmPassword: Confirmă parola nouă
+  validation:
+    passwordMinimum: Folosește cel puțin 10 caractere pentru parola nouă.
+    passwordsMismatch: Parolele noi nu coincid.
+  saved: Parola a fost schimbată. Celelalte sesiuni au fost revocate.
+  save: Schimbă parola
+  saving: Se schimbă…
+data:
+  eyebrow: Gestionarea datelor
+  title: Date și copii de siguranță
+  description: Exportă date portabile despre tranzacții, creează o copie locală completă sau restaurează în siguranță o bază de date LedgerLab anterioară.
+  importTransactions: Importă tranzacții
+  portable:
+    title: Exporturi portabile
+    description: Descarcă datele tranzacțiilor efective
+    csvTitle: Export CSV
+    csvDescription: Tranzacții efective potrivite pentru foi de calcul, cu sumele înregistrate în format lizibil și ca valori întregi, monedele originale și instantaneele FX aplicate.
+    csvButton: Descarcă CSV
+    jsonTitle: Export JSON
+    jsonDescription: Conturi, categorii și tranzacții efective structurate, inclusiv proveniența exactă a cursurilor de schimb aplicate la datele respective.
+    jsonButton: Descarcă JSON
+  safety:
+    title: Protejarea întregii baze de date
+    description: Creează o copie de siguranță sau restaurează toate datele locale LedgerLab
+    createTitle: Creează o copie completă
+    createDescription: Include conturile, soldurile, tranzacțiile, planurile, bugetele, regulile de recurență, setările profilului și memoria cache cu cursurile BNR descărcate.
+    createButton: Descarcă copia de siguranță
+    restoreTitle: Restaurează o copie de siguranță
+    restoreDescription: Validează o copie de siguranță LedgerLab înainte de a înlocui datele utilizatorului local autentificat.
+    restoreButton: Alege copia de siguranță
+  errors:
+    exportFailed: Datele nu au putut fi exportate
+    backupFailed: Copia de siguranță nu a putut fi creată
+    restoreFailed: Această copie de siguranță nu a putut fi restaurată
+    fileTooLarge: Fișierele copiilor de siguranță trebuie să fie mai mici de 100 MB.
+    invalidFile: Acesta nu este un fișier JSON de copie de siguranță LedgerLab valid.
+    confirmationRequired: Confirmă că înțelegi că baza de date curentă va fi înlocuită.
+  restored: Copia de siguranță a fost restaurată. Reîncarcă celelalte file LedgerLab deschise înainte de a face modificări.
+  confirmation:
+    title: Restaurezi copia completă a bazei de date?
+    cancel: Anulează
+    restoring: Se restaurează…
+    replace: Înlocuiește datele și restaurează
+    warning: Această acțiune înlocuiește datele LedgerLab curente.
+    warningHelp: Creează mai întâi o copie nouă dacă este posibil să ai nevoie de starea curentă. Sesiunile din celelalte file ale browserului pot rămâne cu date învechite.
+    acknowledgement: Înțeleg că datele financiare curente vor fi înlocuite cu cele din copia de siguranță selectată.
+workspaces:
+  eyebrow: Acces și partajare
+  title: Spații de lucru
+  description: Păstrează registrul privat separat sau folosește un registru de familie cu persoanele în care ai încredere.
+  current:
+    personalDescription: Datele tale financiare private. Doar tu poți accesa acest spațiu.
+    householdDescription: Date financiare comune pentru această familie și membrii ei.
+    type: Tip
+    role: Rolul tău
+    financialContext: Monedă și fus orar
+  types:
+    personal: Spațiu personal
+    household: Spațiu de familie
+  roles:
+    owner: Proprietar
+    member: Membru
+  personal:
+    title: Creează un spațiu comun pentru familie
+    description: Creează un registru separat pentru conturi, cheltuieli, facturi și planuri comune.
+    help: Spațiul personal rămâne privat. Membrii familiei văd doar datele create sau mutate în spațiul comun.
+  members:
+    title: Membrii familiei
+    description: Proprietarii gestionează invitațiile și membrii. Fiecare membru poate folosi datele financiare comune.
+    tableLabel: Membrii familiei
+    person: Persoană
+    role: Rol
+    joined: Data alăturării
+    you: (tu)
+    promote: Fă proprietar
+    demote: Fă membru
+    transfer: Transferă proprietatea
+    remove: Elimină
+    removeConfirm: "Elimini persoana {name} din această familie?"
+    transferConfirm: "Transferi proprietatea către {name}? Tu vei deveni membru."
+  invitations:
+    title: Invitații
+    description: Linkurile sunt asociate adresei de e-mail, expiră după șapte zile și pot fi folosite o singură dată.
+    action: Invită pe cineva
+    linkReady: Copiază acum acest link. Nu va mai fi afișat.
+    copy: Copiază linkul
+    tableLabel: Invitațiile familiei
+    email: Adresă de e-mail
+    role: Rol
+    status: Stare
+    expires: Expiră
+    revoke: Revocă
+    empty: Nu a fost creată nicio invitație.
+    dialogTitle: Invită un membru al familiei
+    dialogDescription: Destinatarul trebuie să se autentifice sau să se înregistreze cu exact această adresă.
+    creating: Se creează…
+    submit: Creează invitația
+  invitationStatus:
+    pending: În așteptare
+    accepted: Acceptată
+    revoked: Revocată
+    expired: Expirată
+  activity:
+    title: Activitatea familiei
+    description: Modificările comune recente arată cine a acționat, ce s-a schimbat și când. Valorile sensibile și linkurile invitațiilor nu sunt afișate aici.
+    tableLabel: Activitatea recentă a familiei
+    actor: Membru
+    action: Acțiune
+    entity: Element
+    time: Dată și oră
+    deletedActor: Fost membru
+    empty: Nu a fost înregistrată încă nicio activitate a familiei.
+    actions:
+      create: A creat
+      createDefault: A creat implicit
+      update: A actualizat
+      archive: A arhivat
+      restore: A restaurat
+      clear: A confirmat
+      void: A anulat
+      pay: A plătit
+      partialPay: A plătit parțial
+      skip: A omis
+      cancel: A anulat
+      undo: A revenit
+      upload: A încărcat
+      delete: A șters
+      save: A salvat
+      copy: A copiat
+      promote: A promovat
+      demote: A retrogradat
+      transferOwnership: A transferat proprietatea
+      remove: A eliminat
+      leave: A părăsit
+      accept: A acceptat
+      revoke: A revocat
+      other: A modificat
+    entities:
+      workspace: Spațiu de lucru
+      invitation: Invitație
+      member: Membru
+      account: Cont
+      category: Categorie
+      tag: Etichetă
+      merchant: Comerciant
+      transaction: Tranzacție
+      plannedPayment: Plată planificată
+      plannedOccurrence: Apariție planificată
+      attachment: Document
+      budget: Buget
+      monthPlan: Plan lunar
+      monthPlanScenario: Scenariu de plan
+      creditCard: Card de credit
+      creditCardStatement: Extras de card
+      creditCardPayment: Plată de card
+      loan: Împrumut
+      loanRate: Rată a împrumutului
+      loanPayment: Plată a împrumutului
+      loanDisbursement: Debursare a împrumutului
+      settings: Setări
+      other: Element comun
+  danger:
+    title: Accesul la familie
+    description: Ieșirea sau ștergerea familiei nu modifică spațiul tău personal.
+    deleteTitle: Șterge această familie
+    deleteHelp: Șterge definitiv registrul comun pentru toți membrii. Acțiunea nu poate fi anulată.
+    leaveTitle: Ieși din această familie
+    leaveHelp: Vei pierde accesul la datele financiare comune. Familia trebuie să păstreze întotdeauna un proprietar.
+    deleteAction: Șterge familia
+    leaveAction: Ieși din familie
+  create:
+    action: Creează familie
+    title: Creează un spațiu de lucru pentru familie
+    description: Alege numele registrului comun și setările financiare. După creare poți invita membrii.
+    name: Numele familiei
+    currency: Moneda de raportare
+    timeZone: Fus orar
+    timeZoneHelp: Folosește un fus orar IANA, de exemplu Europe/Bucharest.
+    creating: Se creează…
+    submit: Creează familia
+  messages:
+    actionFailed: Acțiunea asupra spațiului nu a putut fi finalizată.
+    created: Familia a fost creată.
+    invitationCreated: Invitația a fost creată.
+    invitationRevoked: Invitația a fost revocată.
+    linkCopied: Linkul invitației a fost copiat.
+    promoted: "{name} este acum proprietar."
+    demoted: "{name} este acum membru."
+    removed: "{name} a fost eliminat(ă) din familie."
+    transferred: "Proprietatea a fost transferată către {name}."
+    deleted: Familia a fost ștearsă.
+    left: Ai ieșit din familie.
+  leaveDialog:
+    title: Ieși din familie?
+    description: "Urmează să ieși din {name}."
+    help: Vei reveni la spațiul personal. Dacă ești ultimul proprietar, transferă mai întâi proprietatea.
+    confirm: Ieși din familie
+  deleteDialog:
+    title: Ștergi definitiv familia?
+    description: "Această acțiune șterge definitiv {name} și toate datele financiare comune pentru fiecare membru."
+    field: "Scrie {name} pentru confirmare"
+    help: Numele trebuie să coincidă exact.
+    deleting: Se șterge…
+    confirm: Șterge definitiv

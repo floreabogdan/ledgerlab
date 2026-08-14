@@ -68,7 +68,7 @@ async function seed(): Promise<void> {
     .values([
       {
         id: currentId,
-        userId: safeUser.id,
+        workspaceId: safeUser.id,
         name: "Demo checking",
         type: "current",
         currency: safeUser.defaultCurrency,
@@ -79,7 +79,7 @@ async function seed(): Promise<void> {
       },
       {
         id: savingsId,
-        userId: safeUser.id,
+        workspaceId: safeUser.id,
         name: "Demo savings",
         type: "savings",
         currency: safeUser.defaultCurrency,
@@ -92,23 +92,23 @@ async function seed(): Promise<void> {
     .run();
   db.insert(categories)
     .values([
-      { id: foodId, userId: safeUser.id, name: "Groceries", kind: "expense", spendingNature: "variable", spendingPriority: "essential", createdAt, updatedAt: createdAt },
-      { id: salaryId, userId: safeUser.id, name: "Salary", kind: "income", createdAt, updatedAt: createdAt },
-      { id: housingId, userId: safeUser.id, name: "Housing", kind: "expense", spendingNature: "fixed", spendingPriority: "essential", createdAt, updatedAt: createdAt },
+      { id: foodId, workspaceId: safeUser.id, name: "Groceries", kind: "expense", spendingNature: "variable", spendingPriority: "essential", createdAt, updatedAt: createdAt },
+      { id: salaryId, workspaceId: safeUser.id, name: "Salary", kind: "income", createdAt, updatedAt: createdAt },
+      { id: housingId, workspaceId: safeUser.id, name: "Housing", kind: "expense", spendingNature: "fixed", spendingPriority: "essential", createdAt, updatedAt: createdAt },
     ])
     .run();
   db.insert(merchants)
-    .values({ id: merchantId, userId: safeUser.id, name: "Demo Market", normalizedName: "demo market", defaultCategoryId: foodId, createdAt, updatedAt: createdAt })
+    .values({ id: merchantId, workspaceId: safeUser.id, name: "Demo Market", normalizedName: "demo market", defaultCategoryId: foodId, createdAt, updatedAt: createdAt })
     .run();
   db.insert(tags)
-    .values({ id: randomUUID(), userId: safeUser.id, name: "demo", color: "#64748b", createdAt, updatedAt: createdAt })
+    .values({ id: randomUUID(), workspaceId: safeUser.id, name: "demo", color: "#64748b", createdAt, updatedAt: createdAt })
     .run();
 
   db.insert(transactions)
     .values([
       {
         id: randomUUID(),
-        userId: safeUser.id,
+        workspaceId: safeUser.id,
         accountId: currentId,
         categoryId: salaryId,
         kind: "income",
@@ -122,7 +122,7 @@ async function seed(): Promise<void> {
       },
       {
         id: randomUUID(),
-        userId: safeUser.id,
+        workspaceId: safeUser.id,
         accountId: currentId,
         categoryId: foodId,
         merchantId,
@@ -142,7 +142,7 @@ async function seed(): Promise<void> {
   db.insert(recurrenceRules)
     .values({
       id: rentRuleId,
-      userId: safeUser.id,
+      workspaceId: safeUser.id,
       frequency: "monthly",
       interval: 1,
       startDate: isoDate(year, month, 15),
@@ -153,7 +153,7 @@ async function seed(): Promise<void> {
   db.insert(plannedPayments)
     .values({
       id: rentPaymentId,
-      userId: safeUser.id,
+      workspaceId: safeUser.id,
       title: "Demo rent",
       direction: "expense",
       expectedAmountMinor: 220_000,

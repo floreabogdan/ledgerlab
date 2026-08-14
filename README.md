@@ -24,13 +24,13 @@ Record what happened, prepare what comes next, and understand the difference wit
 
 ## What it is
 
-LedgerLab is a self-hosted, multi-account financial workspace that runs as one Next.js application backed by SQLite. It combines the daily ledger with future obligations, monthly scenarios, liabilities, imports, statistics, and backups without pretending those are all the same kind of money.
+LedgerLab is a self-hosted, multi-account financial workspace that runs as one Next.js application backed by SQLite. Every user has a private personal workspace and can also join fully shared household workspaces. It combines the daily ledger with future obligations, monthly scenarios, liabilities, imports, statistics, and backups without pretending those are all the same kind of money.
 
 The central design decision is simple: **actual, pending, planned, and hypothetical values remain separate until a deliberate workflow connects them.** A bill can exist before a transaction. Paying it asks what actually happened, creates the real ledger entry, and keeps the link between expectation and outcome.
 
 That boundary drives the dashboard, forecasts, statistics, account reconciliation, and test suite.
 
-## One workspace, four financial states
+## Four financial states
 
 | State | What it means | Changes a reconciled balance | Appears in historical actuals |
 | --- | --- | ---: | ---: |
@@ -71,7 +71,7 @@ docker volume create ledgerlab-data
 docker run --detach --name ledgerlab --restart unless-stopped --publish 127.0.0.1:3000:3000 --env REGISTRATION_MODE=first-user --mount source=ledgerlab-data,target=/app/data ghcr.io/floreabogdan/ledgerlab:latest
 ```
 
-Open <http://localhost:3000> and create the installation owner. `REGISTRATION_MODE=first-user` permits exactly that first account and then closes registration automatically.
+Open <http://localhost:3000> and create the installation administrator. `REGISTRATION_MODE=first-user` permits exactly that first ordinary registration and then closes it automatically; household owners can still add people with email-bound invitation links.
 
 The `ledgerlab-data` volume survives `docker stop`, `docker rm`, image pulls, and container rebuilds. **Do not run `docker volume rm ledgerlab-data` unless you intend to permanently erase the installation.** Read [Backups and recovery](docs/backups-and-recovery.md) before an upgrade or move.
 
@@ -108,9 +108,10 @@ The loopback-only port binding is intentional. See [Deployment](docs/deployment.
 
 - Current, savings, cash, investment, credit-card, loan, and custom accounts
 - Opening balances, native account currencies, balance history, and archive-with-history workflows
-- Income, expenses, refunds, adjustments, atomic transfers, split categories, tags, merchants, notes, and receipt uploads
+- Income, expenses, refunds, adjustments, atomic transfers, split categories, tags, merchants, notes, transaction receipts, and planned-invoice uploads
 - Fast multi-entry transaction sessions, duplicate detection, rich filters, CSV preview/mapping/import, and CSV/JSON export
-- Full installation backup and verified restore, including uploaded receipts and ownership checks
+- Personal and household workspaces with switching, owner/member roles, expiring invitations, holder labels, and shared activity
+- Installation-administrator-only full backup and verified restore, including all validated attachments
 
 **Plan and forecast**
 
@@ -128,7 +129,7 @@ The loopback-only port binding is intentional. See [Deployment](docs/deployment.
 - Income, spending, cash flow, savings rate, rolling trends, runway, recurring commitments, concentration, and forecast accuracy
 - Category, merchant, account, tag, weekday, week, and month analysis with calculation explanations
 - Responsive desktop/mobile layouts, accessible labels, keyboard navigation, loading/error/empty states, and mobile-safe tables
-- Profile reporting currency, locale, and IANA time zone without rewriting historical ledgers
+- Workspace reporting currency and IANA time zone, plus personal locale and English/Romanian interface language, without rewriting historical ledgers
 
 ## Money and currency model
 
@@ -136,11 +137,11 @@ LedgerLab stores money as integer minor units. Floating-point values never enter
 
 Each account has an immutable native ledger currency. A transaction posts in that currency; when the original purchase uses another currency, LedgerLab also preserves the original amount, currency, effective date, applied rate, rate source, and optional reference rate. Cross-currency transfers preserve exact source and destination amounts as paired legs.
 
-The profile currency is a **reporting preference**, not a second ledger. Cross-account totals are converted when read: flows use the transaction date, historical balances use the snapshot date, and current balances use the report's as-of date. Changing the profile currency re-expresses reports without rewriting accounts or transaction history.
+The workspace currency is a **shared reporting setting**, not a second ledger. Cross-account totals are converted when read: flows use the transaction date, historical balances use the snapshot date, and current balances use the report's as-of date. Changing it re-expresses reports for that workspace without rewriting accounts or transaction history. The workspace time zone likewise defines shared calendar boundaries, while locale and interface language remain personal preferences.
 
 BNR publishes RON-anchored reference data, not every possible currency pair. LedgerLab stores downloaded daily observations and can resolve supported pairs through RON. Unsupported pairs and institution-specific rates remain manually editable. A saved transaction keeps the rate that was actually applied, so a future feed update cannot change history.
 
-The interface is currently English. Locale, currency, and time-zone preferences control formatting and calendar behavior; they do not translate interface copy.
+The interface supports English and Romanian. Each member may choose their own interface language and locale without changing shared financial data.
 
 Read [Data model and financial invariants](docs/data-model.md) for the complete rules.
 
@@ -159,7 +160,7 @@ flowchart LR
 ```
 
 - **One application, one database writer.** LedgerLab is designed for a single Node.js process and a local persistent SQLite filesystem, not serverless functions, shared network storage, or multiple replicas.
-- **Server-side financial boundaries.** Authentication, ownership checks, validation, balance writes, payment transitions, FX snapshots, and restore verification live behind the API rather than relying on the browser.
+- **Server-side financial boundaries.** Authentication, active-workspace membership and role checks, validation, balance writes, payment transitions, FX snapshots, and restore verification live behind the API rather than relying on the browser.
 - **Migration-owned schema.** Checked-in Drizzle migrations run idempotently before the application serves financial data.
 - **Reproducible delivery.** The production image is multi-stage, runs as an unprivileged user, declares `/app/data` as its only mutable volume, includes a health check, and omits source tests, local data, and development metadata.
 - **Evidence in CI.** Every change runs lint, strict TypeScript checks, focused domain/service tests, a production build, complete Playwright workflows, and a hardened container restart/persistence test. Published images include provenance and an SBOM.
@@ -175,7 +176,7 @@ These are implementation constraints, not documentation promises:
 - Recurrence remains deterministic across month/year boundaries and cannot duplicate an existing occurrence.
 - Credit limits never increase net worth; loan principal and card repayments never become new spending.
 - Reporting conversion failures stay visible rather than adding unlike currencies.
-- A profile-currency change never mutates native account or transaction history.
+- A workspace-currency change never mutates native account or transaction history.
 
 Focused tests cover balances, transfers, recurrence, forecasts, planned-versus-actual calculations, payment transitions, liabilities, FX, reporting currency, attachments, portability, and restore integrity.
 

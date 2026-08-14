@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type LiabilityModule = typeof import("@/server/liabilities");
 type InsightsModule = typeof import("@/server/insights");
@@ -26,6 +28,7 @@ describe("liability posting and forecasting services", () => {
   let insights: InsightsModule;
   let core: CoreModule;
   const originalDatabaseUrl = process.env.DATABASE_URL;
+  const owner = workspaceContext("owner");
 
   function seedEurRate() {
     db.sqlite.prepare(
@@ -45,20 +48,17 @@ describe("liability posting and forecasting services", () => {
     insights = await import("@/server/insights");
     core = await import("@/server/core");
     db.ensureDatabase();
-    db.sqlite.prepare(
-      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-       VALUES ('owner', 'owner@example.test', 'owner@example.test', 'unused', 'Owner', 'RON')`,
-    ).run();
+    insertTestUser(db.sqlite, { id: "owner", displayName: "Owner", currency: "RON" });
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
        VALUES
         ('cash', 'owner', 'Main account', 'current', 'RON', 1000000, '2026-07-01', NULL),
         ('card', 'owner', 'Daily card', 'credit_card', 'RON', -500000, '2026-07-01', 500000),
         ('loan', 'owner', 'Home loan', 'loan', 'RON', -1200000, '2026-07-01', NULL)`,
     ).run();
     db.sqlite.prepare(
-      `INSERT INTO categories (id, user_id, name, kind, spending_nature, spending_priority)
+      `INSERT INTO categories (id, workspace_id, name, kind, spending_nature, spending_priority)
        VALUES
         ('interest', 'owner', 'Loan interest', 'expense', 'fixed', 'essential'),
         ('fees', 'owner', 'Bank fees', 'expense', 'fixed', 'essential')`,
@@ -73,11 +73,11 @@ describe("liability posting and forecasting services", () => {
   });
 
   it("posts card payments as transfers and can undo one payment group", () => {
-    liabilities.saveCreditCardProfile("owner", "card", {
+    liabilities.saveCreditCardProfile(owner, "card", {
       creditLimitMinor: 500000,
       paymentPreference: "full_statement",
     });
-    liabilities.createCreditCardStatement("owner", "card", {
+    liabilities.createCreditCardStatement(owner, "card", {
       periodStart: "2026-07-01",
       periodEnd: "2026-07-30",
       closingDate: "2026-07-30",
@@ -85,7 +85,7 @@ describe("liability posting and forecasting services", () => {
       statementBalanceMinor: 500000,
       minimumDueMinor: 50000,
     });
-    const before = liabilities.listLiabilityObligations("owner", { from: "2026-08-01", to: "2026-08-31" });
+    const before = liabilities.listLiabilityObligations(owner, { from: "2026-08-01", to: "2026-08-31" });
     expect(before).toEqual([
       expect.objectContaining({
         sourceType: "credit_card_statement",
@@ -95,41 +95,41 @@ describe("liability posting and forecasting services", () => {
       }),
     ]);
 
-    const statementId = String((liabilities.liabilityAccountDetail("owner", "card").statements as Array<{ id: string }>)[0].id);
-    const payment = liabilities.recordCreditCardPayment("owner", "card", {
+    const statementId = String((liabilities.liabilityAccountDetail(owner, "card").statements as Array<{ id: string }>)[0].id);
+    const payment = liabilities.recordCreditCardPayment(owner, "card", {
       statementId,
       sourceAccountId: "cash",
       date: "2026-08-01",
       amountMinor: 100000,
     });
-    const balances = new Map(insights.accountsPayload("owner").accounts.map((account) => [account.id, account.balanceMinor]));
+    const balances = new Map(insights.accountsPayload(owner).accounts.map((account) => [account.id, account.balanceMinor]));
     expect(balances.get("cash")).toBe(900000);
     expect(balances.get("card")).toBe(-400000);
-    expect(insights.statistics("owner", 3, { from: "2026-08-01", to: "2026-08-31" }).summary.spendingMinor).toBe(0);
+    expect(insights.statistics(owner, 3, { from: "2026-08-01", to: "2026-08-31" }).summary.spendingMinor).toBe(0);
 
     const cardTransaction = db.sqlite.prepare(
       "SELECT source_transaction_id AS id FROM credit_card_payments WHERE id = ?",
     ).get(payment.paymentId) as { id: string };
-    expect(() => core.voidTransaction("owner", cardTransaction.id)).toThrow(/liability-payment undo/i);
+    expect(() => core.voidTransaction(owner, cardTransaction.id)).toThrow(/liability-payment undo/i);
 
-    liabilities.undoLiabilityPayment("owner", payment.paymentId);
-    const restored = new Map(insights.accountsPayload("owner").accounts.map((account) => [account.id, account.balanceMinor]));
+    liabilities.undoLiabilityPayment(owner, payment.paymentId);
+    const restored = new Map(insights.accountsPayload(owner).accounts.map((account) => [account.id, account.balanceMinor]));
     expect(restored.get("cash")).toBe(1000000);
     expect(restored.get("card")).toBe(-500000);
-    expect(() => liabilities.undoLiabilityPayment("owner", payment.paymentId)).toThrow(/already undone/i);
+    expect(() => liabilities.undoLiabilityPayment(owner, payment.paymentId)).toThrow(/already undone/i);
   });
 
   it("recomputes statement allocation when undoing a capped card overpayment", () => {
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
        VALUES ('overpayment-card', 'owner', 'Overpayment card', 'credit_card', 'RON', -100000, '2026-08-01', 200000)`,
     ).run();
-    liabilities.saveCreditCardProfile("owner", "overpayment-card", {
+    liabilities.saveCreditCardProfile(owner, "overpayment-card", {
       creditLimitMinor: 200000,
       paymentPreference: "full_statement",
     });
-    liabilities.createCreditCardStatement("owner", "overpayment-card", {
+    liabilities.createCreditCardStatement(owner, "overpayment-card", {
       periodStart: "2026-08-01",
       periodEnd: "2026-08-31",
       closingDate: "2026-08-31",
@@ -138,15 +138,15 @@ describe("liability posting and forecasting services", () => {
       minimumDueMinor: 10000,
     });
     const statementId = String(
-      (liabilities.liabilityAccountDetail("owner", "overpayment-card").statements as Array<{ id: string }>)[0].id,
+      (liabilities.liabilityAccountDetail(owner, "overpayment-card").statements as Array<{ id: string }>)[0].id,
     );
-    const initialPayment = liabilities.recordCreditCardPayment("owner", "overpayment-card", {
+    const initialPayment = liabilities.recordCreditCardPayment(owner, "overpayment-card", {
       statementId,
       sourceAccountId: "cash",
       date: "2026-08-01",
       amountMinor: 80000,
     });
-    const overpayment = liabilities.recordCreditCardPayment("owner", "overpayment-card", {
+    const overpayment = liabilities.recordCreditCardPayment(owner, "overpayment-card", {
       statementId,
       sourceAccountId: "cash",
       date: "2026-08-01",
@@ -156,18 +156,18 @@ describe("liability posting and forecasting services", () => {
       "SELECT payments_applied_minor AS applied, status FROM credit_card_statements WHERE id = ?",
     ).get(statementId)).toEqual({ applied: 100000, status: "paid" });
 
-    liabilities.undoLiabilityPayment("owner", overpayment.paymentId);
+    liabilities.undoLiabilityPayment(owner, overpayment.paymentId);
 
     expect(db.sqlite.prepare(
       "SELECT payments_applied_minor AS applied, status FROM credit_card_statements WHERE id = ?",
     ).get(statementId)).toEqual({ applied: 80000, status: "open" });
-    expect((liabilities.liabilityAccountDetail("owner", "overpayment-card").statements as Array<{ id: string; status: string }>)
+    expect((liabilities.liabilityAccountDetail(owner, "overpayment-card").statements as Array<{ id: string; status: string }>)
       .find((statement) => statement.id === statementId)).toMatchObject({ status: "partial" });
-    liabilities.undoLiabilityPayment("owner", initialPayment.paymentId);
+    liabilities.undoLiabilityPayment(owner, initialPayment.paymentId);
   });
 
   it("derives overdue card-statement status even when persisted status is stale", () => {
-    liabilities.createCreditCardStatement("owner", "card", {
+    liabilities.createCreditCardStatement(owner, "card", {
       periodStart: "1999-12-01",
       periodEnd: "1999-12-31",
       closingDate: "1999-12-31",
@@ -178,12 +178,12 @@ describe("liability posting and forecasting services", () => {
     db.sqlite.prepare(
       "UPDATE credit_card_statements SET status = 'open' WHERE account_id = 'card' AND closing_date = '1999-12-31'",
     ).run();
-    expect((liabilities.liabilityAccountDetail("owner", "card").statements as Array<{ closingDate: string; status: string }>)
+    expect((liabilities.liabilityAccountDetail(owner, "card").statements as Array<{ closingDate: string; status: string }>)
       .find((statement) => statement.closingDate === "1999-12-31")).toMatchObject({ status: "overdue" });
   });
 
   it("splits loan principal from spending and forecasts only liquid opening balances", () => {
-    liabilities.saveLoanProfile("owner", "loan", {
+    liabilities.saveLoanProfile(owner, "loan", {
       originalPrincipalMinor: 1200000,
       originationDate: "2026-07-01",
       firstPaymentDate: "2026-08-15",
@@ -203,7 +203,7 @@ describe("liability posting and forecasting services", () => {
         fixedRateBps: 1200,
       },
     });
-    const detail = liabilities.liabilityAccountDetail("owner", "loan");
+    const detail = liabilities.liabilityAccountDetail(owner, "loan");
     const first = (detail.schedule as Array<{
       id: string;
       principalMinor: number;
@@ -212,7 +212,7 @@ describe("liability posting and forecasting services", () => {
     }>)[0];
     expect(first.principalMinor + first.interestMinor).toBe(first.paymentMinor);
 
-    const workspace = insights.planningWorkspace("owner", "2026-08");
+    const workspace = insights.planningWorkspace(owner, "2026-08");
     expect(workspace.expectedOpeningMinor).toBe(1000000);
     expect(workspace.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -225,9 +225,9 @@ describe("liability posting and forecasting services", () => {
     expect(workspace.expectedExpensesMinor).toBe(first.interestMinor);
 
     const totalMinor = first.paymentMinor + 500;
-    core.setCategoryArchived("owner", "interest", true);
-    core.setCategoryArchived("owner", "fees", true);
-    const payment = liabilities.recordLoanPayment("owner", "loan", {
+    core.setCategoryArchived(owner, "interest", true);
+    core.setCategoryArchived(owner, "fees", true);
+    const payment = liabilities.recordLoanPayment(owner, "loan", {
       scheduleEntryId: first.id,
       sourceAccountId: "cash",
       date: "2026-08-01",
@@ -236,7 +236,7 @@ describe("liability posting and forecasting services", () => {
       interestMinor: first.interestMinor,
       feesMinor: 0,
     });
-    const feePayment = liabilities.recordLoanPayment("owner", "loan", {
+    const feePayment = liabilities.recordLoanPayment(owner, "loan", {
       sourceAccountId: "cash",
       date: "2026-08-01",
       totalMinor: 500,
@@ -244,10 +244,10 @@ describe("liability posting and forecasting services", () => {
       interestMinor: 0,
       feesMinor: 500,
     });
-    const balances = new Map(insights.accountsPayload("owner").accounts.map((account) => [account.id, account.balanceMinor]));
+    const balances = new Map(insights.accountsPayload(owner).accounts.map((account) => [account.id, account.balanceMinor]));
     expect(balances.get("cash")).toBe(1000000 - totalMinor);
     expect(balances.get("loan")).toBe(-1200000 + first.principalMinor);
-    const stats = insights.statistics("owner", 3, { from: "2026-08-01", to: "2026-08-31" });
+    const stats = insights.statistics(owner, 3, { from: "2026-08-01", to: "2026-08-31" });
     expect(stats.summary.spendingMinor).toBe(first.interestMinor + 500);
     expect(stats.debt).toMatchObject({
       loanPaymentsMinor: totalMinor,
@@ -257,11 +257,11 @@ describe("liability posting and forecasting services", () => {
     const loanTransaction = db.sqlite.prepare(
       "SELECT source_principal_transaction_id AS id FROM loan_payments WHERE id = ?",
     ).get(payment.paymentId) as { id: string };
-    expect(() => core.voidTransaction("owner", loanTransaction.id)).toThrow(/liability-payment undo/i);
+    expect(() => core.voidTransaction(owner, loanTransaction.id)).toThrow(/liability-payment undo/i);
 
-    const paidEntryBeforeReset = (liabilities.liabilityAccountDetail("owner", "loan").schedule as Array<Record<string, unknown>>)[0];
-    const secondEntry = (liabilities.liabilityAccountDetail("owner", "loan").schedule as Array<{ dueDate: string }>)[1];
-    liabilities.addLoanRatePeriod("owner", "loan", {
+    const paidEntryBeforeReset = (liabilities.liabilityAccountDetail(owner, "loan").schedule as Array<Record<string, unknown>>)[0];
+    const secondEntry = (liabilities.liabilityAccountDetail(owner, "loan").schedule as Array<{ dueDate: string }>)[1];
+    liabilities.addLoanRatePeriod(owner, "loan", {
       rateType: "variable",
       effectiveFrom: secondEntry.dueDate,
       referenceIndex: "IRCC",
@@ -270,7 +270,7 @@ describe("liability posting and forecasting services", () => {
       marginBps: 200,
       resetFrequencyMonths: 3,
     });
-    const afterReset = liabilities.liabilityAccountDetail("owner", "loan").schedule as Array<Record<string, unknown>>;
+    const afterReset = liabilities.liabilityAccountDetail(owner, "loan").schedule as Array<Record<string, unknown>>;
     expect(afterReset[0]).toMatchObject({
       id: paidEntryBeforeReset.id,
       status: "paid",
@@ -278,13 +278,13 @@ describe("liability posting and forecasting services", () => {
     });
     expect(afterReset[1]).toMatchObject({ annualRateBps: 750, isEstimate: 1 });
 
-    liabilities.undoLiabilityPayment("owner", feePayment.paymentId);
-    liabilities.undoLiabilityPayment("owner", payment.paymentId);
-    const restored = new Map(insights.accountsPayload("owner").accounts.map((account) => [account.id, account.balanceMinor]));
+    liabilities.undoLiabilityPayment(owner, feePayment.paymentId);
+    liabilities.undoLiabilityPayment(owner, payment.paymentId);
+    const restored = new Map(insights.accountsPayload(owner).accounts.map((account) => [account.id, account.balanceMinor]));
     expect(restored.get("cash")).toBe(1000000);
     expect(restored.get("loan")).toBe(-1200000);
-    core.setCategoryArchived("owner", "interest", false);
-    core.setCategoryArchived("owner", "fees", false);
+    core.setCategoryArchived(owner, "interest", false);
+    core.setCategoryArchived(owner, "fees", false);
   });
 
   it("rejects future card and loan actuals and a future loan origination without partial writes", () => {
@@ -298,12 +298,12 @@ describe("liability posting and forecasting services", () => {
       "SELECT origination_date AS originationDate FROM loan_profiles WHERE account_id = ?",
     ).get("loan");
 
-    expect(() => liabilities.recordCreditCardPayment("owner", "card", {
+    expect(() => liabilities.recordCreditCardPayment(owner, "card", {
       sourceAccountId: "cash",
       date: tomorrow,
       amountMinor: 1_337,
     })).toThrow(/transactions cannot be dated in the future/i);
-    expect(() => liabilities.recordLoanPayment("owner", "loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "loan", {
       sourceAccountId: "cash",
       date: tomorrow,
       totalMinor: 1_338,
@@ -312,7 +312,7 @@ describe("liability posting and forecasting services", () => {
       feesMinor: 0,
     })).toThrow(/transactions cannot be dated in the future/i);
 
-    expect(() => liabilities.saveLoanProfile("owner", "loan", {
+    expect(() => liabilities.saveLoanProfile(owner, "loan", {
       originalPrincipalMinor: 1_200_000,
       originationDate: tomorrow,
       firstPaymentDate: addDays(tomorrow, 30),
@@ -337,15 +337,15 @@ describe("liability posting and forecasting services", () => {
 
   it("rolls back invalid allocations and rejects incomplete cross-currency payments", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('eur', 'owner', 'EUR cash', 'current', 'EUR', 100000, '2026-07-01')`,
     ).run();
     const before = db.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions").get() as { count: number };
-    expect(() => liabilities.recordLoanPayment("owner", "loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "loan", {
       sourceAccountId: "cash", date: "2026-08-15", totalMinor: 1000,
       principalMinor: 800, interestMinor: 150, feesMinor: 40,
     })).toThrow(/must equal/i);
-    expect(() => liabilities.recordCreditCardPayment("owner", "card", {
+    expect(() => liabilities.recordCreditCardPayment(owner, "card", {
       sourceAccountId: "eur", date: "2026-08-05", amountMinor: 1000,
     })).toThrow(/cross-currency.*explicit cash-account amount/i);
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM transactions").get()).toEqual(before);
@@ -355,20 +355,20 @@ describe("liability posting and forecasting services", () => {
     seedEurRate();
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date, credit_limit_minor)
        VALUES
         ('fx-card-cash', 'owner', 'EUR card cash', 'current', 'EUR', 20000, '2026-08-01', NULL),
         ('fx-card', 'owner', 'RON travel card', 'credit_card', 'RON', -100000, '2026-08-01', 200000)`,
     ).run();
 
-    expect(() => liabilities.recordCreditCardPayment("owner", "fx-card", {
+    expect(() => liabilities.recordCreditCardPayment(owner, "fx-card", {
       sourceAccountId: "fx-card-cash",
       date: "2026-08-01",
       amountMinor: 52000,
       cashAmountMinor: 10000,
     })).toThrow(/verified FX rate/i);
 
-    const payment = liabilities.recordCreditCardPayment("owner", "fx-card", {
+    const payment = liabilities.recordCreditCardPayment(owner, "fx-card", {
       sourceAccountId: "fx-card-cash",
       date: "2026-08-01",
       amountMinor: 52000,
@@ -405,7 +405,7 @@ describe("liability posting and forecasting services", () => {
         referenceFxRateScaled: 500000000,
       }),
     ]);
-    expect((liabilities.liabilityAccountDetail("owner", "fx-card").payments as Array<Record<string, unknown>>)[0])
+    expect((liabilities.liabilityAccountDetail(owner, "fx-card").payments as Array<Record<string, unknown>>)[0])
       .toMatchObject({
         amountMinor: 52000,
         liabilityAmountMinor: 52000,
@@ -415,13 +415,13 @@ describe("liability posting and forecasting services", () => {
         fxRateSource: "manual",
       });
 
-    const stats = insights.statistics("owner", 3, { from: "2026-08-01", to: "2026-08-31" });
+    const stats = insights.statistics(owner, 3, { from: "2026-08-01", to: "2026-08-31" });
     expect(stats.debt).toMatchObject({
       cardPaymentsMinor: 50_000,
       debtServiceMinor: 50_000,
     });
 
-    liabilities.undoLiabilityPayment("owner", payment.paymentId);
+    liabilities.undoLiabilityPayment(owner, payment.paymentId);
     expect((db.sqlite.prepare(
       "SELECT opening_balance_minor + COALESCE(SUM(CASE WHEN t.voided_at IS NULL THEN t.amount_minor ELSE 0 END), 0) AS balance FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id WHERE a.id = ?",
     ).get("fx-card-cash") as { balance: number }).balance).toBe(20000);
@@ -431,12 +431,12 @@ describe("liability posting and forecasting services", () => {
     seedEurRate();
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
         ('fx-loan-cash', 'owner', 'EUR loan cash', 'current', 'EUR', 50000, '2026-08-01'),
         ('fx-loan', 'owner', 'RON FX loan', 'loan', 'RON', -100000, '2026-08-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "fx-loan", {
+    liabilities.saveLoanProfile(owner, "fx-loan", {
       originalPrincipalMinor: 100000,
       originationDate: "2026-07-01",
       firstPaymentDate: "2026-09-01",
@@ -447,7 +447,7 @@ describe("liability posting and forecasting services", () => {
       rate: { rateType: "fixed", effectiveFrom: "2026-07-01", fixedRateBps: 700 },
     });
 
-    const payment = liabilities.recordLoanPayment("owner", "fx-loan", {
+    const payment = liabilities.recordLoanPayment(owner, "fx-loan", {
       sourceAccountId: "fx-loan-cash",
       date: "2026-08-01",
       totalMinor: 50000,
@@ -518,7 +518,7 @@ describe("liability posting and forecasting services", () => {
       fxRateSource: "bnr",
       fxRateScaled: 500000000,
     });
-    expect((liabilities.liabilityAccountDetail("owner", "fx-loan").payments as Array<Record<string, unknown>>)[0])
+    expect((liabilities.liabilityAccountDetail(owner, "fx-loan").payments as Array<Record<string, unknown>>)[0])
       .toMatchObject({
         cashAmountMinor: 10000,
         cashPrincipalMinor: 7999,
@@ -529,7 +529,7 @@ describe("liability posting and forecasting services", () => {
         liabilityCurrency: "RON",
       });
 
-    liabilities.undoLiabilityPayment("owner", payment.paymentId);
+    liabilities.undoLiabilityPayment(owner, payment.paymentId);
     expect((db.sqlite.prepare(
       "SELECT opening_balance_minor + COALESCE(SUM(CASE WHEN t.voided_at IS NULL THEN t.amount_minor ELSE 0 END), 0) AS balance FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id WHERE a.id = ?",
     ).get("fx-loan-cash") as { balance: number }).balance).toBe(50000);
@@ -539,20 +539,20 @@ describe("liability posting and forecasting services", () => {
     seedEurRate();
     db.sqlite.prepare(
       `INSERT INTO accounts
-        (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
         ('fx-disbursement-loan', 'owner', 'RON disbursement loan', 'loan', 'RON', 0, '2026-08-01'),
         ('fx-disbursement-cash', 'owner', 'EUR disbursement cash', 'current', 'EUR', 0, '2026-08-01'),
         ('legacy-disbursement-loan', 'owner', 'RON legacy loan', 'loan', 'RON', 0, '2026-08-01'),
         ('legacy-disbursement-cash', 'owner', 'RON legacy cash', 'current', 'RON', 0, '2026-08-01')`,
     ).run();
-    expect(() => liabilities.disburseLoan("owner", "fx-disbursement-loan", {
+    expect(() => liabilities.disburseLoan(owner, "fx-disbursement-loan", {
       destinationAccountId: "fx-disbursement-cash",
       amountMinor: 50000,
       date: "2026-08-01",
     })).toThrow(/cross-currency.*explicit cash-account amount/i);
 
-    const result = liabilities.disburseLoan("owner", "fx-disbursement-loan", {
+    const result = liabilities.disburseLoan(owner, "fx-disbursement-loan", {
       destinationAccountId: "fx-disbursement-cash",
       amountMinor: 50000,
       cashAmountMinor: 10000,
@@ -587,7 +587,7 @@ describe("liability posting and forecasting services", () => {
     ]);
 
     expect(() => liabilities.disburseLoan(
-      "owner",
+      owner,
       "legacy-disbursement-loan",
       "legacy-disbursement-cash",
       1000,
@@ -597,10 +597,10 @@ describe("liability posting and forecasting services", () => {
 
   it("uses current outstanding principal for an existing partially repaid loan schedule", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('existing-loan', 'owner', 'Existing loan', 'loan', 'RON', -800000, '2026-07-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "existing-loan", {
+    liabilities.saveLoanProfile(owner, "existing-loan", {
       originalPrincipalMinor: 1200000,
       originationDate: "2025-07-01",
       firstPaymentDate: "2026-08-20",
@@ -610,16 +610,16 @@ describe("liability posting and forecasting services", () => {
       amortizationMethod: "annuity",
       rate: { rateType: "fixed", effectiveFrom: "2025-07-01", fixedRateBps: 800 },
     });
-    const schedule = liabilities.liabilityAccountDetail("owner", "existing-loan").schedule as Array<{ openingPrincipalMinor: number }>;
+    const schedule = liabilities.liabilityAccountDetail(owner, "existing-loan").schedule as Array<{ openingPrincipalMinor: number }>;
     expect(schedule[0].openingPrincipalMinor).toBe(800000);
   });
 
   it("rebuilds future installments after an unscheduled principal payment", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('rescheduled-loan', 'owner', 'Rescheduled loan', 'loan', 'RON', -1200000, '2026-08-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "rescheduled-loan", {
+    liabilities.saveLoanProfile(owner, "rescheduled-loan", {
       originalPrincipalMinor: 1200000,
       originationDate: "2026-08-01",
       firstPaymentDate: "2026-09-15",
@@ -629,13 +629,13 @@ describe("liability posting and forecasting services", () => {
       amortizationMethod: "annuity",
       rate: { rateType: "fixed", effectiveFrom: "2026-08-01", fixedRateBps: 1200 },
     });
-    const before = liabilities.liabilityAccountDetail("owner", "rescheduled-loan").schedule as Array<{
+    const before = liabilities.liabilityAccountDetail(owner, "rescheduled-loan").schedule as Array<{
       openingPrincipalMinor: number;
       paymentMinor: number;
     }>;
     expect(before[0].openingPrincipalMinor).toBe(1200000);
 
-    liabilities.recordLoanPayment("owner", "rescheduled-loan", {
+    liabilities.recordLoanPayment(owner, "rescheduled-loan", {
       sourceAccountId: "cash",
       date: "2026-08-01",
       totalMinor: 300000,
@@ -644,7 +644,7 @@ describe("liability posting and forecasting services", () => {
       feesMinor: 0,
     });
 
-    const after = liabilities.liabilityAccountDetail("owner", "rescheduled-loan").schedule as Array<{
+    const after = liabilities.liabilityAccountDetail(owner, "rescheduled-loan").schedule as Array<{
       openingPrincipalMinor: number;
       paymentMinor: number;
     }>;
@@ -654,10 +654,10 @@ describe("liability posting and forecasting services", () => {
 
   it("requires ordered installment allocation and caps each remaining bucket", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('ordered-loan', 'owner', 'Ordered loan', 'loan', 'RON', -600000, '2026-08-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "ordered-loan", {
+    liabilities.saveLoanProfile(owner, "ordered-loan", {
       originalPrincipalMinor: 600000,
       originationDate: "2026-08-01",
       firstPaymentDate: "2026-09-15",
@@ -667,14 +667,14 @@ describe("liability posting and forecasting services", () => {
       amortizationMethod: "annuity",
       rate: { rateType: "fixed", effectiveFrom: "2026-08-01", fixedRateBps: 900 },
     });
-    const schedule = liabilities.liabilityAccountDetail("owner", "ordered-loan").schedule as Array<{
+    const schedule = liabilities.liabilityAccountDetail(owner, "ordered-loan").schedule as Array<{
       id: string;
       principalMinor: number;
       interestMinor: number;
       feesMinor: number;
     }>;
     const [first, second] = schedule;
-    expect(() => liabilities.recordLoanPayment("owner", "ordered-loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "ordered-loan", {
       scheduleEntryId: second.id,
       sourceAccountId: "cash",
       date: "2026-09-15",
@@ -683,7 +683,7 @@ describe("liability posting and forecasting services", () => {
       interestMinor: 0,
       feesMinor: 0,
     })).toThrow(/earliest outstanding installment/i);
-    expect(() => liabilities.recordLoanPayment("owner", "ordered-loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "ordered-loan", {
       scheduleEntryId: first.id,
       sourceAccountId: "cash",
       date: "2026-09-15",
@@ -692,7 +692,7 @@ describe("liability posting and forecasting services", () => {
       interestMinor: 0,
       feesMinor: 0,
     })).toThrow(/remaining principal/i);
-    expect(() => liabilities.recordLoanPayment("owner", "ordered-loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "ordered-loan", {
       scheduleEntryId: first.id,
       sourceAccountId: "cash",
       date: "2026-09-15",
@@ -701,7 +701,7 @@ describe("liability posting and forecasting services", () => {
       interestMinor: first.interestMinor + 1,
       feesMinor: 0,
     })).toThrow(/remaining interest/i);
-    expect(() => liabilities.recordLoanPayment("owner", "ordered-loan", {
+    expect(() => liabilities.recordLoanPayment(owner, "ordered-loan", {
       scheduleEntryId: first.id,
       sourceAccountId: "cash",
       date: "2026-09-15",
@@ -714,12 +714,12 @@ describe("liability posting and forecasting services", () => {
 
   it("preserves month-end anchors and requires reverse-order installment undo", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES
          ('anchor-cash', 'owner', 'Anchor cash', 'current', 'RON', 1000000, '2026-01-01'),
          ('anchor-loan', 'owner', 'Anchor loan', 'loan', 'RON', -400000, '2026-01-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "anchor-loan", {
+    liabilities.saveLoanProfile(owner, "anchor-loan", {
       originalPrincipalMinor: 400000,
       originationDate: "2025-12-01",
       firstPaymentDate: "2026-01-31",
@@ -729,13 +729,13 @@ describe("liability posting and forecasting services", () => {
       amortizationMethod: "annuity",
       rate: { rateType: "fixed", effectiveFrom: "2025-12-01", fixedRateBps: 600 },
     });
-    const initial = liabilities.liabilityAccountDetail("owner", "anchor-loan").schedule as Array<{
+    const initial = liabilities.liabilityAccountDetail(owner, "anchor-loan").schedule as Array<{
       id: string; dueDate: string; paymentMinor: number; principalMinor: number; interestMinor: number;
     }>;
     expect(initial.map((entry) => entry.dueDate)).toEqual([
       "2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30",
     ]);
-    const firstPayment = liabilities.recordLoanPayment("owner", "anchor-loan", {
+    const firstPayment = liabilities.recordLoanPayment(owner, "anchor-loan", {
       scheduleEntryId: initial[0].id,
       sourceAccountId: "anchor-cash",
       date: initial[0].dueDate,
@@ -744,11 +744,11 @@ describe("liability posting and forecasting services", () => {
       interestMinor: initial[0].interestMinor,
       feesMinor: 0,
     });
-    const afterFirst = liabilities.liabilityAccountDetail("owner", "anchor-loan").schedule as typeof initial;
+    const afterFirst = liabilities.liabilityAccountDetail(owner, "anchor-loan").schedule as typeof initial;
     expect(afterFirst.map((entry) => entry.dueDate)).toEqual([
       "2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30",
     ]);
-    const secondPayment = liabilities.recordLoanPayment("owner", "anchor-loan", {
+    const secondPayment = liabilities.recordLoanPayment(owner, "anchor-loan", {
       scheduleEntryId: afterFirst[1].id,
       sourceAccountId: "anchor-cash",
       date: afterFirst[1].dueDate,
@@ -758,15 +758,15 @@ describe("liability posting and forecasting services", () => {
       feesMinor: 0,
     });
 
-    expect(() => liabilities.undoLiabilityPayment("owner", firstPayment.paymentId))
+    expect(() => liabilities.undoLiabilityPayment(owner, firstPayment.paymentId))
       .toThrow(/undo later loan installments/i);
-    liabilities.undoLiabilityPayment("owner", secondPayment.paymentId);
-    expect(() => liabilities.undoLiabilityPayment("owner", firstPayment.paymentId)).not.toThrow();
+    liabilities.undoLiabilityPayment(owner, secondPayment.paymentId);
+    expect(() => liabilities.undoLiabilityPayment(owner, firstPayment.paymentId)).not.toThrow();
   });
 
   it("rejects unsupported schedule inputs before persisting a loan profile", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('validated-loan', 'owner', 'Validated loan', 'loan', 'RON', -600000, '2026-07-01')`,
     ).run();
     const base = {
@@ -782,7 +782,7 @@ describe("liability posting and forecasting services", () => {
     };
     type Input = Parameters<typeof liabilities.saveLoanProfile>[2];
     const save = (overrides: Record<string, unknown>) => liabilities.saveLoanProfile(
-      "owner",
+      owner,
       "validated-loan",
       { ...base, ...overrides } as unknown as Input,
     );
@@ -796,8 +796,8 @@ describe("liability posting and forecasting services", () => {
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM loan_profiles WHERE account_id = ?").get("validated-loan"))
       .toEqual({ count: 0 });
 
-    liabilities.saveLoanProfile("owner", "validated-loan", base as Input);
-    const detail = liabilities.liabilityAccountDetail("owner", "validated-loan");
+    liabilities.saveLoanProfile(owner, "validated-loan", base as Input);
+    const detail = liabilities.liabilityAccountDetail(owner, "validated-loan");
     expect((detail.schedule as Array<unknown>)).toHaveLength(4);
     expect(detail.profile).toMatchObject({
       paymentFrequency: "quarterly",
@@ -810,10 +810,10 @@ describe("liability posting and forecasting services", () => {
 
   it("refuses misleading projections from unsupported restored loan profiles", () => {
     db.sqlite.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
        VALUES ('legacy-loan', 'owner', 'Legacy loan', 'loan', 'RON', -300000, '2026-07-01')`,
     ).run();
-    liabilities.saveLoanProfile("owner", "legacy-loan", {
+    liabilities.saveLoanProfile(owner, "legacy-loan", {
       originalPrincipalMinor: 300000,
       originationDate: "2026-07-01",
       firstPaymentDate: "2026-09-15",
@@ -829,12 +829,12 @@ describe("liability posting and forecasting services", () => {
 
     try {
       db.sqlite.prepare("UPDATE loan_profiles SET amortization_method = 'balloon' WHERE account_id = ?").run("legacy-loan");
-      expect(() => liabilities.liabilityAccountDetail("owner", "legacy-loan"))
+      expect(() => liabilities.liabilityAccountDetail(owner, "legacy-loan"))
         .toThrow(/unsupported repayment schedule/i);
-      expect(() => liabilities.listLiabilityObligations("owner", {}))
+      expect(() => liabilities.listLiabilityObligations(owner, {}))
         .toThrow(/unsupported repayment schedule/i);
       const beforeRateCount = rateCount();
-      expect(() => liabilities.addLoanRatePeriod("owner", "legacy-loan", {
+      expect(() => liabilities.addLoanRatePeriod(owner, "legacy-loan", {
         rateType: "fixed",
         effectiveFrom: "2027-01-01",
         fixedRateBps: 550,
@@ -844,19 +844,19 @@ describe("liability posting and forecasting services", () => {
       db.sqlite.prepare(
         "UPDATE loan_profiles SET amortization_method = 'annuity', regular_payment_minor = 1000 WHERE account_id = ?",
       ).run("legacy-loan");
-      expect(() => liabilities.liabilityAccountDetail("owner", "legacy-loan"))
+      expect(() => liabilities.liabilityAccountDetail(owner, "legacy-loan"))
         .toThrow(/unsupported contractual fixed-payment/i);
 
       db.sqlite.prepare(
         "UPDATE loan_profiles SET regular_payment_minor = NULL, balloon_minor = 1000 WHERE account_id = ?",
       ).run("legacy-loan");
-      expect(() => liabilities.liabilityAccountDetail("owner", "legacy-loan"))
+      expect(() => liabilities.liabilityAccountDetail(owner, "legacy-loan"))
         .toThrow(/unsupported balloon/i);
 
       db.sqlite.prepare(
         "UPDATE loan_profiles SET balloon_minor = 0, payment_frequency = 'quarterly', payment_interval_months = 1 WHERE account_id = ?",
       ).run("legacy-loan");
-      expect(() => liabilities.liabilityAccountDetail("owner", "legacy-loan"))
+      expect(() => liabilities.liabilityAccountDetail(owner, "legacy-loan"))
         .toThrow(/cadence does not match/i);
     } finally {
       db.sqlite.prepare(

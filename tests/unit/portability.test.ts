@@ -4,6 +4,10 @@ import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SUPPORTED_UI_LANGUAGE_TAGS } from "@/i18n/language";
+
+import { workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type CoreModule = typeof import("@/server/core");
 type PortabilityModule = typeof import("@/server/portability");
@@ -13,12 +17,37 @@ let core: CoreModule;
 let portability: PortabilityModule;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 const ownerEmail = "owner@example.test";
+const currentOwner = workspaceContext("current-owner");
 
 function insertOwner(connection: BetterSqlite3.Database, id: string, email = ownerEmail) {
-  connection.prepare(
-    `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-     VALUES (?, ?, ?, 'unused', 'Owner', 'RON')`,
-  ).run(id, email, email.trim().toLowerCase());
+  const hasWorkspaces = Boolean(connection.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'",
+  ).get());
+  if (!hasWorkspaces) {
+    connection.prepare(
+      `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
+       VALUES (?, ?, ?, 'unused', 'Owner', 'RON')`,
+    ).run(id, email, email.trim().toLowerCase());
+    return;
+  }
+  const hasInstallationAdmin = Boolean(connection.prepare(
+    "SELECT 1 FROM users WHERE is_installation_admin = 1 LIMIT 1",
+  ).get());
+  connection.transaction(() => {
+    connection.prepare(
+      `INSERT INTO users
+        (id, email, normalized_email, password_hash, display_name, default_currency, is_installation_admin)
+       VALUES (?, ?, ?, 'unused', 'Owner', 'RON', ?)`,
+    ).run(id, email, email.trim().toLowerCase(), hasInstallationAdmin ? 0 : 1);
+    connection.prepare(
+      `INSERT INTO workspaces
+        (id, type, name, default_currency, time_zone, created_by_user_id)
+       VALUES (?, 'personal', 'Owner', 'RON', 'UTC', ?)`,
+    ).run(id, id);
+    connection.prepare(
+      "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
+    ).run(id, id);
+  })();
 }
 
 function backupEnvelope(connection: BetterSqlite3.Database) {
@@ -34,7 +63,9 @@ function backupEnvelope(connection: BetterSqlite3.Database) {
 function stagedDatabaseFiles() {
   const directory = path.join(process.cwd(), "data", "restore-staging");
   if (!existsSync(directory)) return new Set<string>();
-  return new Set(readdirSync(directory).filter((file) => file.endsWith(".db")));
+  return new Set(readdirSync(directory).filter(
+    (file) => file.startsWith(`${process.pid}-`) && file.endsWith(".db"),
+  ));
 }
 
 beforeEach(async () => {
@@ -48,7 +79,7 @@ beforeEach(async () => {
   insertOwner(db.sqlite, "current-owner");
   db.sqlite.prepare(
     `INSERT INTO accounts
-      (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
      VALUES ('current-account', 'current-owner', 'Current account', 'current', 'RON', 100000, '2025-01-01')`,
   ).run();
 });
@@ -62,7 +93,7 @@ afterEach(() => {
 
 describe("CSV import safety", () => {
   it("rolls back the batch and every created record after an unexpected row failure", () => {
-    expect(() => portability.commitImport("current-owner", {
+    expect(() => portability.commitImport(currentOwner, {
       accountId: "current-account",
       rows: [{
         date: "2025-02-01",
@@ -82,10 +113,10 @@ describe("CSV import safety", () => {
   it("records impossible calendar dates and foreign categories as invalid without posting", () => {
     insertOwner(db.sqlite, "other-owner", "other@example.test");
     db.sqlite.prepare(
-      "INSERT INTO categories (id, user_id, name, kind) VALUES ('other-category', 'other-owner', 'Private', 'expense')",
+      "INSERT INTO categories (id, workspace_id, name, kind) VALUES ('other-category', 'other-owner', 'Private', 'expense')",
     ).run();
 
-    const result = portability.commitImport("current-owner", {
+    const result = portability.commitImport(currentOwner, {
       accountId: "current-account",
       rows: [{ date: "2025-02-30", amountMinor: -100, merchant: "Bad date" }, {
         date: "2025-02-01",
@@ -101,8 +132,8 @@ describe("CSV import safety", () => {
       "SELECT status, validation_errors AS validationErrors FROM import_records ORDER BY row_number",
     ).all() as Array<{ status: string; validationErrors: string }>;
     expect(records.map((record) => record.status)).toEqual(["invalid", "invalid"]);
-    expect(records[0].validationErrors).toContain("Invalid date or amount");
-    expect(records[1].validationErrors).toContain("belongs to this profile");
+    expect(JSON.parse(records[0].validationErrors)).toContainEqual({ code: "IMPORT_INVALID_DATE_OR_AMOUNT" });
+    expect(JSON.parse(records[1].validationErrors)).toContainEqual({ code: "IMPORT_CATEGORY_UNAVAILABLE" });
   });
 
   it("can intentionally import a duplicate external id without violating its unique index", () => {
@@ -112,8 +143,8 @@ describe("CSV import safety", () => {
       merchant: "Card purchase",
       externalId: "bank-row-1",
     };
-    portability.commitImport("current-owner", { accountId: "current-account", rows: [row] });
-    const forced = portability.commitImport("current-owner", {
+    portability.commitImport(currentOwner, { accountId: "current-account", rows: [row] });
+    const forced = portability.commitImport(currentOwner, {
       accountId: "current-account",
       rows: [row],
       duplicateStrategy: "import",
@@ -129,7 +160,7 @@ describe("CSV import safety", () => {
 
   it("rejects rather than silently dropping rows beyond the 10,000-row limit", () => {
     const lines = ["date,amount", ...Array.from({ length: 10_001 }, (_, index) => `2025-02-01,-${index + 1}.00`)];
-    expect(() => portability.previewImport("current-owner", {
+    expect(() => portability.previewImport(currentOwner, {
       accountId: "current-account",
       csv: lines.join("\n"),
     })).toThrow(/limited to 10,000 rows/i);
@@ -137,12 +168,12 @@ describe("CSV import safety", () => {
 
   it("rejects CSV payloads above the advertised 20 MB limit before parsing", () => {
     const oversized = "x".repeat(20 * 1024 * 1024 + 1);
-    expect(() => portability.previewImport("current-owner", { csv: oversized }))
+    expect(() => portability.previewImport(currentOwner, { csv: oversized }))
       .toThrow(/smaller than 20 MB/i);
   });
 
   it("uses one-based row numbers when importing a headerless CSV", () => {
-    const preview = portability.previewImport("current-owner", {
+    const preview = portability.previewImport(currentOwner, {
       accountId: "current-account",
       csv: "2025-02-01,-12.34",
       hasHeader: false,
@@ -156,17 +187,15 @@ describe("CSV import safety", () => {
       accountId: "current-account",
       csv: "date,amount\n03/04/2026,-12.34",
     };
-    const automatic = portability.previewImport("current-owner", input);
+    const automatic = portability.previewImport(currentOwner, input);
     expect(automatic.rows[0]).toMatchObject({ date: null, valid: false });
-    expect(automatic.rows[0].validationErrors).toContain(
-      "Ambiguous date; choose DD/MM/YYYY or MM/DD/YYYY before importing",
-    );
+    expect(automatic.rows[0].validationErrors).toContainEqual({ code: "IMPORT_AMBIGUOUS_DATE" });
 
-    expect(portability.previewImport("current-owner", {
+    expect(portability.previewImport(currentOwner, {
       ...input,
       options: { dateFormat: "MM/dd/yyyy" },
     }).rows[0]).toMatchObject({ date: "2026-03-04", valid: true });
-    expect(portability.previewImport("current-owner", {
+    expect(portability.previewImport(currentOwner, {
       ...input,
       options: { dateFormat: "dd/MM/yyyy" },
     }).rows[0]).toMatchObject({ date: "2026-04-03", valid: true });
@@ -174,14 +203,14 @@ describe("CSV import safety", () => {
 
   it("honors an explicitly selected decimal separator", () => {
     const csv = "date,amount\n2026-03-04,\"-1.234,56\"";
-    const preview = portability.previewImport("current-owner", {
+    const preview = portability.previewImport(currentOwner, {
       accountId: "current-account",
       csv,
       options: { decimalSeparator: "," },
     });
     expect(preview.rows[0]).toMatchObject({ amountMinor: -123_456, valid: true });
 
-    const malformedGrouping = portability.previewImport("current-owner", {
+    const malformedGrouping = portability.previewImport(currentOwner, {
       accountId: "current-account",
       csv: "date,amount\n2026-03-04,\"12,34\"",
       options: { decimalSeparator: "." },
@@ -191,10 +220,86 @@ describe("CSV import safety", () => {
 });
 
 describe("portable exports", () => {
+  it("exports only the selected workspace and omits identities, sessions, invitations, and private preferences", () => {
+    insertOwner(db.sqlite, "private-owner", "private@example.test");
+    db.sqlite.prepare(
+      `UPDATE users
+          SET password_hash = 'credential-secret', locale = 'private-locale'
+        WHERE id = 'current-owner'`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO workspaces
+        (id, type, name, default_currency, time_zone, created_by_user_id)
+       VALUES ('shared-export', 'household', 'Shared export', 'RON', 'Europe/Bucharest', 'current-owner')`,
+    ).run();
+    db.sqlite.prepare(
+      "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('shared-export', 'current-owner', 'owner')",
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO accounts
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
+       VALUES
+        ('shared-export-account', 'shared-export', 'Visible shared account', 'current', 'RON', 0, '2026-01-01'),
+        ('private-account', 'private-owner', 'Inaccessible account secret', 'current', 'RON', 0, '2026-01-01')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO workspace_invitations
+        (id, workspace_id, normalized_email, token_hash, role, expires_at, created_by_user_id)
+       VALUES
+        ('secret-invitation', 'shared-export', 'invitee@example.test', 'invitation-token-secret',
+         'member', '2099-01-01T00:00:00.000Z', 'current-owner')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO sessions
+        (id, user_id, active_workspace_id, token_hash, expires_at, last_seen_at)
+       VALUES
+        ('secret-session', 'current-owner', 'shared-export', 'session-token-secret',
+         '2099-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO audit_logs
+        (id, workspace_id, actor_user_id, entity_type, entity_id, action, after)
+       VALUES
+        ('private-settings-audit', 'shared-export', 'current-owner', 'user_settings',
+         'current-owner', 'preferences', '{"locale":"private-settings-sentinel"}'),
+        ('visible-account-audit', 'shared-export', 'current-owner', 'account',
+         'shared-export-account', 'create', '{"name":"Visible shared account"}')`,
+    ).run();
+
+    const exported = portability.exportData(
+      workspaceContext("current-owner", "shared-export"),
+      "json",
+    ).body;
+    const json = JSON.parse(exported) as {
+      workspace: { id: string };
+      data: Record<string, Array<Record<string, unknown>>>;
+    };
+
+    expect(json.workspace.id).toBe("shared-export");
+    expect(json.data.workspace).toEqual([
+      expect.objectContaining({ id: "shared-export", name: "Shared export" }),
+    ]);
+    expect(json.data.accounts).toEqual([
+      expect.objectContaining({ id: "shared-export-account", workspace_id: "shared-export" }),
+    ]);
+    expect(json.data).not.toHaveProperty("users");
+    expect(json.data).not.toHaveProperty("sessions");
+    expect(json.data).not.toHaveProperty("workspace_invitations");
+    expect(json.data.audit_logs).toEqual([
+      expect.objectContaining({ id: "visible-account-audit", entity_type: "account" }),
+    ]);
+    expect(exported).not.toContain("credential-secret");
+    expect(exported).not.toContain("session-token-secret");
+    expect(exported).not.toContain("invitation-token-secret");
+    expect(exported).not.toContain("private-locale");
+    expect(exported).not.toContain("private-settings-sentinel");
+    expect(exported).not.toContain("Inaccessible account secret");
+  });
+
   it("neutralizes spreadsheet formulas in text cells without changing signed amount fields", () => {
     const dangerousPrefixes = ["=2+2", "+2+2", "-2+2", "@SUM(A:A)", "\t=2+2", "\r=2+2"];
     dangerousPrefixes.forEach((note, index) => {
-      core.createTransaction("current-owner", {
+      core.createTransaction(currentOwner, {
         kind: "expense",
         accountId: "current-account",
         amountMinor: 1_000 + index,
@@ -205,7 +310,7 @@ describe("portable exports", () => {
       });
     });
 
-    const csv = portability.exportData("current-owner", "csv").body;
+    const csv = portability.exportData(currentOwner, "csv").body;
     for (const dangerous of dangerousPrefixes) expect(csv).toContain(`'${dangerous}`);
     expect(csv).toContain("-10.00,RON,-1000");
     expect(csv).not.toContain("'-10.00,RON");
@@ -213,15 +318,20 @@ describe("portable exports", () => {
 
   it("includes every user-owned relationship table and detailed CSV columns", () => {
     db.sqlite.prepare(
+      `UPDATE users
+          SET ui_language = 'en', locale = 'ro-RO', time_zone = 'Europe/Bucharest'
+        WHERE id = 'current-owner'`,
+    ).run();
+    db.sqlite.prepare(
       "INSERT INTO balance_snapshots (id, account_id, snapshot_date, balance_minor) VALUES ('snapshot', 'current-account', '2025-02-01', 99000)",
     ).run();
     db.sqlite.prepare(
-      "INSERT INTO categories (id, user_id, name, kind) VALUES ('food', 'current-owner', 'Food', 'expense')",
+      "INSERT INTO categories (id, workspace_id, name, kind) VALUES ('food', 'current-owner', 'Food', 'expense')",
     ).run();
     db.sqlite.prepare(
-      "INSERT INTO tags (id, user_id, name) VALUES ('travel', 'current-owner', 'travel')",
+      "INSERT INTO tags (id, workspace_id, name) VALUES ('travel', 'current-owner', 'travel')",
     ).run();
-    const transaction = core.createTransaction("current-owner", {
+    const transaction = core.createTransaction(currentOwner, {
       kind: "expense",
       accountId: "current-account",
       amountMinor: 1_000,
@@ -234,12 +344,13 @@ describe("portable exports", () => {
       splits: [{ categoryId: "food", amountMinor: 1_000, note: "full split" }],
     });
 
-    const json = JSON.parse(portability.exportData("current-owner", "json").body) as {
+    const json = JSON.parse(portability.exportData(currentOwner, "json").body) as {
       data: Record<string, unknown[]>;
+      workspace: { id: string; defaultCurrency: string; timeZone: string };
       rowCounts: Record<string, number>;
     };
     const expectedTables = [
-      "accounts", "balance_snapshots", "categories", "merchants", "tags", "transactions",
+      "workspace", "workspace_members", "accounts", "balance_snapshots", "categories", "merchants", "tags", "transactions",
       "transaction_splits", "transaction_tags", "recurrence_rules", "planned_payments",
       "planned_payment_occurrences", "planned_payment_transactions", "budgets", "month_plans",
       "month_plan_accounts", "month_plan_items", "plan_scenarios", "scenario_adjustments",
@@ -257,8 +368,15 @@ describe("portable exports", () => {
       attachments: 1,
     });
     expect(json.data.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ id: transaction.id })]));
+    expect(json.workspace).toEqual({
+      id: "current-owner",
+      type: "personal",
+      name: "Owner",
+      defaultCurrency: "RON",
+      timeZone: "UTC",
+    });
 
-    const csv = portability.exportData("current-owner", "csv").body;
+    const csv = portability.exportData(currentOwner, "csv").body;
     expect(csv).toContain("reference_fx_rate,reference_fx_rate_scaled");
     expect(csv).toContain("account_id,category_id,transfer_group_id,transfer_peer_id,attachment_reference,planned_occurrence_id,external_id,splits_json");
     expect(csv).toContain("receipt-42");
@@ -266,12 +384,106 @@ describe("portable exports", () => {
     expect(csv).toContain("'=2+2");
     expect(csv).toContain("full split");
 
-    const preview = portability.previewImport("current-owner", { csv, accountId: "current-account" });
+    const preview = portability.previewImport(currentOwner, { csv, accountId: "current-account" });
     expect(preview.mapping.externalId).toBe("external_id");
   });
 });
 
 describe("full backup restore safety", () => {
+  it("round-trips household memberships, roles, audit actors, invitations, and attachments", () => {
+    insertOwner(db.sqlite, "co-owner", "co-owner@example.test");
+    insertOwner(db.sqlite, "family-member", "family-member@example.test");
+    db.sqlite.prepare(
+      `INSERT INTO workspaces
+        (id, type, name, default_currency, time_zone, created_by_user_id)
+       VALUES ('family', 'household', 'Family', 'RON', 'Europe/Bucharest', 'current-owner')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO workspace_members (workspace_id, user_id, role)
+       VALUES
+        ('family', 'current-owner', 'owner'),
+        ('family', 'co-owner', 'owner'),
+        ('family', 'family-member', 'member')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO accounts
+        (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
+       VALUES ('family-account', 'family', 'Family account', 'current', 'RON', 10000, '2026-01-01')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO transactions
+        (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
+       VALUES ('family-transaction', 'family', 'family-account', 'expense', 'cleared', -1000, 'RON', '2026-01-02')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO attachments
+        (id, workspace_id, transaction_id, file_name, external_reference)
+       VALUES ('family-attachment', 'family', 'family-transaction', 'invoice.pdf', 'paper-archive-42')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO audit_logs
+        (id, workspace_id, actor_user_id, entity_type, entity_id, action, metadata)
+       VALUES
+        ('family-audit', 'family', 'family-member', 'transaction', 'family-transaction',
+         'create', '{"source":"family-member"}')`,
+    ).run();
+    db.sqlite.prepare(
+      `INSERT INTO workspace_invitations
+        (id, workspace_id, normalized_email, token_hash, role, expires_at, created_by_user_id)
+       VALUES
+        ('family-invitation', 'family', 'future-member@example.test', 'full-backup-invitation-token',
+         'member', '2099-01-01T00:00:00.000Z', 'co-owner')`,
+    ).run();
+
+    const backup = JSON.stringify(portability.createBackup("current-owner"));
+    db.sqlite.prepare(
+      "UPDATE workspace_members SET role = 'member' WHERE workspace_id = 'family' AND user_id = 'current-owner'",
+    ).run();
+    db.sqlite.prepare(
+      "DELETE FROM workspace_members WHERE workspace_id = 'family' AND user_id = 'family-member'",
+    ).run();
+    db.sqlite.prepare("DELETE FROM attachments WHERE id = 'family-attachment'").run();
+    db.sqlite.prepare(
+      "UPDATE audit_logs SET actor_user_id = 'current-owner' WHERE id = 'family-audit'",
+    ).run();
+    db.sqlite.prepare("DELETE FROM workspace_invitations WHERE id = 'family-invitation'").run();
+
+    expect(portability.restoreBackup("current-owner", {
+      backup,
+      confirmation: "RESTORE",
+    })).toMatchObject({ success: true });
+    expect(db.sqlite.prepare(
+      `SELECT user_id AS userId, role FROM workspace_members
+        WHERE workspace_id = 'family' ORDER BY user_id`,
+    ).all()).toEqual([
+      { userId: "co-owner", role: "owner" },
+      { userId: "current-owner", role: "owner" },
+      { userId: "family-member", role: "member" },
+    ]);
+    expect(db.sqlite.prepare(
+      "SELECT workspace_id AS workspaceId, actor_user_id AS actorUserId FROM audit_logs WHERE id = 'family-audit'",
+    ).get()).toEqual({ workspaceId: "family", actorUserId: "family-member" });
+    expect(db.sqlite.prepare(
+      `SELECT workspace_id AS workspaceId, transaction_id AS transactionId,
+              file_name AS fileName, external_reference AS externalReference
+         FROM attachments WHERE id = 'family-attachment'`,
+    ).get()).toEqual({
+      workspaceId: "family",
+      transactionId: "family-transaction",
+      fileName: "invoice.pdf",
+      externalReference: "paper-archive-42",
+    });
+    expect(db.sqlite.prepare(
+      `SELECT workspace_id AS workspaceId, token_hash AS tokenHash, created_by_user_id AS createdByUserId
+         FROM workspace_invitations WHERE id = 'family-invitation'`,
+    ).get()).toEqual({
+      workspaceId: "family",
+      tokenHash: "full-backup-invitation-token",
+      createdByUserId: "co-owner",
+    });
+    expect(db.sqlite.pragma("foreign_key_check")).toEqual([]);
+  });
+
   it("restores a legacy pre-liability backup through shared columns and removes its staging file", () => {
     const legacy = new BetterSqlite3(":memory:");
     try {
@@ -280,6 +492,11 @@ describe("full backup restore safety", () => {
         legacy.exec(statement);
       }
       insertOwner(legacy, "legacy-owner");
+      legacy.prepare(
+        `UPDATE users
+            SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest'
+          WHERE id = 'legacy-owner'`,
+      ).run();
       legacy.prepare(
         `INSERT INTO accounts
           (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
@@ -295,9 +512,81 @@ describe("full backup restore safety", () => {
       expect(result.success).toBe(true);
       expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["legacy-account"]);
       expect(db.sqlite.prepare("SELECT COUNT(*) FROM fx_rate_observations").pluck().get()).toBe(0);
+      expect(db.sqlite.prepare(
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = 'legacy-owner'`,
+      ).get()).toEqual({
+        defaultCurrency: "EUR",
+        locale: "ro-RO",
+        timeZone: "Europe/Bucharest",
+        uiLanguage: "en",
+      });
       expect([...afterFiles].filter((file) => !beforeFiles.has(file))).toEqual([]);
     } finally {
       legacy.close();
+    }
+  });
+
+  it("round-trips a supported UI language without coupling regional preferences", () => {
+    const uiLanguage = SUPPORTED_UI_LANGUAGE_TAGS.at(-1) ?? "en";
+    db.sqlite.prepare(
+      `UPDATE users
+          SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest',
+              ui_language = ?
+        WHERE id = 'current-owner'`,
+    ).run(uiLanguage);
+    const backup = JSON.stringify(portability.createBackup("current-owner"));
+
+    db.sqlite.prepare(
+      `UPDATE users
+          SET default_currency = 'USD', locale = 'en-US', time_zone = 'UTC', ui_language = 'en'
+        WHERE id = 'current-owner'`,
+    ).run();
+
+    expect(portability.restoreBackup("current-owner", {
+      backup,
+      confirmation: "RESTORE",
+    })).toMatchObject({ success: true });
+    expect(db.sqlite.prepare(
+      `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+              ui_language AS uiLanguage
+         FROM users WHERE normalized_email = ?`,
+    ).get(ownerEmail)).toEqual({
+      defaultCurrency: "EUR",
+      locale: "ro-RO",
+      timeZone: "Europe/Bucharest",
+      uiLanguage,
+    });
+  });
+
+  it("normalizes an unsupported restored UI language without changing regional preferences", () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertOwner(source.sqlite, "backup-owner");
+      source.sqlite.prepare(
+        `UPDATE users
+            SET default_currency = 'EUR', locale = 'ro-RO', time_zone = 'Europe/Bucharest',
+                ui_language = 'zz-ZZ'
+          WHERE id = 'backup-owner'`,
+      ).run();
+
+      expect(portability.restoreBackup("current-owner", {
+        backup: backupEnvelope(source.sqlite),
+        confirmation: "RESTORE",
+      })).toMatchObject({ success: true });
+      expect(db.sqlite.prepare(
+        `SELECT default_currency AS defaultCurrency, locale, time_zone AS timeZone,
+                ui_language AS uiLanguage
+           FROM users WHERE id = 'backup-owner'`,
+      ).get()).toEqual({
+        defaultCurrency: "EUR",
+        locale: "ro-RO",
+        timeZone: "Europe/Bucharest",
+        uiLanguage: "en",
+      });
+    } finally {
+      source.sqlite.close();
     }
   });
 
@@ -308,7 +597,7 @@ describe("full backup restore safety", () => {
       expect(() => portability.restoreBackup("current-owner", {
         backup: backupEnvelope(source.sqlite),
         confirmation: "RESTORE",
-      })).toThrow(/different local owner/i);
+      })).toThrow(/different installation administrator/i);
       expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["current-account"]);
     } finally {
       source.sqlite.close();
@@ -322,7 +611,7 @@ describe("full backup restore safety", () => {
       source.sqlite.pragma("foreign_keys = OFF");
       source.sqlite.prepare(
         `INSERT INTO transactions
-          (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at)
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
          VALUES ('broken-transaction', 'backup-owner', 'missing-account', 'expense', 'cleared', -100, 'RON', '2025-02-01')`,
       ).run();
       source.sqlite.pragma("foreign_keys = ON");
@@ -343,7 +632,7 @@ describe("full backup restore safety", () => {
       insertOwner(source.sqlite, "backup-owner");
       source.sqlite.prepare(
         `INSERT INTO accounts
-          (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES ('foreign-ledger', 'backup-owner', 'Foreign ledger', 'current', 'EUR', 10000, '2025-01-01')`,
       ).run();
 
@@ -365,12 +654,12 @@ describe("full backup restore safety", () => {
       insertOwner(source.sqlite, "backup-owner");
       source.sqlite.prepare(
         `INSERT INTO accounts
-          (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES ('eur-account', 'backup-owner', 'EUR account', 'current', 'EUR', 10000, '2025-01-01')`,
       ).run();
       source.sqlite.prepare(
         `INSERT INTO transactions
-          (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at)
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
          VALUES ('mismatched-posting', 'backup-owner', 'eur-account', 'expense', 'cleared', -100, 'RON', '2025-02-01')`,
       ).run();
 
@@ -390,7 +679,7 @@ describe("full backup restore safety", () => {
       insertOwner(source.sqlite, "backup-owner");
       source.sqlite.prepare(
         `INSERT INTO accounts
-          (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES ('unsupported-account', 'backup-owner', 'Unsupported account', 'current', 'ZZZ', 10000, '2025-01-01')`,
       ).run();
 
@@ -410,12 +699,12 @@ describe("full backup restore safety", () => {
       insertOwner(source.sqlite, "backup-owner");
       source.sqlite.prepare(
         `INSERT INTO accounts
-          (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES ('ron-account', 'backup-owner', 'RON account', 'current', 'RON', 100000, '2025-01-01')`,
       ).run();
       source.sqlite.prepare(
         `INSERT INTO transactions
-          (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at,
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at,
            original_amount_minor, original_currency, fx_rate_scaled, fx_rate_source, fx_rate_date)
          VALUES ('bad-fx', 'backup-owner', 'ron-account', 'expense', 'cleared', -46000, 'RON', '2025-02-01',
                  10000, 'USD', 450000000, 'manual', '2025-02-01')`,
@@ -437,7 +726,7 @@ describe("full backup restore safety", () => {
       insertOwner(source.sqlite, "backup-owner");
       source.sqlite.prepare(
         `INSERT INTO accounts
-          (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
          VALUES
           ('ron-account', 'backup-owner', 'RON account', 'current', 'RON', 100000, '2025-01-01'),
           ('eur-account', 'backup-owner', 'EUR account', 'current', 'EUR', 0, '2025-01-01')`,
@@ -445,14 +734,14 @@ describe("full backup restore safety", () => {
       source.sqlite.pragma("foreign_keys = OFF");
       source.sqlite.prepare(
         `INSERT INTO transactions
-          (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at,
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at,
            transfer_group_id, transfer_peer_id)
          VALUES ('bad-transfer-source', 'backup-owner', 'ron-account', 'transfer', 'cleared', -50000, 'RON', '2025-02-01',
                  'bad-transfer-group', 'bad-transfer-destination')`,
       ).run();
       source.sqlite.prepare(
         `INSERT INTO transactions
-          (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at,
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at,
            transfer_group_id, transfer_peer_id, original_amount_minor, original_currency,
            fx_rate_scaled, fx_rate_source, fx_rate_date)
          VALUES ('bad-transfer-destination', 'backup-owner', 'eur-account', 'transfer', 'cleared', 9999, 'EUR', '2025-02-01',
@@ -479,5 +768,102 @@ describe("full backup restore safety", () => {
     })).toThrow(/checksum/i);
     expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["current-account"]);
     expect(stagedDatabaseFiles()).toEqual(beforeFiles);
+  });
+
+  it("rejects a backup from a newer schema without mutating the current installation", () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertOwner(source.sqlite, "future-owner");
+      source.sqlite.prepare(
+        `INSERT INTO accounts
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
+         VALUES ('future-account', 'future-owner', 'Future account', 'current', 'RON', 500, '2026-01-01')`,
+      ).run();
+      source.sqlite.exec(`
+        ALTER TABLE accounts ADD COLUMN future_only_value text;
+        UPDATE accounts SET future_only_value = 'must-not-be-truncated' WHERE id = 'future-account';
+        CREATE TABLE future_financial_records (
+          id text PRIMARY KEY NOT NULL,
+          workspace_id text NOT NULL,
+          amount_minor integer NOT NULL
+        );
+        INSERT INTO future_financial_records VALUES ('future-row', 'future-owner', 999);
+      `);
+      const latestMigration = source.sqlite.prepare(
+        "SELECT MAX(created_at) FROM __drizzle_migrations",
+      ).pluck().get() as number;
+      source.sqlite.prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('future-schema', ?)",
+      ).run(latestMigration + 1);
+
+      const beforeFiles = stagedDatabaseFiles();
+      expect(() => portability.restoreBackup("current-owner", {
+        backup: backupEnvelope(source.sqlite),
+        confirmation: "RESTORE",
+      })).toThrow(/newer LedgerLab version/i);
+      expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["current-account"]);
+      expect(db.sqlite.prepare("SELECT id FROM users").pluck().all()).toEqual(["current-owner"]);
+      expect(db.sqlite.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'future_financial_records'",
+      ).get()).toBeUndefined();
+      expect(stagedDatabaseFiles()).toEqual(beforeFiles);
+    } finally {
+      source.sqlite.close();
+    }
+  });
+
+  it("rejects cross-workspace financial references without mutating the current installation", () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertOwner(source.sqlite, "backup-owner");
+      insertOwner(source.sqlite, "other-owner", "other-owner@example.test");
+      source.sqlite.prepare(
+        `INSERT INTO accounts
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
+         VALUES ('other-account', 'other-owner', 'Other account', 'current', 'RON', 0, '2026-01-01')`,
+      ).run();
+      source.sqlite.prepare(
+        `INSERT INTO transactions
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
+         VALUES ('cross-workspace-transaction', 'backup-owner', 'other-account',
+                 'expense', 'cleared', -100, 'RON', '2026-01-02')`,
+      ).run();
+
+      const beforeFiles = stagedDatabaseFiles();
+      expect(() => portability.restoreBackup("current-owner", {
+        backup: backupEnvelope(source.sqlite),
+        confirmation: "RESTORE",
+      })).toThrow(/transaction references relationship/i);
+      expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["current-account"]);
+      expect(db.sqlite.prepare("SELECT id FROM users").pluck().all()).toEqual(["current-owner"]);
+      expect(stagedDatabaseFiles()).toEqual(beforeFiles);
+    } finally {
+      source.sqlite.close();
+    }
+  });
+
+  it("rejects an ownerless household without mutating the current installation", () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertOwner(source.sqlite, "backup-owner");
+      source.sqlite.prepare(
+        `INSERT INTO workspaces
+          (id, type, name, default_currency, time_zone, created_by_user_id)
+         VALUES ('ownerless-household', 'household', 'Ownerless', 'RON', 'UTC', 'backup-owner')`,
+      ).run();
+      source.sqlite.prepare(
+        `INSERT INTO workspace_members (workspace_id, user_id, role)
+         VALUES ('ownerless-household', 'backup-owner', 'member')`,
+      ).run();
+
+      expect(() => portability.restoreBackup("current-owner", {
+        backup: backupEnvelope(source.sqlite),
+        confirmation: "RESTORE",
+      })).toThrow(/household owner relationship/i);
+      expect(db.sqlite.prepare("SELECT id FROM accounts").pluck().all()).toEqual(["current-account"]);
+      expect(db.sqlite.prepare("SELECT id FROM users").pluck().all()).toEqual(["current-owner"]);
+    } finally {
+      source.sqlite.close();
+    }
   });
 });

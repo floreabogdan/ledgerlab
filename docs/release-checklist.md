@@ -34,7 +34,7 @@ npm audit
 docker build --tag ledgerlab:release-candidate .
 ```
 
-Review all dependency findings rather than suppressing them. Test the candidate container with a new disposable volume, then test an upgrade using a backup of synthetic data from the previous release. Reconcile account balances, transfer pairs, planned-to-paid links, profile-currency totals, receipts, and liability allocations.
+Review all dependency findings rather than suppressing them. Test the candidate container with a new disposable volume, then test an upgrade using a backup of synthetic data from the previous release. Reconcile personal and household account balances, transfer pairs, planned-to-paid links, workspace-currency totals, receipts, planned invoices, memberships, and liability allocations.
 
 ## 4. Review security and operations
 

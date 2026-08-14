@@ -5,10 +5,21 @@ import {
   scrypt as nodeScrypt,
   timingSafeEqual,
 } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 
 import { db as defaultDb, type LedgerDatabase } from "@/db";
-import { sessions, users, type User } from "@/db/schema";
+import {
+  auditLogs,
+  categories,
+  sessions,
+  users,
+  workspaceMembers,
+  workspaceInvitations,
+  workspaces,
+  type User,
+} from "@/db/schema";
+import type { Translator } from "@/i18n/runtime";
+import { resolveConfiguredUiLanguage } from "@/i18n/language";
 import {
   DEFAULT_CURRENCY,
   DEFAULT_LOCALE,
@@ -16,6 +27,8 @@ import {
   isSupportedCurrency,
   normalizeCurrencyCode,
 } from "@/lib/currencies";
+import { localizedDefaultCategories } from "@/lib/default-categories";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 
 export const SESSION_COOKIE_NAME = "ledgerlab_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -45,6 +58,7 @@ export class AuthError extends Error {
       | "INVALID_CURRENCY"
       | "INVALID_LOCALE"
       | "INVALID_TIME_ZONE"
+      | "INVITATION_UNAVAILABLE"
       | "REGISTRATION_CLOSED",
   ) {
     super(message);
@@ -120,11 +134,20 @@ export type CreateUserInput = {
   currency?: string;
   locale?: string;
   timeZone?: string;
+  uiLanguage?: string;
 };
 
 export type CreateUserOptions = {
   /** Atomically require this user to be the installation's first account. */
   requireEmptyDatabase?: boolean;
+  /** Seed the personal workspace in the selected interface language. */
+  defaultCategoryTranslator?: Translator;
+  invitation?: {
+    id: string;
+    tokenHash: string;
+    workspaceId: string;
+    role: "owner" | "member";
+  };
 };
 
 function toSafeUser(user: User): SafeUser {
@@ -166,6 +189,7 @@ export async function createUser(
   } catch {
     throw new AuthError("Choose a valid IANA time zone.", "INVALID_TIME_ZONE");
   }
+  const uiLanguage = resolveConfiguredUiLanguage(input.uiLanguage);
 
   const passwordHash = await hashPassword(input.password);
   const now = new Date().toISOString();
@@ -175,22 +199,110 @@ export async function createUser(
     normalizedEmail,
     passwordHash,
     displayName: input.displayName.trim() || normalizedEmail.split("@")[0]!,
+    uiLanguage,
     defaultCurrency,
     locale,
     timeZone,
     demoDataEnabled: false,
+    isInstallationAdmin: false,
     createdAt: now,
     updatedAt: now,
   };
   try {
     database.transaction((transaction) => {
+      const existingUser = transaction.select({ id: users.id }).from(users).limit(1).get();
       if (options.requireEmptyDatabase) {
-        const existingUser = transaction.select({ id: users.id }).from(users).limit(1).get();
         if (existingUser) {
           throw new AuthError("Registration is closed for this installation.", "REGISTRATION_CLOSED");
         }
       }
+      user.isInstallationAdmin = !existingUser;
       transaction.insert(users).values(user).run();
+      transaction.insert(workspaces).values({
+        id: user.id,
+        type: "personal",
+        name: user.displayName,
+        defaultCurrency: user.defaultCurrency,
+        timeZone: user.timeZone,
+        createdByUserId: user.id,
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+      transaction.insert(workspaceMembers).values({
+        workspaceId: user.id,
+        userId: user.id,
+        role: "owner",
+        createdAt: now,
+      }).run();
+      if (options.defaultCategoryTranslator) {
+        for (const category of localizedDefaultCategories(options.defaultCategoryTranslator)) {
+          const categoryId = randomUUID();
+          transaction.insert(categories).values({
+            id: categoryId,
+            workspaceId: user.id,
+            name: category.name,
+            kind: category.kind,
+            spendingNature: category.spendingNature,
+            spendingPriority: category.spendingPriority,
+            color: category.color,
+            displayOrder: category.displayOrder,
+            createdAt: now,
+            updatedAt: now,
+          }).run();
+          transaction.insert(auditLogs).values({
+            id: randomUUID(),
+            workspaceId: user.id,
+            actorUserId: user.id,
+            entityType: "category",
+            entityId: categoryId,
+            action: "create_default",
+            after: {
+              name: category.name,
+              kind: category.kind,
+              spendingNature: category.spendingNature,
+              spendingPriority: category.spendingPriority,
+            },
+            createdAt: now,
+          }).run();
+        }
+      }
+      if (options.invitation) {
+        const invitation = transaction.select({ id: workspaceInvitations.id })
+          .from(workspaceInvitations)
+          .where(and(
+            eq(workspaceInvitations.id, options.invitation.id),
+            eq(workspaceInvitations.tokenHash, options.invitation.tokenHash),
+            eq(workspaceInvitations.workspaceId, options.invitation.workspaceId),
+            eq(workspaceInvitations.normalizedEmail, normalizedEmail),
+            isNull(workspaceInvitations.acceptedAt),
+            isNull(workspaceInvitations.revokedAt),
+            gt(workspaceInvitations.expiresAt, now),
+          ))
+          .get();
+        if (!invitation) {
+          throw new AuthError("This invitation is no longer available.", "INVITATION_UNAVAILABLE");
+        }
+        transaction.insert(workspaceMembers).values({
+          workspaceId: options.invitation.workspaceId,
+          userId: user.id,
+          role: options.invitation.role,
+          createdAt: now,
+        }).run();
+        transaction.update(workspaceInvitations)
+          .set({ acceptedAt: now })
+          .where(eq(workspaceInvitations.id, options.invitation.id))
+          .run();
+        transaction.insert(auditLogs).values({
+          id: randomUUID(),
+          workspaceId: options.invitation.workspaceId,
+          actorUserId: user.id,
+          entityType: "workspace_invitation",
+          entityId: options.invitation.id,
+          action: "accept",
+          after: { role: options.invitation.role },
+          createdAt: now,
+        }).run();
+      }
     });
   } catch (error) {
     const message = String(error);
@@ -242,6 +354,7 @@ export function createSession(
     .values({
       id: sessionId,
       userId,
+      activeWorkspaceId: userId,
       tokenHash: hashSessionToken(token),
       expiresAt: expiresAt.toISOString(),
       lastSeenAt: now.toISOString(),
@@ -256,6 +369,11 @@ export function createSession(
 export type ValidSession = {
   session: typeof sessions.$inferSelect;
   user: SafeUser;
+};
+
+export type ValidWorkspaceSession = ValidSession & {
+  workspace: typeof workspaces.$inferSelect;
+  context: WorkspaceContext;
 };
 
 export function validateSessionToken(
@@ -285,6 +403,59 @@ export function validateSessionToken(
     row.session.lastSeenAt = now.toISOString();
   }
   return { session: row.session, user: toSafeUser(row.user) };
+}
+
+/**
+ * Resolves and revalidates workspace membership for each request. The role is
+ * never trusted from session state, so removing a member takes effect on their
+ * next request even when the identity session itself is still valid.
+ */
+export function resolveWorkspaceSession(
+  valid: ValidSession,
+  database: LedgerDatabase = defaultDb,
+): ValidWorkspaceSession | null {
+  const findMembership = (workspaceId: string) => database
+    .select({ workspace: workspaces, role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.userId, valid.user.id),
+      eq(workspaceMembers.workspaceId, workspaceId),
+    ))
+    .get();
+
+  const requestedWorkspaceId = valid.session.activeWorkspaceId ?? valid.user.id;
+  let membership = findMembership(requestedWorkspaceId);
+  if (!membership && requestedWorkspaceId !== valid.user.id) {
+    membership = findMembership(valid.user.id);
+    if (membership) {
+      database.update(sessions)
+        .set({ activeWorkspaceId: valid.user.id })
+        .where(eq(sessions.id, valid.session.id))
+        .run();
+      valid.session.activeWorkspaceId = valid.user.id;
+    }
+  }
+  if (!membership) return null;
+
+  return {
+    ...valid,
+    workspace: membership.workspace,
+    context: {
+      actorUserId: valid.user.id,
+      workspaceId: membership.workspace.id,
+      role: membership.role,
+    },
+  };
+}
+
+export function validateWorkspaceSessionToken(
+  token: string | null | undefined,
+  database: LedgerDatabase = defaultDb,
+  now = new Date(),
+): ValidWorkspaceSession | null {
+  const valid = validateSessionToken(token, database, now);
+  return valid ? resolveWorkspaceSession(valid, database) : null;
 }
 
 export function revokeSession(token: string, database: LedgerDatabase = defaultDb): void {

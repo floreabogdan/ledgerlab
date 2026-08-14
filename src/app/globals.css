@@ -174,7 +174,7 @@ svg {
   position: fixed;
   z-index: 1000;
   top: 8px;
-  left: 8px;
+  inset-inline-start: 8px;
   transform: translateY(-150%);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -195,12 +195,13 @@ svg {
 .app-sidebar {
   position: fixed;
   z-index: 50;
-  inset: 0 auto 0 0;
+  inset-block: 0;
+  inset-inline-start: 0;
   display: flex;
   width: var(--sidebar-width);
   flex-direction: column;
   overflow-y: auto;
-  border-right: 1px solid var(--sidebar-line);
+  border-inline-end: 1px solid var(--sidebar-line);
   background: var(--sidebar);
   color: var(--sidebar-ink);
 }
@@ -252,6 +253,170 @@ svg {
   flex: 1;
   padding: var(--space-4) var(--space-3) var(--space-6);
 }
+
+.workspace-switcher {
+  position: relative;
+  min-width: 0;
+  margin: var(--space-3);
+}
+
+.workspace-switcher-trigger {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid rgb(148 163 184 / 0.3);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.07);
+  padding: 7px 9px;
+  color: var(--sidebar-ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.workspace-switcher-trigger:hover,
+.workspace-switcher-trigger[aria-expanded="true"] {
+  border-color: rgb(103 232 249 / 0.46);
+  background: rgb(255 255 255 / 0.11);
+}
+
+.workspace-switcher-trigger:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgb(103 232 249 / 0.22);
+}
+
+.workspace-switcher-mark,
+.workspace-switcher-option-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgb(103 232 249 / 0.14);
+  color: #67e8f9;
+}
+
+.workspace-switcher-copy,
+.workspace-switcher-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  line-height: var(--leading-tight);
+}
+
+.workspace-switcher-copy small,
+.workspace-switcher-copy strong,
+.workspace-switcher-option-copy small,
+.workspace-switcher-option-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-switcher-copy small {
+  color: var(--sidebar-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+
+.workspace-switcher-copy strong { font-size: var(--text-sm); font-weight: 650; }
+
+.workspace-switcher-chevron {
+  color: var(--sidebar-muted);
+  transition: transform 140ms ease;
+}
+
+.workspace-switcher-trigger[aria-expanded="true"] .workspace-switcher-chevron { transform: rotate(180deg); }
+
+.workspace-switcher-popover {
+  position: absolute;
+  z-index: 220;
+  inset-block-start: calc(100% + 7px);
+  inset-inline-start: 0;
+  width: min(320px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 20px 50px rgb(6 18 48 / 0.35);
+  color: var(--ink);
+  animation: fade-in 120ms ease-out;
+}
+
+.workspace-switcher-header {
+  display: grid;
+  gap: 3px;
+  padding: 12px 13px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-switcher-header strong { font-size: var(--text-sm); }
+.workspace-switcher-header span { color: var(--ink-faint); font-size: var(--text-xs); line-height: var(--leading-normal); }
+.workspace-switcher-options { max-height: min(320px, 46vh); overflow-y: auto; padding: var(--space-2); }
+
+.workspace-switcher-option,
+.workspace-switcher-manage {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 7px 8px;
+  color: var(--ink-soft);
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.workspace-switcher-option:hover,
+.workspace-switcher-option:focus-visible,
+.workspace-switcher-manage:hover,
+.workspace-switcher-manage:focus-visible {
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+  outline: 0;
+}
+
+.workspace-switcher-option[aria-checked="true"] { color: var(--brand-hover); }
+.workspace-switcher-option:disabled { cursor: wait; opacity: 0.72; }
+.workspace-switcher-option-mark { background: var(--brand-soft); color: var(--brand); }
+.workspace-switcher-option-copy strong { font-size: var(--text-sm); }
+.workspace-switcher-option-copy small { color: var(--ink-faint); font-size: var(--text-2xs); }
+.workspace-switcher-status { color: var(--ink-faint); font-size: var(--text-2xs); }
+.workspace-switcher-error { margin: 0; padding: 0 13px 9px; color: var(--negative); font-size: var(--text-xs); }
+.workspace-switcher-separator { height: 1px; background: var(--line); }
+.workspace-switcher-manage { grid-template-columns: 20px minmax(0, 1fr); margin: var(--space-2); width: calc(100% - var(--space-4)); min-height: 40px; }
+
+.workspace-switcher-compact {
+  flex: 1 1 auto;
+  max-width: 132px;
+  margin: 0;
+}
+
+.workspace-switcher-compact .workspace-switcher-trigger {
+  min-height: 38px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  border-color: var(--line);
+  background: var(--surface-subtle);
+  padding: 3px 6px;
+  color: var(--ink);
+}
+
+.workspace-switcher-compact .workspace-switcher-mark { width: 28px; height: 28px; background: var(--brand-soft); color: var(--brand); }
+.workspace-switcher-compact .workspace-switcher-copy small { display: none; }
+.workspace-switcher-compact .workspace-switcher-copy strong { font-size: var(--text-xs); }
+.workspace-switcher-compact .workspace-switcher-chevron { color: var(--ink-faint); }
+.workspace-switcher-compact .workspace-switcher-popover { position: fixed; inset-block-start: 56px; inset-inline: 12px; width: auto; }
 
 .nav-section + .nav-section {
   margin-top: var(--space-6);
@@ -308,7 +473,7 @@ svg {
 .app-main {
   min-height: 100vh;
   min-height: 100dvh;
-  margin-left: var(--sidebar-width);
+  margin-inline-start: var(--sidebar-width);
 }
 
 .app-topbar {
@@ -364,7 +529,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: 1.25;
-  text-align: left;
+  text-align: start;
   box-shadow: var(--shadow-sm);
 }
 
@@ -373,7 +538,7 @@ svg {
   min-height: 22px;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
+  margin-inline-start: auto;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--surface-subtle);
@@ -443,7 +608,7 @@ svg {
   position: absolute;
   z-index: 220;
   top: calc(100% + 9px);
-  left: 0;
+  inset-inline-start: 0;
   width: min(430px, calc(100vw - 28px));
   max-height: calc(100vh - 86px);
   max-height: calc(100dvh - 86px);
@@ -453,7 +618,7 @@ svg {
   background: var(--surface);
   box-shadow: 0 20px 50px rgb(23 37 84 / 0.2);
   color: var(--ink);
-  text-align: left;
+  text-align: start;
   animation: fade-in 120ms ease-out;
 }
 
@@ -492,7 +657,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .date-range-quick-picks button:hover {
@@ -566,11 +731,12 @@ svg {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface);
-  padding: 5px 10px 5px 5px;
+  padding-block: 5px;
+  padding-inline: 5px 10px;
   color: var(--ink);
   font: inherit;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   box-shadow: var(--shadow-sm);
 }
 
@@ -615,7 +781,7 @@ svg {
   position: absolute;
   z-index: 220;
   top: calc(100% + 8px);
-  right: 0;
+  inset-inline-end: 0;
   width: min(300px, calc(100vw - 24px));
   border: 1px solid var(--line-strong);
   border-radius: 10px;
@@ -671,7 +837,7 @@ svg {
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
 }
 
 .account-menu-item:hover,
@@ -787,7 +953,7 @@ svg {
   width: 14px;
   height: 14px;
   border: 2px solid currentColor;
-  border-right-color: transparent;
+  border-inline-end-color: transparent;
   border-radius: 50%;
   animation: spin 700ms linear infinite;
 }
@@ -861,11 +1027,11 @@ svg {
   width: 100%;
 }
 
-.input-wrap .input { padding-left: 36px; }
+.input-wrap .input { padding-inline-start: 36px; }
 .input-leading {
   position: absolute;
   top: 50%;
-  left: var(--control-padding-inline);
+  inset-inline-start: var(--control-padding-inline);
   color: var(--ink-faint);
   pointer-events: none;
   transform: translateY(-50%);
@@ -889,7 +1055,7 @@ svg {
   background: var(--surface);
   color: var(--ink);
   padding: 4px var(--control-padding-inline);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
@@ -925,7 +1091,7 @@ svg {
   position: absolute;
   z-index: 260;
   top: calc(100% + 7px);
-  left: 0;
+  inset-inline-start: 0;
   width: 100%;
   min-width: min(320px, calc(100vw - 40px));
   overflow: hidden;
@@ -967,7 +1133,7 @@ svg {
   color: var(--ink);
   min-height: 48px;
   padding: var(--space-2);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -1093,7 +1259,7 @@ svg {
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: 600;
-  text-align: left;
+  text-align: start;
 }
 
 .command-result:hover,
@@ -1182,8 +1348,8 @@ svg {
   content: "";
 }
 
-.auth-aside::before { width: 520px; height: 520px; top: -270px; right: -160px; }
-.auth-aside::after { width: 360px; height: 360px; bottom: -200px; left: -100px; }
+.auth-aside::before { width: 520px; height: 520px; inset-block-start: -270px; inset-inline-end: -160px; }
+.auth-aside::after { width: 360px; height: 360px; inset-block-end: -200px; inset-inline-start: -100px; }
 .auth-aside-content { position: relative; z-index: 1; width: min(100%, 590px); }
 .auth-aside-label { color: #67e8f9; font-size: var(--text-2xs); font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
 .auth-aside h2 { max-width: 16ch; margin: var(--space-3) 0 var(--space-4); font-size: clamp(2.125rem, 4vw, 3.25rem); font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
@@ -1211,11 +1377,12 @@ svg {
 @media (max-width: 900px) {
   :root { --sidebar-width: 0px; }
   .app-sidebar, .app-topbar { display: none; }
-  .app-main { margin-left: 0; padding-top: 104px; padding-bottom: 64px; }
+  .app-main { margin-inline-start: 0; padding-top: 104px; padding-bottom: 64px; }
   .mobile-topbar {
     position: fixed;
     z-index: 80;
-    inset: 0 auto auto 0;
+    inset-block-start: 0;
+    inset-inline-start: 0;
     width: 100%;
     max-width: 100%;
     display: grid;
@@ -1261,10 +1428,11 @@ svg {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .date-range-control-compact .date-range-chevron { margin-left: auto; }
+  .date-range-control-compact .date-range-chevron { margin-inline-start: auto; }
   .date-range-control-compact .date-range-popover {
     position: fixed;
-    inset: 112px 12px auto;
+    inset-block: 112px auto;
+    inset-inline: 12px;
     width: auto;
     max-height: calc(100dvh - 190px);
     overflow-y: auto;
@@ -1274,7 +1442,8 @@ svg {
   .mobile-nav {
     position: fixed;
     z-index: 70;
-    inset: auto auto 0 0;
+    inset-block-end: 0;
+    inset-inline-start: 0;
     width: 100%;
     max-width: 100%;
     display: grid;
@@ -1309,6 +1478,7 @@ svg {
 }
 
 @media (max-width: 430px) {
+  .mobile-brand { gap: 0; font-size: 0; }
   .date-range-fields { grid-template-columns: 1fr; }
   .date-range-quick-picks { gap: 4px; }
   .date-range-quick-picks button { padding-inline: 7px; font-size: var(--text-2xs); }

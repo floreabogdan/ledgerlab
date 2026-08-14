@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpError } from "@/lib/api-response";
+import { HttpError, type ApiErrorParameters } from "@/lib/api-response";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 import {
   buildLoanSchedule,
   calculateCardStatementDue,
@@ -24,9 +25,18 @@ import {
   validateTransferFxForPosting,
   type PreparedTransferFx,
 } from "@/server/fx";
-import { getUserCalendarContext } from "@/server/user-settings";
+import { getWorkspaceCalendarContext } from "@/server/user-settings";
 
 type SqlValue = string | number | bigint | Buffer | null;
+
+function liabilityError(
+  status: number,
+  code: `LIABILITY_${string}`,
+  message: string,
+  params?: ApiErrorParameters,
+) {
+  return new HttpError(status, { code, message, params });
+}
 
 export type CreditCardProfileInput = {
   creditLimitMinor: number;
@@ -141,32 +151,40 @@ function requireSupportedLoanAmortization(value: unknown): SupportedLoanAmortiza
   if (typeof value === "string" && SUPPORTED_LOAN_AMORTIZATION_METHODS.has(value as SupportedLoanAmortizationMethod)) {
     return value as SupportedLoanAmortizationMethod;
   }
-  throw new HttpError(422, "This loan uses an unsupported repayment schedule. Choose annuity, equal principal, or interest only");
+  throw liabilityError(422, "LIABILITY_LOAN_AMORTIZATION_UNSUPPORTED", "This loan uses an unsupported repayment schedule. Choose annuity, equal principal, or interest only");
 }
 
 function requireSupportedPaymentCadence(frequency: unknown, intervalMonths: unknown): LoanPaymentFrequency {
   if (!Number.isSafeInteger(intervalMonths) || Number(intervalMonths) < 1 || Number(intervalMonths) > 120) {
-    throw new HttpError(422, "The loan payment interval must be between 1 and 120 months");
+    throw liabilityError(422, "LIABILITY_PAYMENT_INTERVAL_INVALID", "The loan payment interval must be between 1 and 120 months");
   }
   const canonicalInterval = frequency === "monthly"
     ? 1
     : frequency === "quarterly"
       ? 3
       : frequency === "yearly" ? 12 : frequency === "custom" ? null : undefined;
-  if (canonicalInterval === undefined) throw new HttpError(422, "This loan uses an unsupported payment cadence");
-  if (canonicalInterval !== null && intervalMonths !== canonicalInterval) {
-    throw new HttpError(422, `${frequency} cadence does not match the payment interval`);
+  if (canonicalInterval === undefined) {
+    throw liabilityError(422, "LIABILITY_PAYMENT_CADENCE_UNSUPPORTED", "This loan uses an unsupported payment cadence");
   }
-  return frequency as LoanPaymentFrequency;
+  const supportedFrequency = frequency as LoanPaymentFrequency;
+  if (canonicalInterval !== null && intervalMonths !== canonicalInterval) {
+    throw liabilityError(
+      422,
+      "LIABILITY_PAYMENT_CADENCE_INTERVAL_MISMATCH",
+      `${supportedFrequency} cadence does not match the payment interval`,
+      { frequency: supportedFrequency },
+    );
+  }
+  return supportedFrequency;
 }
 
 function rejectUnsupportedLoanProfileFields(input: LoanProfileInput): void {
   const raw = input as LoanProfileInput & Record<string, unknown>;
   if (Object.prototype.hasOwnProperty.call(raw, "regularPaymentMinor")) {
-    throw new HttpError(422, "Contractual fixed-payment schedules are not supported yet; remove regularPaymentMinor");
+    throw liabilityError(422, "LIABILITY_FIXED_PAYMENT_SCHEDULE_UNSUPPORTED", "Contractual fixed-payment schedules are not supported yet; remove regularPaymentMinor");
   }
   if (Object.prototype.hasOwnProperty.call(raw, "balloonMinor")) {
-    throw new HttpError(422, "Explicit balloon schedules are not supported yet; remove balloonMinor");
+    throw liabilityError(422, "LIABILITY_BALLOON_SCHEDULE_UNSUPPORTED", "Explicit balloon schedules are not supported yet; remove balloonMinor");
   }
 }
 
@@ -183,7 +201,7 @@ type OwnedAccount = {
 };
 
 function ownedAccount(
-  userId: string,
+  workspace: WorkspaceContext,
   accountId: string,
   expectedType?: "credit_card" | "loan",
   options: { allowArchived?: boolean } = {},
@@ -200,23 +218,25 @@ function ownedAccount(
               AND substr(t.occurred_at, 1, 10) >= a.opening_balance_date
               THEN t.amount_minor ELSE 0 END), 0) AS pendingMinor
        FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id
-      WHERE a.id = ? AND a.user_id = ? GROUP BY a.id`,
-    [accountId, userId],
+      WHERE a.id = ? AND a.workspace_id = ? GROUP BY a.id`,
+    [accountId, workspace.workspaceId],
   );
-  if (!account) throw new HttpError(404, "Account not found");
+  if (!account) throw liabilityError(404, "LIABILITY_ACCOUNT_NOT_FOUND", "Account not found");
   if (account.archivedAt && !options.allowArchived) {
-    throw new HttpError(409, "Restore this account before changing its liability records");
+    throw liabilityError(409, "LIABILITY_ACCOUNT_RESTORE_REQUIRED", "Restore this account before changing its liability records");
   }
   if (expectedType && account.type !== expectedType) {
-    throw new HttpError(422, expectedType === "loan" ? "Choose a loan account" : "Choose a credit-card account");
+    throw expectedType === "loan"
+      ? liabilityError(422, "LIABILITY_LOAN_ACCOUNT_REQUIRED", "Choose a loan account")
+      : liabilityError(422, "LIABILITY_CREDIT_CARD_ACCOUNT_REQUIRED", "Choose a credit-card account");
   }
   return account;
 }
 
-function sourceCashAccount(userId: string, accountId: string) {
-  const account = ownedAccount(userId, accountId);
+function sourceCashAccount(workspace: WorkspaceContext, accountId: string) {
+  const account = ownedAccount(workspace, accountId);
   if (!new Set(["current", "savings", "cash"]).has(account.type)) {
-    throw new HttpError(422, "Debt payments must come from a current, savings, or cash account");
+    throw liabilityError(422, "LIABILITY_CASH_ACCOUNT_REQUIRED", "Debt payments must come from a current, savings, or cash account");
   }
   return account;
 }
@@ -243,12 +263,12 @@ function resolvePaymentTransfer(
 ) {
   const crossCurrency = cashAccount.currency !== liabilityAccount.currency;
   if (crossCurrency && input.cashAmountMinor == null) {
-    throw new HttpError(422, "Cross-currency debt payments require an explicit cash-account amount");
+    throw liabilityError(422, "LIABILITY_CROSS_CURRENCY_CASH_AMOUNT_REQUIRED", "Cross-currency debt payments require an explicit cash-account amount");
   }
   const cashAmountMinor = input.cashAmountMinor ?? liabilityAmountMinor;
   assertMinor(cashAmountMinor, "Cash-account amount");
   if (!crossCurrency && cashAmountMinor !== liabilityAmountMinor) {
-    throw new HttpError(422, "Same-currency cash and liability amounts must match");
+    throw liabilityError(422, "LIABILITY_SAME_CURRENCY_PAYMENT_AMOUNT_MISMATCH", "Same-currency cash and liability amounts must match");
   }
   const prepared = validateTransferFxForPosting(
     cashAccount.currency,
@@ -277,7 +297,7 @@ function allocateCashPayment(
   const components = (Object.entries(liabilityAmounts) as Array<[LiabilityComponent, number]>)
     .filter(([, amount]) => amount > 0);
   if (cashAmountMinor < components.length) {
-    throw new HttpError(422, "The cash amount is too small to represent every non-zero loan allocation");
+    throw liabilityError(422, "LIABILITY_CASH_ALLOCATION_TOO_SMALL", "The cash amount is too small to represent every non-zero loan allocation");
   }
   const liabilityTotal = components.reduce((sum, [, amount]) => sum + BigInt(amount), 0n);
   const remainingCash = cashAmountMinor - components.length;
@@ -317,7 +337,7 @@ function exactEffectiveRate(
     currencyMinorUnitDigits(fromCurrency),
     currencyMinorUnitDigits(toCurrency),
   ) !== toAmountMinor) {
-    throw new HttpError(422, "This cash/liability allocation cannot be represented at the supported FX precision");
+    throw liabilityError(422, "LIABILITY_FX_ALLOCATION_PRECISION_UNSUPPORTED", "This cash/liability allocation cannot be represented at the supported FX precision");
   }
   return rateScaled;
 }
@@ -331,7 +351,7 @@ function referenceQuoteFields(
   if (prepared.fxRateSource !== "bnr" && prepared.referenceFxRateScaled == null) return {};
   const quote = findPersistedBnrQuote(date, fromCurrency, toCurrency);
   if (!quote) {
-    throw new HttpError(422, "The reference BNR quote is not cached. Request the FX quote before posting this liability payment");
+    throw liabilityError(422, "LIABILITY_REFERENCE_QUOTE_NOT_CACHED", "The reference BNR quote is not cached. Request the FX quote before posting this liability payment");
   }
   return {
     referenceFxRateScaled: quote.rateScaled,
@@ -404,26 +424,63 @@ function componentExpenseFx(
   };
 }
 
-function assertOwnedCategory(userId: string, categoryId?: string | null) {
+function assertOwnedCategory(workspace: WorkspaceContext, categoryId?: string | null) {
   if (!categoryId) return;
   const category = one<{ id: string }>(
-    "SELECT id FROM categories WHERE id = ? AND user_id = ? AND archived_at IS NULL",
-    [categoryId, userId],
+    "SELECT id FROM categories WHERE id = ? AND workspace_id = ? AND archived_at IS NULL",
+    [categoryId, workspace.workspaceId],
   );
-  if (!category) throw new HttpError(422, "Choose an active category that belongs to you");
+  if (!category) throw liabilityError(422, "LIABILITY_CATEGORY_REQUIRED", "Choose an active category that belongs to you");
 }
 
-function assertMinor(value: number, label: string, allowZero = false) {
+const LIABILITY_MINOR_ERROR_CODES = {
+  "Cash-account amount": "LIABILITY_CASH_ACCOUNT_AMOUNT_INVALID",
+  "Credit limit": "LIABILITY_CREDIT_LIMIT_INVALID",
+  "Original principal": "LIABILITY_ORIGINAL_PRINCIPAL_INVALID",
+  "Statement balance": "LIABILITY_STATEMENT_BALANCE_INVALID",
+  "Minimum due": "LIABILITY_MINIMUM_DUE_INVALID",
+  "Payment amount": "LIABILITY_PAYMENT_AMOUNT_INVALID",
+  "Total payment": "LIABILITY_TOTAL_PAYMENT_INVALID",
+  "Principal amount": "LIABILITY_PRINCIPAL_AMOUNT_INVALID",
+  "Interest amount": "LIABILITY_INTEREST_AMOUNT_INVALID",
+  "Fee amount": "LIABILITY_FEE_AMOUNT_INVALID",
+  "Disbursement amount": "LIABILITY_DISBURSEMENT_AMOUNT_INVALID",
+} as const;
+
+function assertMinor(value: number, label: keyof typeof LIABILITY_MINOR_ERROR_CODES, allowZero = false) {
   if (!Number.isSafeInteger(value) || (allowZero ? value < 0 : value <= 0)) {
-    throw new HttpError(422, `${label} must be ${allowZero ? "a non-negative" : "a positive"} integer in minor units`);
+    throw liabilityError(
+      422,
+      LIABILITY_MINOR_ERROR_CODES[label],
+      `${label} must be ${allowZero ? "a non-negative" : "a positive"} integer in minor units`,
+    );
   }
 }
 
-function assertDate(value: string, label: string) {
+const LIABILITY_DATE_ERROR_CODES = {
+  "rate effective date": "LIABILITY_RATE_EFFECTIVE_DATE_INVALID",
+  "rate end date": "LIABILITY_RATE_END_DATE_INVALID",
+  "next reset date": "LIABILITY_NEXT_RESET_DATE_INVALID",
+  "origination date": "LIABILITY_LOAN_ORIGINATION_DATE_INVALID",
+  "first payment date": "LIABILITY_FIRST_PAYMENT_DATE_INVALID",
+  "maturity date": "LIABILITY_MATURITY_DATE_INVALID",
+  "statement period start": "LIABILITY_STATEMENT_PERIOD_START_INVALID",
+  "statement period end": "LIABILITY_STATEMENT_PERIOD_END_INVALID",
+  "statement closing date": "LIABILITY_STATEMENT_CLOSING_DATE_INVALID",
+  "statement due date": "LIABILITY_STATEMENT_DUE_DATE_INVALID",
+  "payment date": "LIABILITY_PAYMENT_DATE_INVALID",
+  "disbursement date": "LIABILITY_DISBURSEMENT_DATE_INVALID",
+} as const;
+
+function assertDate(value: string, label: keyof typeof LIABILITY_DATE_ERROR_CODES) {
   try {
     parseDateKey(value);
   } catch {
-    throw new HttpError(422, `Choose a valid ${label} in YYYY-MM-DD format`);
+    throw liabilityError(
+      422,
+      LIABILITY_DATE_ERROR_CODES[label],
+      `Choose a valid ${label} in YYYY-MM-DD format`,
+    );
   }
 }
 
@@ -432,10 +489,10 @@ function assertRatePeriod(input: LoanRateInput) {
   if (input.effectiveTo) assertDate(input.effectiveTo, "rate end date");
   if (input.nextResetDate) assertDate(input.nextResetDate, "next reset date");
   if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) {
-    throw new HttpError(422, "The rate period cannot end before it starts");
+    throw liabilityError(422, "LIABILITY_RATE_PERIOD_ORDER_INVALID", "The rate period cannot end before it starts");
   }
   if (input.rateType === "fixed" && input.fixedRateBps == null) {
-    throw new HttpError(422, "Enter the fixed annual interest rate");
+    throw liabilityError(422, "LIABILITY_FIXED_RATE_REQUIRED", "Enter the fixed annual interest rate");
   }
   if (input.rateType === "variable" && (
     !input.referenceIndex?.trim()
@@ -443,10 +500,10 @@ function assertRatePeriod(input: LoanRateInput) {
     || input.referenceRateBps == null
     || input.resetFrequencyMonths == null
   )) {
-    throw new HttpError(422, "Variable rates require an index, tenor, observed rate, and reset frequency");
+    throw liabilityError(422, "LIABILITY_VARIABLE_RATE_FIELDS_REQUIRED", "Variable rates require an index, tenor, observed rate, and reset frequency");
   }
   if (input.floorRateBps != null && input.capRateBps != null && input.floorRateBps > input.capRateBps) {
-    throw new HttpError(422, "The rate cap cannot be below the floor");
+    throw liabilityError(422, "LIABILITY_RATE_CAP_BELOW_FLOOR", "The rate cap cannot be below the floor");
   }
 }
 
@@ -456,13 +513,13 @@ function previousDate(date: string): string {
   return value.toISOString().slice(0, 10);
 }
 
-export function saveCreditCardProfile(userId: string, accountId: string, input: CreditCardProfileInput) {
-  const account = ownedAccount(userId, accountId, "credit_card");
+export function saveCreditCardProfile(workspace: WorkspaceContext, accountId: string, input: CreditCardProfileInput) {
+  const account = ownedAccount(workspace, accountId, "credit_card");
   assertMinor(input.creditLimitMinor, "Credit limit", true);
   const before = one<Record<string, unknown>>("SELECT * FROM credit_card_profiles WHERE account_id = ?", [accountId]);
   database().transaction(() => {
-    database().prepare("UPDATE accounts SET credit_limit_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
-      .run(input.creditLimitMinor, accountId, userId);
+    database().prepare("UPDATE accounts SET credit_limit_minor = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?")
+      .run(input.creditLimitMinor, accountId, workspace.workspaceId);
     database().prepare(
       `INSERT INTO credit_card_profiles
         (account_id, statement_day, due_day, grace_period_days, purchase_apr_bps,
@@ -490,9 +547,9 @@ export function saveCreditCardProfile(userId: string, accountId: string, input: 
       input.paymentPreference ?? "full_statement",
       input.generatePlannedPayments === false ? 0 : 1,
     );
-    audit(userId, "credit_card_profile", accountId, before ? "update" : "create", before, input);
+    audit(workspace, "credit_card_profile", accountId, before ? "update" : "create", before, input);
   })();
-  return liabilityAccountDetail(userId, account.id);
+  return liabilityAccountDetail(workspace, account.id);
 }
 
 function insertRatePeriod(accountId: string, input: LoanRateInput) {
@@ -588,10 +645,10 @@ function requireSupportedStoredLoanProfile(profile: {
   const repaymentMethod = requireSupportedLoanAmortization(profile.amortizationMethod);
   requireSupportedPaymentCadence(profile.paymentFrequency, profile.paymentIntervalMonths);
   if (profile.regularPaymentMinor !== null) {
-    throw new HttpError(422, "This loan contains an unsupported contractual fixed-payment value. Update its terms before using projections");
+    throw liabilityError(422, "LIABILITY_STORED_FIXED_PAYMENT_UNSUPPORTED", "This loan contains an unsupported contractual fixed-payment value. Update its terms before using projections");
   }
   if (profile.balloonMinor !== 0) {
-    throw new HttpError(422, "This loan contains an unsupported balloon value. Update its terms before using projections");
+    throw liabilityError(422, "LIABILITY_STORED_BALLOON_UNSUPPORTED", "This loan contains an unsupported balloon value. Update its terms before using projections");
   }
   return repaymentMethod;
 }
@@ -606,7 +663,7 @@ function rebuildLoanSchedule(accountId: string) {
        FROM loan_profiles WHERE account_id = ?`,
     [accountId],
   );
-  if (!profile) throw new HttpError(404, "Loan terms not found");
+  if (!profile) throw liabilityError(404, "LIABILITY_LOAN_TERMS_NOT_FOUND", "Loan terms not found");
   const repaymentMethod = requireSupportedStoredLoanProfile(profile);
   const locked = database().prepare(
     `SELECT installment_number AS installmentNumber, due_date AS dueDate,
@@ -659,7 +716,11 @@ function rebuildLoanSchedule(accountId: string) {
       ratePeriods: domainRates(accountId),
     });
   } catch (error) {
-    throw new HttpError(422, error instanceof Error ? error.message : "Could not calculate the loan schedule");
+    throw liabilityError(
+      422,
+      "LIABILITY_LOAN_SCHEDULE_CALCULATION_FAILED",
+      error instanceof Error ? error.message : "Could not calculate the loan schedule",
+    );
   }
   database().prepare("DELETE FROM loan_schedule_entries WHERE loan_account_id = ? AND installment_number > ?")
     .run(accountId, lockedThrough);
@@ -681,8 +742,8 @@ function rebuildLoanSchedule(accountId: string) {
   return schedule;
 }
 
-export function saveLoanProfile(userId: string, accountId: string, input: LoanProfileInput) {
-  ownedAccount(userId, accountId, "loan");
+export function saveLoanProfile(workspace: WorkspaceContext, accountId: string, input: LoanProfileInput) {
+  ownedAccount(workspace, accountId, "loan");
   rejectUnsupportedLoanProfileFields(input);
   const amortizationMethod = requireSupportedLoanAmortization(input.amortizationMethod ?? "annuity");
   const paymentFrequency = requireSupportedPaymentCadence(
@@ -694,13 +755,21 @@ export function saveLoanProfile(userId: string, accountId: string, input: LoanPr
   assertDate(input.originationDate, "origination date");
   assertDate(input.firstPaymentDate, "first payment date");
   if (input.maturityDate) assertDate(input.maturityDate, "maturity date");
-  if (input.originationDate > getUserCalendarContext(userId).today) throw new HttpError(422, "Loan origination date cannot be in the future");
-  if (input.firstPaymentDate < input.originationDate) throw new HttpError(422, "The first payment cannot precede loan origination");
-  if (input.rate.effectiveFrom > input.firstPaymentDate) throw new HttpError(422, "The first rate must cover the first installment");
-  if (input.maturityDate && input.maturityDate < input.firstPaymentDate) throw new HttpError(422, "Maturity cannot precede the first payment");
-  if (input.paymentAccountId) sourceCashAccount(userId, input.paymentAccountId);
-  assertOwnedCategory(userId, input.interestCategoryId);
-  assertOwnedCategory(userId, input.feeCategoryId);
+  if (input.originationDate > getWorkspaceCalendarContext(workspace).today) {
+    throw liabilityError(422, "LIABILITY_LOAN_ORIGINATION_IN_FUTURE", "Loan origination date cannot be in the future");
+  }
+  if (input.firstPaymentDate < input.originationDate) {
+    throw liabilityError(422, "LIABILITY_FIRST_PAYMENT_BEFORE_ORIGINATION", "The first payment cannot precede loan origination");
+  }
+  if (input.rate.effectiveFrom > input.firstPaymentDate) {
+    throw liabilityError(422, "LIABILITY_FIRST_RATE_AFTER_FIRST_PAYMENT", "The first rate must cover the first installment");
+  }
+  if (input.maturityDate && input.maturityDate < input.firstPaymentDate) {
+    throw liabilityError(422, "LIABILITY_MATURITY_BEFORE_FIRST_PAYMENT", "Maturity cannot precede the first payment");
+  }
+  if (input.paymentAccountId) sourceCashAccount(workspace, input.paymentAccountId);
+  assertOwnedCategory(workspace, input.interestCategoryId);
+  assertOwnedCategory(workspace, input.feeCategoryId);
   const before = one<Record<string, unknown>>("SELECT * FROM loan_profiles WHERE account_id = ?", [accountId]);
   return database().transaction(() => {
     database().prepare(
@@ -741,30 +810,32 @@ export function saveLoanProfile(userId: string, accountId: string, input: LoanPr
       }
     }
     const schedule = rebuildLoanSchedule(accountId);
-    audit(userId, "loan_profile", accountId, before ? "update" : "create", before, input);
-    return { account: liabilityAccountDetail(userId, accountId), scheduleSummary: schedule };
+    audit(workspace, "loan_profile", accountId, before ? "update" : "create", before, input);
+    return { account: liabilityAccountDetail(workspace, accountId), scheduleSummary: schedule };
   })();
 }
 
-export function addLoanRatePeriod(userId: string, accountId: string, input: LoanRateInput) {
-  ownedAccount(userId, accountId, "loan");
+export function addLoanRatePeriod(workspace: WorkspaceContext, accountId: string, input: LoanRateInput) {
+  ownedAccount(workspace, accountId, "loan");
   assertRatePeriod(input);
   const last = one<{ id: string; effectiveFrom: string }>(
     "SELECT id, effective_from AS effectiveFrom FROM loan_rate_periods WHERE loan_account_id = ? ORDER BY effective_from DESC LIMIT 1",
     [accountId],
   );
-  if (last && input.effectiveFrom <= last.effectiveFrom) throw new HttpError(422, "A new rate period must start after the latest existing period");
+  if (last && input.effectiveFrom <= last.effectiveFrom) {
+    throw liabilityError(422, "LIABILITY_RATE_PERIOD_NOT_AFTER_LATEST", "A new rate period must start after the latest existing period");
+  }
   return database().transaction(() => {
     if (last) database().prepare("UPDATE loan_rate_periods SET effective_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(previousDate(input.effectiveFrom), last.id);
     const id = insertRatePeriod(accountId, input);
     rebuildLoanSchedule(accountId);
-    audit(userId, "loan_rate_period", id, "create", undefined, input);
-    return liabilityAccountDetail(userId, accountId);
+    audit(workspace, "loan_rate_period", id, "create", undefined, input);
+    return liabilityAccountDetail(workspace, accountId);
   })();
 }
 
-export function createCreditCardStatement(userId: string, accountId: string, input: {
+export function createCreditCardStatement(workspace: WorkspaceContext, accountId: string, input: {
   periodStart: string;
   periodEnd: string;
   closingDate: string;
@@ -774,18 +845,26 @@ export function createCreditCardStatement(userId: string, accountId: string, inp
   source?: "manual" | "imported";
   notes?: string | null;
 }) {
-  ownedAccount(userId, accountId, "credit_card");
+  ownedAccount(workspace, accountId, "credit_card");
   assertDate(input.periodStart, "statement period start");
   assertDate(input.periodEnd, "statement period end");
   assertDate(input.closingDate, "statement closing date");
   assertDate(input.dueDate, "statement due date");
   assertMinor(input.statementBalanceMinor, "Statement balance");
   assertMinor(input.minimumDueMinor, "Minimum due", true);
-  if (input.periodEnd < input.periodStart) throw new HttpError(422, "The statement period cannot end before it starts");
-  if (input.closingDate < input.periodEnd) throw new HttpError(422, "The closing date cannot precede the statement period end");
-  if (input.dueDate < input.closingDate) throw new HttpError(422, "The due date cannot precede the closing date");
-  if (input.minimumDueMinor > input.statementBalanceMinor) throw new HttpError(422, "Minimum due cannot exceed the statement balance");
-  const today = getUserCalendarContext(userId).today;
+  if (input.periodEnd < input.periodStart) {
+    throw liabilityError(422, "LIABILITY_STATEMENT_PERIOD_ORDER_INVALID", "The statement period cannot end before it starts");
+  }
+  if (input.closingDate < input.periodEnd) {
+    throw liabilityError(422, "LIABILITY_STATEMENT_CLOSING_BEFORE_PERIOD_END", "The closing date cannot precede the statement period end");
+  }
+  if (input.dueDate < input.closingDate) {
+    throw liabilityError(422, "LIABILITY_STATEMENT_DUE_BEFORE_CLOSING", "The due date cannot precede the closing date");
+  }
+  if (input.minimumDueMinor > input.statementBalanceMinor) {
+    throw liabilityError(422, "LIABILITY_MINIMUM_DUE_EXCEEDS_BALANCE", "Minimum due cannot exceed the statement balance");
+  }
+  const today = getWorkspaceCalendarContext(workspace).today;
   const id = randomUUID();
   try {
     database().prepare(
@@ -804,15 +883,15 @@ export function createCreditCardStatement(userId: string, accountId: string, inp
       message.includes("credit_card_statements_account_closing_unique")
       || message.includes("credit_card_statements.account_id, credit_card_statements.closing_date")
     ) {
-      throw new HttpError(409, "A statement for this closing date already exists");
+      throw liabilityError(409, "LIABILITY_STATEMENT_CLOSING_DATE_DUPLICATE", "A statement for this closing date already exists");
     }
     throw error;
   }
-  audit(userId, "credit_card_statement", id, "create", undefined, input);
-  return liabilityAccountDetail(userId, accountId);
+  audit(workspace, "credit_card_statement", id, "create", undefined, input);
+  return liabilityAccountDetail(workspace, accountId);
 }
 
-function refreshCreditCardStatementPaymentState(userId: string, statementId: string) {
+function refreshCreditCardStatementPaymentState(workspace: WorkspaceContext, statementId: string) {
   const statement = one<{ balance: number; dueDate: string }>(
     "SELECT statement_balance_minor AS balance, due_date AS dueDate FROM credit_card_statements WHERE id = ?",
     [statementId],
@@ -827,7 +906,7 @@ function refreshCreditCardStatementPaymentState(userId: string, statementId: str
   const applied = Math.min(statement.balance, Math.max(0, paidMinor));
   const status = applied >= statement.balance
     ? "paid"
-    : statement.dueDate < getUserCalendarContext(userId).today ? "overdue" : "open";
+    : statement.dueDate < getWorkspaceCalendarContext(workspace).today ? "overdue" : "open";
   database().prepare(
     "UPDATE credit_card_statements SET payments_applied_minor = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).run(applied, status, statementId);
@@ -845,21 +924,23 @@ function creditCardStatementDisplayStatus(input: {
   return "open";
 }
 
-export function recordCreditCardPayment(userId: string, accountId: string, input: CreditCardPaymentInput) {
-  const card = ownedAccount(userId, accountId, "credit_card");
+export function recordCreditCardPayment(workspace: WorkspaceContext, accountId: string, input: CreditCardPaymentInput) {
+  const card = ownedAccount(workspace, accountId, "credit_card");
   assertDate(input.date, "payment date");
   assertMinor(input.amountMinor, "Payment amount");
-  const cashAccount = sourceCashAccount(userId, input.sourceAccountId);
+  const cashAccount = sourceCashAccount(workspace, input.sourceAccountId);
   const paymentTransfer = resolvePaymentTransfer(cashAccount, card, input.amountMinor, input.date, input);
   const statement = input.statementId ? one<{ id: string }>(
     `SELECT s.id
        FROM credit_card_statements s JOIN accounts a ON a.id = s.account_id
-      WHERE s.id = ? AND s.account_id = ? AND a.user_id = ?`,
-    [input.statementId, accountId, userId],
+      WHERE s.id = ? AND s.account_id = ? AND a.workspace_id = ?`,
+    [input.statementId, accountId, workspace.workspaceId],
   ) : undefined;
-  if (input.statementId && !statement) throw new HttpError(404, "Card statement not found");
+  if (input.statementId && !statement) {
+    throw liabilityError(404, "LIABILITY_CARD_STATEMENT_NOT_FOUND", "Card statement not found");
+  }
   return database().transaction(() => {
-    const transfer = createLiabilityTransaction(userId, {
+    const transfer = createLiabilityTransaction(workspace, {
       kind: "transfer",
       accountId: input.sourceAccountId,
       transferAccountId: accountId,
@@ -877,14 +958,14 @@ export function recordCreditCardPayment(userId: string, accountId: string, input
     const id = randomUUID();
     database().prepare(
       `INSERT INTO credit_card_payments
-        (id, user_id, account_id, source_account_id, statement_id, payment_date,
+        (id, workspace_id, account_id, source_account_id, statement_id, payment_date,
          amount_minor, transfer_group_id, source_transaction_id, card_transaction_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      id, userId, accountId, input.sourceAccountId, statement?.id ?? null, input.date,
+      id, workspace.workspaceId, accountId, input.sourceAccountId, statement?.id ?? null, input.date,
       input.amountMinor, transfer.transferGroupId, transfer.id, transfer.peerId,
     );
-    if (statement) refreshCreditCardStatementPaymentState(userId, statement.id);
+    if (statement) refreshCreditCardStatementPaymentState(workspace, statement.id);
     const auditRecord = {
       ...input,
       cashAmountMinor: paymentTransfer.cashAmountMinor,
@@ -898,7 +979,7 @@ export function recordCreditCardPayment(userId: string, accountId: string, input
       referenceFxRateDate: paymentTransfer.prepared.referenceFxRateDate ?? null,
       transferGroupId: transfer.transferGroupId,
     };
-    audit(userId, "credit_card_payment", id, "create", undefined, auditRecord);
+    audit(workspace, "credit_card_payment", id, "create", undefined, auditRecord);
     return {
       paymentId: id,
       transferGroupId: transfer.transferGroupId,
@@ -906,21 +987,21 @@ export function recordCreditCardPayment(userId: string, accountId: string, input
       cashCurrency: cashAccount.currency,
       liabilityAmountMinor: input.amountMinor,
       liabilityCurrency: card.currency,
-      account: liabilityAccountDetail(userId, accountId),
+      account: liabilityAccountDetail(workspace, accountId),
     };
   })();
 }
 
-export function recordLoanPayment(userId: string, accountId: string, input: LoanPaymentInput) {
-  const loan = ownedAccount(userId, accountId, "loan");
+export function recordLoanPayment(workspace: WorkspaceContext, accountId: string, input: LoanPaymentInput) {
+  const loan = ownedAccount(workspace, accountId, "loan");
   assertDate(input.date, "payment date");
   assertMinor(input.totalMinor, "Total payment");
   assertMinor(input.principalMinor, "Principal amount", true);
   assertMinor(input.interestMinor, "Interest amount", true);
   assertMinor(input.feesMinor, "Fee amount", true);
-  const cashAccount = sourceCashAccount(userId, input.sourceAccountId);
+  const cashAccount = sourceCashAccount(workspace, input.sourceAccountId);
   if (BigInt(input.principalMinor) + BigInt(input.interestMinor) + BigInt(input.feesMinor) !== BigInt(input.totalMinor)) {
-    throw new HttpError(422, "Principal, interest, and fees must equal the total payment");
+    throw liabilityError(422, "LIABILITY_PAYMENT_ALLOCATION_MISMATCH", "Principal, interest, and fees must equal the total payment");
   }
   const paymentTransfer = resolvePaymentTransfer(cashAccount, loan, input.totalMinor, input.date, input);
   const cashAllocations = allocateCashPayment(paymentTransfer.cashAmountMinor, {
@@ -932,7 +1013,7 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
     "SELECT interest_category_id AS interestCategoryId, fee_category_id AS feeCategoryId FROM loan_profiles WHERE account_id = ?",
     [accountId],
   );
-  if (!profile) throw new HttpError(409, "Add the loan terms before recording installments");
+  if (!profile) throw liabilityError(409, "LIABILITY_LOAN_TERMS_REQUIRED", "Add the loan terms before recording installments");
   const schedule = input.scheduleEntryId ? one<{
     id: string;
     installmentNumber: number;
@@ -951,8 +1032,12 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
        FROM loan_schedule_entries WHERE id = ? AND loan_account_id = ?`,
     [input.scheduleEntryId, accountId],
   ) : undefined;
-  if (input.scheduleEntryId && !schedule) throw new HttpError(404, "Loan installment not found");
-  if (schedule?.status === "paid") throw new HttpError(409, "This installment is already paid");
+  if (input.scheduleEntryId && !schedule) {
+    throw liabilityError(404, "LIABILITY_LOAN_INSTALLMENT_NOT_FOUND", "Loan installment not found");
+  }
+  if (schedule?.status === "paid") {
+    throw liabilityError(409, "LIABILITY_LOAN_INSTALLMENT_ALREADY_PAID", "This installment is already paid");
+  }
   if (schedule) {
     const earliestOutstanding = one<{ id: string }>(
       `SELECT id FROM loan_schedule_entries
@@ -961,25 +1046,27 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
       [accountId],
     );
     if (earliestOutstanding?.id !== schedule.id) {
-      throw new HttpError(409, "Record the earliest outstanding installment before paying a later one");
+      throw liabilityError(409, "LIABILITY_EARLIEST_INSTALLMENT_REQUIRED", "Record the earliest outstanding installment before paying a later one");
     }
     const remainingPrincipal = Math.max(0, schedule.principalMinor - schedule.paidPrincipalMinor);
     const remainingInterest = Math.max(0, schedule.interestMinor - schedule.paidInterestMinor);
     const remainingFees = Math.max(0, schedule.feesMinor - schedule.paidFeesMinor);
     if (input.principalMinor > remainingPrincipal) {
-      throw new HttpError(422, "Principal allocation exceeds this installment's remaining principal; record extra principal without selecting an installment");
+      throw liabilityError(422, "LIABILITY_INSTALLMENT_PRINCIPAL_EXCEEDED", "Principal allocation exceeds this installment's remaining principal; record extra principal without selecting an installment");
     }
     if (input.interestMinor > remainingInterest) {
-      throw new HttpError(422, "Interest allocation exceeds this installment's remaining interest");
+      throw liabilityError(422, "LIABILITY_INSTALLMENT_INTEREST_EXCEEDED", "Interest allocation exceeds this installment's remaining interest");
     }
     if (input.feesMinor > remainingFees) {
-      throw new HttpError(422, "Fee allocation exceeds this installment's remaining fees");
+      throw liabilityError(422, "LIABILITY_INSTALLMENT_FEES_EXCEEDED", "Fee allocation exceeds this installment's remaining fees");
     }
   }
-  if (input.principalMinor > Math.max(0, -loan.balanceMinor)) throw new HttpError(422, "Principal payment exceeds the current outstanding loan balance");
+  if (input.principalMinor > Math.max(0, -loan.balanceMinor)) {
+    throw liabilityError(422, "LIABILITY_PRINCIPAL_EXCEEDS_BALANCE", "Principal payment exceeds the current outstanding loan balance");
+  }
 
   return database().transaction(() => {
-    const principalTransfer = input.principalMinor > 0 ? createLiabilityTransaction(userId, {
+    const principalTransfer = input.principalMinor > 0 ? createLiabilityTransaction(workspace, {
       kind: "transfer",
       accountId: input.sourceAccountId,
       transferAccountId: accountId,
@@ -997,7 +1084,7 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
       note: input.note ?? `Loan principal payment to ${loan.name}`,
       duplicateConfirmed: true,
     }) : null;
-    const interest = input.interestMinor > 0 ? createLiabilityTransaction(userId, {
+    const interest = input.interestMinor > 0 ? createLiabilityTransaction(workspace, {
       kind: "expense",
       accountId: input.sourceAccountId,
       amountMinor: cashAllocations.interestMinor,
@@ -1014,7 +1101,7 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
       note: input.note ?? `Loan interest for ${loan.name}`,
       duplicateConfirmed: true,
     }) : null;
-    const fee = input.feesMinor > 0 ? createLiabilityTransaction(userId, {
+    const fee = input.feesMinor > 0 ? createLiabilityTransaction(workspace, {
       kind: "expense",
       accountId: input.sourceAccountId,
       amountMinor: cashAllocations.feesMinor,
@@ -1034,13 +1121,13 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
     const id = randomUUID();
     database().prepare(
       `INSERT INTO loan_payments
-        (id, user_id, loan_account_id, source_account_id, schedule_entry_id, payment_date,
+        (id, workspace_id, loan_account_id, source_account_id, schedule_entry_id, payment_date,
          total_minor, principal_minor, interest_minor, fees_minor, principal_transfer_group_id,
          source_principal_transaction_id, loan_principal_transaction_id,
          interest_transaction_id, fee_transaction_id, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      id, userId, accountId, input.sourceAccountId, schedule?.id ?? null, input.date,
+      id, workspace.workspaceId, accountId, input.sourceAccountId, schedule?.id ?? null, input.date,
       input.totalMinor, input.principalMinor, input.interestMinor, input.feesMinor,
       principalTransfer?.transferGroupId ?? null, principalTransfer?.id ?? null,
       principalTransfer?.peerId ?? null, interest?.id ?? null, fee?.id ?? null, input.note ?? null,
@@ -1070,7 +1157,7 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
       referenceFxRateScaled: paymentTransfer.prepared.referenceFxRateScaled ?? null,
       referenceFxRateDate: paymentTransfer.prepared.referenceFxRateDate ?? null,
     };
-    audit(userId, "loan_payment", id, "create", undefined, auditRecord);
+    audit(workspace, "loan_payment", id, "create", undefined, auditRecord);
     return {
       paymentId: id,
       cashAmountMinor: paymentTransfer.cashAmountMinor,
@@ -1078,12 +1165,12 @@ export function recordLoanPayment(userId: string, accountId: string, input: Loan
       liabilityAmountMinor: input.totalMinor,
       liabilityCurrency: loan.currency,
       cashAllocations,
-      account: liabilityAccountDetail(userId, accountId),
+      account: liabilityAccountDetail(workspace, accountId),
     };
   })();
 }
 
-export function undoLiabilityPayment(userId: string, paymentId: string) {
+export function undoLiabilityPayment(workspace: WorkspaceContext, paymentId: string) {
   const cardPayment = one<{
     id: string;
     accountId: string;
@@ -1094,19 +1181,21 @@ export function undoLiabilityPayment(userId: string, paymentId: string) {
   }>(
     `SELECT id, account_id AS accountId, statement_id AS statementId, amount_minor AS amountMinor,
             source_transaction_id AS sourceTransactionId, voided_at AS voidedAt
-       FROM credit_card_payments WHERE id = ? AND user_id = ?`,
-    [paymentId, userId],
+       FROM credit_card_payments WHERE id = ? AND workspace_id = ?`,
+    [paymentId, workspace.workspaceId],
   );
   if (cardPayment) {
-    if (cardPayment.voidedAt) throw new HttpError(409, "This payment was already undone");
+    if (cardPayment.voidedAt) {
+      throw liabilityError(409, "LIABILITY_PAYMENT_ALREADY_UNDONE", "This payment was already undone");
+    }
     return database().transaction(() => {
-      voidWorkflowTransaction(userId, cardPayment.sourceTransactionId);
+      voidWorkflowTransaction(workspace, cardPayment.sourceTransactionId);
       const now = new Date().toISOString();
       database().prepare("UPDATE credit_card_payments SET voided_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(now, paymentId);
-      if (cardPayment.statementId) refreshCreditCardStatementPaymentState(userId, cardPayment.statementId);
-      audit(userId, "credit_card_payment", paymentId, "undo", cardPayment);
-      return { success: true, account: liabilityAccountDetail(userId, cardPayment.accountId) };
+      if (cardPayment.statementId) refreshCreditCardStatementPaymentState(workspace, cardPayment.statementId);
+      audit(workspace, "credit_card_payment", paymentId, "undo", cardPayment);
+      return { success: true, account: liabilityAccountDetail(workspace, cardPayment.accountId) };
     })();
   }
 
@@ -1127,11 +1216,13 @@ export function undoLiabilityPayment(userId: string, paymentId: string) {
             source_principal_transaction_id AS sourcePrincipalTransactionId,
             interest_transaction_id AS interestTransactionId, fee_transaction_id AS feeTransactionId,
             voided_at AS voidedAt
-       FROM loan_payments WHERE id = ? AND user_id = ?`,
-    [paymentId, userId],
+       FROM loan_payments WHERE id = ? AND workspace_id = ?`,
+    [paymentId, workspace.workspaceId],
   );
-  if (!loanPayment) throw new HttpError(404, "Liability payment not found");
-  if (loanPayment.voidedAt) throw new HttpError(409, "This payment was already undone");
+  if (!loanPayment) throw liabilityError(404, "LIABILITY_PAYMENT_NOT_FOUND", "Liability payment not found");
+  if (loanPayment.voidedAt) {
+    throw liabilityError(409, "LIABILITY_PAYMENT_ALREADY_UNDONE", "This payment was already undone");
+  }
   if (loanPayment.scheduleEntryId) {
     const laterActivePayment = one<{ id: string }>(
       `SELECT later_payment.id
@@ -1144,12 +1235,12 @@ export function undoLiabilityPayment(userId: string, paymentId: string) {
       [loanPayment.scheduleEntryId, loanPayment.accountId],
     );
     if (laterActivePayment) {
-      throw new HttpError(409, "Undo later loan installments before undoing this payment");
+      throw liabilityError(409, "LIABILITY_UNDO_LATER_INSTALLMENTS_FIRST", "Undo later loan installments before undoing this payment");
     }
   }
   return database().transaction(() => {
     for (const transactionId of [loanPayment.sourcePrincipalTransactionId, loanPayment.interestTransactionId, loanPayment.feeTransactionId]) {
-      if (transactionId) voidWorkflowTransaction(userId, transactionId);
+      if (transactionId) voidWorkflowTransaction(workspace, transactionId);
     }
     const now = new Date().toISOString();
     database().prepare("UPDATE loan_payments SET voided_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -1180,14 +1271,15 @@ export function undoLiabilityPayment(userId: string, paymentId: string) {
       }
     }
     rebuildLoanSchedule(loanPayment.accountId);
-    audit(userId, "loan_payment", paymentId, "undo", loanPayment);
-    return { success: true, account: liabilityAccountDetail(userId, loanPayment.accountId) };
+    audit(workspace, "loan_payment", paymentId, "undo", loanPayment);
+    return { success: true, account: liabilityAccountDetail(workspace, loanPayment.accountId) };
   })();
 }
 
 export type LiabilityObligation = {
   id: string;
   plannedPaymentId: null;
+  /** Compatibility fields containing only the user-authored account name. */
   name: string;
   title: string;
   type: "expense";
@@ -1211,6 +1303,7 @@ export type LiabilityObligation = {
   spendingPriority: "essential";
   sourceType: "credit_card_statement" | "loan_schedule";
   liabilityAccountId: string;
+  liabilityAccountName: string;
   cashFlowAmountMinor: number;
   spendingAmountMinor: number;
   plannedSpendingAmountMinor: number;
@@ -1218,16 +1311,16 @@ export type LiabilityObligation = {
   isEstimate: boolean;
 };
 
-export function listLiabilityObligations(userId: string, filters: { from?: string; to?: string; status?: string } = {}): LiabilityObligation[] {
-  const today = getUserCalendarContext(userId).today;
+export function listLiabilityObligations(workspace: WorkspaceContext, filters: { from?: string; to?: string; status?: string } = {}): LiabilityObligation[] {
+  const today = getWorkspaceCalendarContext(workspace).today;
   const whereDate = (column: "s.due_date" | "e.due_date", params: SqlValue[]) => {
     const clauses: string[] = [];
     if (filters.from) { clauses.push(`${column} >= ?`); params.push(filters.from); }
     if (filters.to) { clauses.push(`${column} <= ?`); params.push(filters.to); }
     return clauses;
   };
-  const cardParams: SqlValue[] = [userId];
-  const cardWhere = ["a.user_id = ?", "a.archived_at IS NULL", "COALESCE(p.generate_planned_payments, 1) = 1", ...whereDate("s.due_date", cardParams)];
+  const cardParams: SqlValue[] = [workspace.workspaceId];
+  const cardWhere = ["a.workspace_id = ?", "a.archived_at IS NULL", "COALESCE(p.generate_planned_payments, 1) = 1", ...whereDate("s.due_date", cardParams)];
   const statements = database().prepare(
     `SELECT s.id, a.id AS accountId, a.name AS account,
             s.due_date AS dueDate, s.statement_balance_minor AS statementBalanceMinor,
@@ -1251,20 +1344,20 @@ export function listLiabilityObligations(userId: string, filters: { from?: strin
     const expected = row.paymentPreference === "minimum" ? due.remainingMinimumMinor : due.remainingStatementMinor;
     const status = due.status === "paid" ? "paid" : due.status === "overdue" ? "overdue" : "scheduled";
     return {
-      id: `card:${row.id}`, plannedPaymentId: null, name: `${row.account} statement`, title: `${row.account} statement`,
+      id: `card:${row.id}`, plannedPaymentId: null, name: row.account, title: row.account,
       type: "expense", direction: "expense", expectedAmountMinor: expected,
       paidAmountMinor: row.paymentsAppliedMinor, dueDate: row.dueDate, status,
       accountId: null, account: null, categoryId: null, category: null, merchant: null,
       note: row.notes, recurrenceRuleId: null, frequency: null, interval: null,
       recurrenceEndDate: null, archivedAt: null, spendingNature: "fixed", spendingPriority: "essential",
-      sourceType: "credit_card_statement", liabilityAccountId: row.accountId,
+      sourceType: "credit_card_statement", liabilityAccountId: row.accountId, liabilityAccountName: row.account,
       cashFlowAmountMinor: expected, spendingAmountMinor: 0, plannedSpendingAmountMinor: 0,
       principalAmountMinor: expected, isEstimate: false,
     };
   });
 
-  const loanParams: SqlValue[] = [userId];
-  const loanWhere = ["a.user_id = ?", "a.archived_at IS NULL", "p.generate_planned_payments = 1", "e.status <> 'skipped'", ...whereDate("e.due_date", loanParams)];
+  const loanParams: SqlValue[] = [workspace.workspaceId];
+  const loanWhere = ["a.workspace_id = ?", "a.archived_at IS NULL", "p.generate_planned_payments = 1", "e.status <> 'skipped'", ...whereDate("e.due_date", loanParams)];
   const entries = database().prepare(
     `SELECT e.id, a.id AS accountId, a.name AS account, e.due_date AS dueDate,
             e.principal_minor AS principalMinor, e.interest_minor AS interestMinor,
@@ -1293,27 +1386,32 @@ export function listLiabilityObligations(userId: string, filters: { from?: strin
     const total = principal + spending;
     const status = total === 0 ? "paid" : row.dueDate < today ? "overdue" : row.status === "partial" ? "scheduled" : "planned";
     return {
-      id: `loan:${row.id}`, plannedPaymentId: null, name: `${row.account} installment`, title: `${row.account} installment`,
+      id: `loan:${row.id}`, plannedPaymentId: null, name: row.account, title: row.account,
       type: "expense", direction: "expense", expectedAmountMinor: total,
       paidAmountMinor: row.paidPrincipalMinor + row.paidInterestMinor + row.paidFeesMinor,
       dueDate: row.dueDate, status, accountId: row.paymentAccountId, account: row.sourceAccount,
-      categoryId: null, category: null, merchant: null, note: row.isEstimate ? "Estimated from the current rate terms" : null,
+      categoryId: null, category: null, merchant: null, note: null,
       recurrenceRuleId: null, frequency: null, interval: null, recurrenceEndDate: null, archivedAt: null,
       spendingNature: "fixed", spendingPriority: "essential", sourceType: "loan_schedule",
-      liabilityAccountId: row.accountId, cashFlowAmountMinor: total, spendingAmountMinor: spending,
+      liabilityAccountId: row.accountId, liabilityAccountName: row.account,
+      cashFlowAmountMinor: total, spendingAmountMinor: spending,
       plannedSpendingAmountMinor: row.interestMinor + row.feesMinor,
       principalAmountMinor: principal, isEstimate: Boolean(row.isEstimate),
     };
   });
   const combined = [...cards, ...loans].filter((item) => !filters.status || item.status === filters.status);
-  return combined.sort((left, right) => left.dueDate.localeCompare(right.dueDate) || left.title.localeCompare(right.title));
+  return combined.sort((left, right) => left.dueDate.localeCompare(right.dueDate)
+    || left.liabilityAccountName.localeCompare(right.liabilityAccountName)
+    || left.sourceType.localeCompare(right.sourceType));
 }
 
-export function liabilityAccountDetail(userId: string, accountId: string) {
-  const account = ownedAccount(userId, accountId, undefined, { allowArchived: true });
-  if (!new Set(["credit_card", "loan"]).has(account.type)) throw new HttpError(422, "This account is not a liability");
+export function liabilityAccountDetail(workspace: WorkspaceContext, accountId: string) {
+  const account = ownedAccount(workspace, accountId, undefined, { allowArchived: true });
+  if (!new Set(["credit_card", "loan"]).has(account.type)) {
+    throw liabilityError(422, "LIABILITY_ACCOUNT_TYPE_INVALID", "This account is not a liability");
+  }
   if (account.type === "credit_card") {
-    const today = getUserCalendarContext(userId).today;
+    const today = getWorkspaceCalendarContext(workspace).today;
     const profile = one<Record<string, unknown>>(
       `SELECT statement_day AS statementDay, due_day AS dueDay, grace_period_days AS gracePeriodDays,
               purchase_apr_bps AS purchaseAprBps, minimum_payment_mode AS minimumPaymentMode,
@@ -1360,8 +1458,8 @@ export function liabilityAccountDetail(userId: string, accountId: string) {
          JOIN accounts card ON card.id = p.account_id
          JOIN transactions source_transaction ON source_transaction.id = p.source_transaction_id
          JOIN transactions card_transaction ON card_transaction.id = p.card_transaction_id
-        WHERE p.account_id = ? AND p.user_id = ? ORDER BY p.payment_date DESC, p.created_at DESC`,
-    ).all(accountId, userId);
+        WHERE p.account_id = ? AND p.workspace_id = ? ORDER BY p.payment_date DESC, p.created_at DESC`,
+    ).all(accountId, workspace.workspaceId);
     const limit = account.creditLimitMinor ?? 0;
     return {
       account,
@@ -1436,8 +1534,8 @@ export function liabilityAccountDetail(userId: string, accountId: string) {
        LEFT JOIN transactions principal_source ON principal_source.id = p.source_principal_transaction_id
        LEFT JOIN transactions interest_transaction ON interest_transaction.id = p.interest_transaction_id
        LEFT JOIN transactions fee_transaction ON fee_transaction.id = p.fee_transaction_id
-      WHERE p.loan_account_id = ? AND p.user_id = ? ORDER BY p.payment_date DESC, p.created_at DESC`,
-  ).all(accountId, userId);
+      WHERE p.loan_account_id = ? AND p.workspace_id = ? ORDER BY p.payment_date DESC, p.created_at DESC`,
+  ).all(accountId, workspace.workspaceId);
   return {
     account,
     kind: "loan" as const,
@@ -1454,7 +1552,7 @@ export function liabilityAccountDetail(userId: string, accountId: string) {
   };
 }
 
-export function enrichLiabilityAccounts(userId: string, accounts: ReturnType<typeof listAccounts>) {
+export function enrichLiabilityAccounts(workspace: WorkspaceContext, accounts: ReturnType<typeof listAccounts>) {
   return accounts.map((account) => {
     if (account.type === "credit_card") {
       const limit = account.creditLimitMinor ?? 0;
@@ -1489,7 +1587,7 @@ export function enrichLiabilityAccounts(userId: string, accounts: ReturnType<typ
 }
 
 export function disburseLoan(
-  userId: string,
+  workspace: WorkspaceContext,
   accountId: string,
   inputOrDestinationAccountId: LoanDisbursementInput | string,
   legacyAmountMinor?: number,
@@ -1502,21 +1600,21 @@ export function disburseLoan(
       date: legacyDate ?? "",
     }
     : inputOrDestinationAccountId;
-  const loan = ownedAccount(userId, accountId, "loan");
+  const loan = ownedAccount(workspace, accountId, "loan");
   assertMinor(input.amountMinor, "Disbursement amount");
   assertDate(input.date, "disbursement date");
-  const cashAccount = sourceCashAccount(userId, input.destinationAccountId);
+  const cashAccount = sourceCashAccount(workspace, input.destinationAccountId);
   const crossCurrency = cashAccount.currency !== loan.currency;
   if (crossCurrency && input.cashAmountMinor == null) {
-    throw new HttpError(422, "Cross-currency loan disbursements require an explicit cash-account amount");
+    throw liabilityError(422, "LIABILITY_DISBURSEMENT_CROSS_CURRENCY_CASH_AMOUNT_REQUIRED", "Cross-currency loan disbursements require an explicit cash-account amount");
   }
   const cashAmountMinor = input.cashAmountMinor ?? input.amountMinor;
   assertMinor(cashAmountMinor, "Cash-account amount");
   if (!crossCurrency && cashAmountMinor !== input.amountMinor) {
-    throw new HttpError(422, "Same-currency loan and cash disbursement amounts must match");
+    throw liabilityError(422, "LIABILITY_DISBURSEMENT_SAME_CURRENCY_AMOUNT_MISMATCH", "Same-currency loan and cash disbursement amounts must match");
   }
   if (!crossCurrency && hasLiabilityFxFields(input)) {
-    throw new HttpError(422, "Same-currency loan disbursements do not need FX rate fields");
+    throw liabilityError(422, "LIABILITY_DISBURSEMENT_SAME_CURRENCY_FX_FORBIDDEN", "Same-currency loan disbursements do not need FX rate fields");
   }
   const prepared = validateTransferFxForPosting(
     loan.currency,
@@ -1533,7 +1631,7 @@ export function disburseLoan(
     },
   );
   return database().transaction(() => {
-    const result = createLiabilityTransaction(userId, {
+    const result = createLiabilityTransaction(workspace, {
       kind: "transfer",
       accountId,
       transferAccountId: input.destinationAccountId,
@@ -1563,14 +1661,14 @@ export function disburseLoan(
       referenceFxRateDate: prepared.referenceFxRateDate ?? null,
       transferGroupId: result.transferGroupId,
     };
-    audit(userId, "loan_disbursement", result.transferGroupId ?? result.id, "create", undefined, auditRecord);
+    audit(workspace, "loan_disbursement", result.transferGroupId ?? result.id, "create", undefined, auditRecord);
     return {
       transaction: result,
       loanAmountMinor: input.amountMinor,
       loanCurrency: loan.currency,
       cashAmountMinor,
       cashCurrency: cashAccount.currency,
-      account: liabilityAccountDetail(userId, accountId),
+      account: liabilityAccountDetail(workspace, accountId),
     };
   })();
 }

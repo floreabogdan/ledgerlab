@@ -4,17 +4,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createMemoryDatabase, type LedgerDatabase } from "@/db";
 import {
   accounts,
+  auditLogs,
   plannedPaymentOccurrences,
   plannedPaymentTransactions,
   plannedPayments,
   transactions,
-  users,
 } from "@/db/schema";
 import { payPlannedOccurrence, undoPlannedPayment } from "@/lib/domain/planned-payments";
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
 
 describe("paying a planned occurrence", () => {
   let close: (() => void) | undefined;
   let database: LedgerDatabase;
+  const context = workspaceContext("user");
 
   afterEach(() => close?.());
 
@@ -23,18 +25,11 @@ describe("paying a planned occurrence", () => {
     database = memory.db;
     close = () => memory.sqlite.close();
     const now = "2026-08-01T00:00:00.000Z";
-    database.insert(users).values({
-      id: "user",
-      email: "unit@example.test",
-      normalizedEmail: "unit@example.test",
-      passwordHash: "not-used",
-      displayName: "Unit",
-      createdAt: now,
-      updatedAt: now,
-    }).run();
+    insertTestUser(memory.sqlite, { id: "user", email: "unit@example.test", displayName: "Unit" });
+    insertTestUser(memory.sqlite, { id: "other-user", email: "other@example.test", displayName: "Other" });
     database.insert(accounts).values({
       id: "account",
-      userId: "user",
+      workspaceId: context.workspaceId,
       name: "Current",
       type: "current",
       openingBalanceMinor: 100_000,
@@ -44,7 +39,7 @@ describe("paying a planned occurrence", () => {
     }).run();
     database.insert(plannedPayments).values({
       id: "payment",
-      userId: "user",
+      workspaceId: context.workspaceId,
       title: "Electricity",
       direction: "expense",
       expectedAmountMinor: 10_000,
@@ -66,7 +61,7 @@ describe("paying a planned occurrence", () => {
 
   it("creates linked actual rows, supports partial payment, completion and undo", () => {
     setup();
-    const partial = payPlannedOccurrence(database, "user", "occurrence", {
+    const partial = payPlannedOccurrence(database, context, "occurrence", {
       actualAmountMinor: 4_000,
       paymentDate: "2026-08-09",
       accountId: "account",
@@ -80,7 +75,7 @@ describe("paying a planned occurrence", () => {
       status: "scheduled",
     });
 
-    const completed = payPlannedOccurrence(database, "user", "occurrence", {
+    const completed = payPlannedOccurrence(database, context, "occurrence", {
       actualAmountMinor: 6_000,
       paymentDate: "2026-08-10",
       accountId: "account",
@@ -98,7 +93,7 @@ describe("paying a planned occurrence", () => {
 
     const undone = undoPlannedPayment(
       database,
-      "user",
+      context,
       "occurrence",
       "tx-final",
       new Date("2026-08-11T10:00:00Z"),
@@ -108,12 +103,17 @@ describe("paying a planned occurrence", () => {
       status: "void",
     });
     expect(database.select().from(plannedPaymentTransactions).all()).toHaveLength(1);
+    expect(database.select().from(auditLogs).all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ workspaceId: "user", actorUserId: "user" }),
+      ]),
+    );
   });
 
-  it("requires the selected account to belong to the user", () => {
+  it("requires the occurrence and selected account to belong to the active workspace", () => {
     setup();
     expect(() =>
-      payPlannedOccurrence(database, "other-user", "occurrence", {
+      payPlannedOccurrence(database, workspaceContext("other-user"), "occurrence", {
         actualAmountMinor: 10_000,
         paymentDate: "2026-08-10",
         accountId: "account",
@@ -121,4 +121,3 @@ describe("paying a planned occurrence", () => {
     ).toThrow(/not found/);
   });
 });
-

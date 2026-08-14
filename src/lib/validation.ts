@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveConfiguredUiLanguage } from "@/i18n/language";
 import {
   ACCOUNT_TYPES,
   RECURRENCE_FREQUENCIES,
@@ -55,6 +56,8 @@ const timeZoneInput = z.string().trim().min(1).max(100).refine((value) => {
   }
 }, "Choose a valid IANA time zone");
 
+const uiLanguageInput = z.unknown().optional().transform(resolveConfiguredUiLanguage);
+
 export const registerInput = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(254),
@@ -62,11 +65,55 @@ export const registerInput = z.object({
   currency: currencyCodeInput.default(DEFAULT_CURRENCY),
   locale: localeInput.default(DEFAULT_LOCALE),
   timeZone: timeZoneInput.default(DEFAULT_TIME_ZONE),
+  uiLanguage: uiLanguageInput,
 });
 
 export const loginInput = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   password: z.string().min(1).max(128),
+});
+
+const workspaceRoleInput = z.enum(["owner", "member"]);
+const invitationTokenInput = z.string().regex(
+  /^[A-Za-z0-9_-]{43}$/,
+  "Invitation token is invalid",
+);
+
+export const workspaceCreateInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  currency: currencyCodeInput.default(DEFAULT_CURRENCY),
+  timeZone: timeZoneInput.default(DEFAULT_TIME_ZONE),
+});
+
+export const workspaceSwitchInput = z.object({
+  workspaceId: id,
+});
+
+export const workspaceInvitationInput = z.object({
+  email: z.string().trim().toLowerCase().email().max(254),
+  role: workspaceRoleInput.default("member"),
+  expiresInHours: z.number().int().min(1).max(24 * 30).default(24 * 7),
+});
+
+export const workspaceInvitationAcceptanceInput = z.object({
+  token: invitationTokenInput,
+});
+
+export const workspaceInvitationRegistrationInput = registerInput.extend({
+  invitationToken: invitationTokenInput,
+});
+
+export const workspaceMemberRoleInput = z.object({
+  userId: id,
+  role: workspaceRoleInput,
+});
+
+export const workspaceMemberActionInput = z.object({
+  userId: id,
+});
+
+export const workspaceDeleteInput = z.object({
+  confirmation: z.string().trim().min(1).max(80),
 });
 
 export const accountInput = z.object({
@@ -78,6 +125,7 @@ export const accountInput = z.object({
   openingDate: dateKey,
   creditLimitMinor: minor.nonnegative().optional().nullable(),
   institution: z.string().trim().max(120).optional().nullable(),
+  holderLabel: z.string().trim().max(120).optional().nullable(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"),
 }).superRefine((value, context) => {
   if (value.type === "custom" && !value.customType?.trim()) {
@@ -412,6 +460,7 @@ export const profilePreferencesInput = z.object({
   currency: currencyCodeInput,
   locale: localeInput.default(DEFAULT_LOCALE),
   timeZone: timeZoneInput.default(DEFAULT_TIME_ZONE),
+  uiLanguage: uiLanguageInput,
   compactTables: z.boolean().default(true),
 });
 
@@ -442,6 +491,7 @@ export const plannedPayInput = z.object({
   referenceFxRateDate: nullableDateKey,
   partial: z.boolean().default(false),
   note: z.string().trim().max(500).optional().nullable(),
+  idempotencyKey: z.string().trim().min(1).max(128).optional(),
 }).superRefine((value, context) => {
   const hasReferenceRate = value.referenceFxRateScaled != null;
   const hasReferenceDate = value.referenceFxRateDate != null;
