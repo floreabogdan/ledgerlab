@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { workspaceContext } from "../helpers/workspace-fixtures";
+
 type DatabaseModule = typeof import("@/db");
 type AuthModule = typeof import("@/lib/auth");
 type CoreModule = typeof import("@/server/core");
@@ -94,14 +96,14 @@ async function register(input: {
   return body.user;
 }
 
-function categoryRows(userId: string) {
+function categoryRows(workspaceId: string) {
   return db.sqlite.prepare(
     `SELECT id, name, kind, spending_nature AS nature,
             spending_priority AS priority, color, display_order AS displayOrder
        FROM categories
-      WHERE user_id = ?
+      WHERE workspace_id = ?
       ORDER BY display_order, name`,
-  ).all(userId) as Array<{
+  ).all(workspaceId) as Array<{
     id: string;
     name: string;
     kind: string;
@@ -158,7 +160,8 @@ describe("localized workspace defaults", () => {
 
     const groceries = initialCategories.find((category) => category.name === "Groceries");
     expect(groceries).toBeDefined();
-    const account = core.createAccount(user.id, {
+    const context = workspaceContext(user.id);
+    const account = core.createAccount(context, {
       name: "Everyday account",
       type: "current",
       currency: "RON",
@@ -166,7 +169,7 @@ describe("localized workspace defaults", () => {
       openingDate: "2026-07-01",
     });
     expect(account).toBeDefined();
-    const transaction = core.createTransaction(user.id, {
+    const transaction = core.createTransaction(context, {
       kind: "expense",
       accountId: account!.id,
       categoryId: groceries!.id,
@@ -179,13 +182,13 @@ describe("localized workspace defaults", () => {
               opening_balance_minor AS openingBalanceMinor,
               opening_balance_date AS openingBalanceDate
          FROM accounts
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(account!.id, user.id);
     const transactionSnapshot = db.sqlite.prepare(
       `SELECT id, account_id AS accountId, category_id AS categoryId,
               amount_minor AS amountMinor, notes AS note
          FROM transactions
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(transaction.id, user.id);
 
     const session = auth.createSession(user.id, {}, db.db);
@@ -223,13 +226,13 @@ describe("localized workspace defaults", () => {
               opening_balance_minor AS openingBalanceMinor,
               opening_balance_date AS openingBalanceDate
          FROM accounts
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(account!.id, user.id)).toEqual(accountSnapshot);
     expect(db.sqlite.prepare(
       `SELECT id, account_id AS accountId, category_id AS categoryId,
               amount_minor AS amountMinor, notes AS note
          FROM transactions
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(transaction.id, user.id)).toEqual(transactionSnapshot);
     expect(transactionSnapshot).toMatchObject({
       accountId: account!.id,
@@ -245,13 +248,13 @@ describe("localized workspace defaults", () => {
               opening_balance_minor AS openingBalanceMinor,
               opening_balance_date AS openingBalanceDate
          FROM accounts
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(account!.id, user.id)).toEqual(accountSnapshot);
     expect(db.sqlite.prepare(
       `SELECT id, account_id AS accountId, category_id AS categoryId,
               amount_minor AS amountMinor, notes AS note
          FROM transactions
-        WHERE id = ? AND user_id = ?`,
+        WHERE id = ? AND workspace_id = ?`,
     ).get(transaction.id, user.id)).toEqual(transactionSnapshot);
     expect(db.sqlite.prepare(
       "SELECT ui_language AS uiLanguage FROM users WHERE id = ?",

@@ -72,12 +72,29 @@ navigation:
     importTransactions:
       label: Import transactions
       shortLabel: Import
+    workspaces:
+      label: Workspaces & sharing
+      shortLabel: Workspaces
     profileSettings:
       label: Profile settings
       shortLabel: Settings
     dataBackups:
       label: Data & backups
       shortLabel: Backups
+workspaceSwitcher:
+  triggerAria: "Open workspace menu for {name}"
+  menuAria: Available workspaces
+  heading: Switch workspace
+  description: Choose the financial data you want to use.
+  types:
+    personal: Personal
+    household: Household
+  roles:
+    owner: Owner
+    member: Member
+  switching: Switching…
+  switchFailed: The workspace could not be switched. Try again.
+  manage: Manage workspaces & sharing
 shell:
   skipToContent: Skip to main content
   searchAndNavigate: Search and navigate

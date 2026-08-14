@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
 
 type DatabaseModule = typeof import("@/db");
 type AuthModule = typeof import("@/lib/auth");
@@ -32,6 +33,7 @@ let route: RouteModule;
 let storageDirectory: string;
 let ownerToken: string;
 let otherToken: string;
+const ownerWorkspace = workspaceContext("owner");
 
 function restoreVariable(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
@@ -81,20 +83,17 @@ beforeEach(async () => {
   portability = await import("@/server/portability");
   route = await import("@/app/api/[...path]/route");
   db.ensureDatabase();
+  insertTestUser(db.sqlite, { id: "owner", email: "owner@example.test", displayName: "Owner", currency: "RON" });
+  insertTestUser(db.sqlite, { id: "other", email: "other@example.test", displayName: "Other", currency: "RON" });
+  db.sqlite.prepare("UPDATE users SET is_installation_admin = 1 WHERE id = 'owner'").run();
   db.sqlite.prepare(
-    `INSERT INTO users (id, email, normalized_email, password_hash, display_name, default_currency)
-     VALUES
-       ('owner', 'owner@example.test', 'owner@example.test', 'unused', 'Owner', 'RON'),
-       ('other', 'other@example.test', 'other@example.test', 'unused', 'Other', 'RON')`,
-  ).run();
-  db.sqlite.prepare(
-    `INSERT INTO accounts (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+    `INSERT INTO accounts (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
      VALUES
        ('owner-account', 'owner', 'Owner account', 'current', 'RON', 0, '2026-01-01'),
        ('other-account', 'other', 'Other account', 'current', 'RON', 0, '2026-01-01')`,
   ).run();
   db.sqlite.prepare(
-    `INSERT INTO transactions (id, user_id, account_id, kind, status, amount_minor, currency, occurred_at)
+    `INSERT INTO transactions (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
      VALUES
        ('owner-transaction', 'owner', 'owner-account', 'expense', 'cleared', -1000, 'RON', '2026-01-02'),
        ('owner-transaction-2', 'owner', 'owner-account', 'expense', 'cleared', -2000, 'RON', '2026-01-03'),
@@ -177,7 +176,7 @@ describe("local receipt attachments", () => {
     );
     expect(deleteResponse.status).toBe(200);
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments WHERE id = ?").get(stored.id)).toEqual({ count: 0 });
-    expect(existsSync(storedPath)).toBe(false);
+    expect(existsSync(storedPath)).toBe(true);
   });
 
   it("enforces transaction ownership and leaves another user's receipt undiscoverable", async () => {
@@ -213,7 +212,7 @@ describe("local receipt attachments", () => {
     expect((await upload("owner-transaction-2", "too-large.pdf", PDF, ownerToken, "application/pdf")).status).toBe(413);
   });
 
-  it("uses content-addressed files and removes shared content only after the final reference", async () => {
+  it("retains content-addressed blobs after the final deletion so a concurrent same-hash upload cannot lose content", async () => {
     expect((await upload("owner-transaction", "first.png", PNG, ownerToken, "image/png")).status).toBe(201);
     expect((await upload("owner-transaction-2", "second.png", PNG, ownerToken, "image/png")).status).toBe(201);
     const rows = db.sqlite.prepare(
@@ -223,10 +222,16 @@ describe("local receipt attachments", () => {
     expect(rows[0]!.storagePath).toBe(rows[1]!.storagePath);
     const storedPath = attachments.resolveAttachmentStoragePath(rows[0]!.storagePath, rows[0]!.sha256);
 
-    attachments.deleteAttachment("owner", rows[0]!.id);
+    attachments.deleteAttachment(ownerWorkspace, rows[0]!.id);
     expect(existsSync(storedPath)).toBe(true);
-    attachments.deleteAttachment("owner", rows[1]!.id);
-    expect(existsSync(storedPath)).toBe(false);
+    attachments.deleteAttachment(ownerWorkspace, rows[1]!.id);
+    expect(existsSync(storedPath)).toBe(true);
+
+    expect((await upload("owner-transaction", "third.png", PNG, ownerToken, "image/png")).status).toBe(201);
+    const replacement = db.sqlite.prepare(
+      "SELECT id FROM attachments WHERE transaction_id = 'owner-transaction'",
+    ).get() as { id: string };
+    expect(attachments.attachmentDownload(ownerWorkspace, replacement.id).content).toEqual(PNG);
   });
 
   it("enforces per-user quota and per-transaction file-count limits before committing content", async () => {
@@ -260,14 +265,41 @@ describe("local receipt attachments", () => {
 
   it("keeps legacy external references listable and deletable without treating them as files", async () => {
     db.sqlite.prepare(
-      `INSERT INTO attachments (id, user_id, transaction_id, file_name, external_reference)
+      `INSERT INTO attachments (id, workspace_id, transaction_id, file_name, external_reference)
        VALUES ('legacy-reference', 'owner', 'owner-transaction', 'Receipt reference', 'invoice-42')`,
     ).run();
-    expect(attachments.listTransactionAttachments("owner", "owner-transaction")).toEqual([
+    expect(attachments.listTransactionAttachments(ownerWorkspace, "owner-transaction")).toEqual([
       expect.objectContaining({ id: "legacy-reference", kind: "reference", externalReference: "invoice-42" }),
     ]);
-    expect(() => attachments.attachmentDownload("owner", "legacy-reference")).toThrow(/reference/i);
-    expect(attachments.deleteAttachment("owner", "legacy-reference")).toEqual({ deleted: true, id: "legacy-reference" });
+    expect(() => attachments.attachmentDownload(ownerWorkspace, "legacy-reference")).toThrow(/reference/i);
+    expect(attachments.deleteAttachment(ownerWorkspace, "legacy-reference")).toEqual({ deleted: true, id: "legacy-reference" });
+  });
+
+  it("stores invoice documents on a planned bill and keeps other workspaces isolated", async () => {
+    db.sqlite.prepare(
+      `INSERT INTO planned_payments
+        (id, workspace_id, title, direction, expected_amount_minor, currency, due_date, account_id)
+       VALUES
+        ('owner-plan', 'owner', 'Electricity', 'expense', 10000, 'RON', '2026-02-01', 'owner-account'),
+        ('other-plan', 'other', 'Private bill', 'expense', 20000, 'RON', '2026-02-01', 'other-account')`,
+    ).run();
+    const attachment = await attachments.uploadPlannedPaymentAttachment(ownerWorkspace, "owner-plan", {
+      fileName: "invoice.pdf",
+      claimedMimeType: "application/pdf",
+      contentLength: String(PDF.length),
+      body: new Blob([Uint8Array.from(PDF)]).stream(),
+    });
+    expect(attachment).toMatchObject({ plannedPaymentId: "owner-plan", transactionId: null, kind: "file" });
+    expect(attachments.listPlannedPaymentAttachments(ownerWorkspace, "owner-plan"))
+      .toEqual([expect.objectContaining({ id: attachment.id, fileName: "invoice.pdf" })]);
+    await expect(attachments.uploadPlannedPaymentAttachment(ownerWorkspace, "other-plan", {
+      fileName: "private.pdf",
+      claimedMimeType: "application/pdf",
+      contentLength: String(PDF.length),
+      body: new Blob([Uint8Array.from(PDF)]).stream(),
+    })).rejects.toThrow(/not found/i);
+    expect(() => attachments.listPlannedPaymentAttachments(ownerWorkspace, "other-plan")).toThrow(/not found/i);
+    expect(() => attachments.attachmentDownload(workspaceContext("other"), attachment.id)).toThrow(/not found/i);
   });
 
   it("includes receipt bytes in full backups and restores them with integrity validation", async () => {
@@ -279,7 +311,7 @@ describe("local receipt attachments", () => {
       expect.objectContaining({ data: PNG.toString("base64"), sizeBytes: PNG.length }),
     ]);
 
-    attachments.deleteAttachment("owner", uploaded.attachment.id);
+    attachments.deleteAttachment(ownerWorkspace, uploaded.attachment.id);
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments").get()).toEqual({ count: 0 });
     expect(portability.restoreBackup("owner", {
       backup: JSON.stringify(backup),
@@ -288,7 +320,7 @@ describe("local receipt attachments", () => {
 
     const restored = db.sqlite.prepare("SELECT id FROM attachments WHERE id = ?").get(uploaded.attachment.id) as { id: string };
     expect(restored.id).toBe(uploaded.attachment.id);
-    expect(attachments.attachmentDownload("owner", restored.id).content).toEqual(PNG);
+    expect(attachments.attachmentDownload(ownerWorkspace, restored.id).content).toEqual(PNG);
 
     const corrupt = structuredClone(backup);
     corrupt.attachments[0]!.data = Buffer.from("not the receipt", "utf8").toString("base64");
@@ -297,5 +329,140 @@ describe("local receipt attachments", () => {
       confirmation: "RESTORE",
     })).toThrow(/integrity check/i);
     expect(db.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments WHERE id = ?").get(restored.id)).toEqual({ count: 1 });
+  });
+
+  it("reconciles retained blobs only after a successful full restore", async () => {
+    const originalUpload = await upload("owner-transaction", "receipt.png", PNG, ownerToken, "image/png");
+    expect(originalUpload.status).toBe(201);
+    const original = db.sqlite.prepare(
+      "SELECT id, storage_path AS storagePath, sha256 FROM attachments WHERE transaction_id = 'owner-transaction'",
+    ).get() as { id: string; storagePath: string; sha256: string };
+    const originalPath = attachments.resolveAttachmentStoragePath(original.storagePath, original.sha256);
+
+    const backup = portability.createBackup("owner");
+    attachments.deleteAttachment(ownerWorkspace, original.id);
+    expect(existsSync(originalPath)).toBe(true);
+    expect(portability.restoreBackup("owner", {
+      backup: JSON.stringify(backup),
+      confirmation: "RESTORE",
+    })).toMatchObject({ success: true });
+    expect(attachments.attachmentDownload(ownerWorkspace, original.id).content).toEqual(PNG);
+
+    const orphanHash = createHash("sha256").update(PDF).digest("hex");
+    const orphanStoragePath = attachments.attachmentStoragePathForHash(orphanHash);
+    const orphanPath = attachments.resolveAttachmentStoragePath(orphanStoragePath, orphanHash);
+    writeFileSync(orphanPath, PDF, { flag: "wx" });
+    expect(existsSync(orphanPath)).toBe(true);
+
+    expect(portability.restoreBackup("owner", {
+      backup: JSON.stringify(backup),
+      confirmation: "RESTORE",
+    })).toMatchObject({ success: true });
+    expect(existsSync(originalPath)).toBe(true);
+    expect(existsSync(orphanPath)).toBe(false);
+    expect(attachments.attachmentDownload(ownerWorkspace, original.id).content).toEqual(PNG);
+  });
+
+  it("refuses restore while an attachment upload holds the storage lifecycle gate", async () => {
+    const backup = portability.createBackup("owner");
+    let releaseBody!: () => void;
+    const bodyReleased = new Promise<void>((resolve) => {
+      releaseBody = resolve;
+    });
+    let sentHeader = false;
+    const uploadBody = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (!sentHeader) {
+          sentHeader = true;
+          controller.enqueue(Uint8Array.from(PNG.subarray(0, 16)));
+          await bodyReleased;
+          controller.enqueue(Uint8Array.from(PNG.subarray(16)));
+          controller.close();
+        }
+      },
+    });
+    const pendingUpload = attachments.uploadTransactionAttachment(ownerWorkspace, "owner-transaction", {
+      fileName: "slow.png",
+      claimedMimeType: "image/png",
+      contentLength: String(PNG.length),
+      body: uploadBody,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(() => portability.restoreBackup("owner", {
+      backup: JSON.stringify(backup),
+      confirmation: "RESTORE",
+    })).toThrow(/storage is busy/i);
+    expect(db.sqlite.prepare("SELECT id FROM users ORDER BY id").pluck().all()).toEqual(["other", "owner"]);
+
+    releaseBody();
+    await expect(pendingUpload).resolves.toMatchObject({ fileName: "slow.png" });
+  });
+
+  it("rolls back newly installed restore blobs when the database replacement fails", async () => {
+    const source = db.createMemoryDatabase();
+    try {
+      insertTestUser(source.sqlite, {
+        id: "owner",
+        email: "owner@example.test",
+        displayName: "Owner",
+        currency: "RON",
+        isInstallationAdmin: true,
+      });
+      source.sqlite.prepare(
+        `INSERT INTO accounts
+          (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
+         VALUES ('owner-account', 'owner', 'Owner account', 'current', 'RON', 0, '2026-01-01')`,
+      ).run();
+      source.sqlite.prepare(
+        `INSERT INTO transactions
+          (id, workspace_id, account_id, kind, status, amount_minor, currency, occurred_at)
+         VALUES ('owner-transaction', 'owner', 'owner-account', 'expense', 'cleared', -1000, 'RON', '2026-01-02')`,
+      ).run();
+      source.sqlite.prepare(
+        `INSERT INTO audit_logs
+          (id, workspace_id, actor_user_id, entity_type, entity_id, action)
+         VALUES ('restore-audit', 'owner', 'owner', 'transaction', 'owner-transaction', 'create')`,
+      ).run();
+      const restoreContent = Buffer.from("%PDF-1.4\nrestore-only\n%%EOF\n", "utf8");
+      const sha256 = createHash("sha256").update(restoreContent).digest("hex");
+      const storagePath = attachments.attachmentStoragePathForHash(sha256);
+      source.sqlite.prepare(
+        `INSERT INTO attachments
+          (id, workspace_id, transaction_id, file_name, storage_path, mime_type, size_bytes, sha256)
+         VALUES ('restore-only', 'owner', 'owner-transaction', 'restore.pdf', ?, 'application/pdf', ?, ?)`,
+      ).run(storagePath, restoreContent.length, sha256);
+      db.sqlite.exec(`
+        CREATE TRIGGER fail_restore_after_attachments
+        BEFORE INSERT ON audit_logs
+        BEGIN
+          SELECT RAISE(ABORT, 'forced restore failure');
+        END;
+      `);
+      const buffer = source.sqlite.serialize();
+      const backup = {
+        format: "ledgerlab-sqlite-v1",
+        owner: "owner@example.test",
+        checksum: createHash("sha256").update(buffer).digest("hex"),
+        database: buffer.toString("base64"),
+        attachments: [{
+          storagePath,
+          sizeBytes: restoreContent.length,
+          sha256,
+          data: restoreContent.toString("base64"),
+        }],
+      };
+      const target = attachments.resolveAttachmentStoragePath(storagePath, sha256);
+
+      expect(() => portability.restoreBackup("owner", {
+        backup: JSON.stringify(backup),
+        confirmation: "RESTORE",
+      })).toThrow(/forced restore failure/i);
+      expect(existsSync(target)).toBe(false);
+      expect(db.sqlite.prepare("SELECT id FROM users ORDER BY id").pluck().all()).toEqual(["other", "owner"]);
+      expect(db.sqlite.prepare("SELECT 1 FROM attachments WHERE id = 'restore-only'").get()).toBeUndefined();
+    } finally {
+      source.sqlite.close();
+    }
   });
 });

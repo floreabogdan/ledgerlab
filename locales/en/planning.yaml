@@ -102,6 +102,9 @@ plannedPayments:
     cancelWithdrawn: Cancel a withdrawn obligation
     undoPayment: Undo linked payment
     restoreOccurrence: Restore this occurrence
+    editBill: "Edit {name}"
+    manageInvoices: "Manage invoices ({count})"
+    viewActual: View actual transaction
     keepOccurrence: Keep occurrence
     cancelOccurrence: Cancel occurrence
   feedback:
@@ -210,9 +213,12 @@ plannedPayments:
   form:
     title: Plan a payment
     description: Create an expected payment without changing an actual balance.
+    editTitle: Edit planned payment
+    editDescription: Update the shared bill. Changes apply only when they preserve existing occurrence and payment history.
     cancel: Cancel
     planning: Planning…
     create: Create planned payment
+    save: Save changes
     paymentName: Payment name
     paymentNamePlaceholder: e.g. Electricity bill
     direction: Direction
@@ -245,6 +251,26 @@ plannedPayments:
     currencyError: Choose a supported ISO 4217 currency.
     positiveAmountError: Expected amount must be greater than zero.
     intervalError: Recurrence interval must be a positive whole number.
+  invoices:
+    title: Invoice documents
+    description: "{payment} · due {date}"
+    choose: Choose invoice
+    replaceSelection: Choose another file
+    hint: PDF or image · up to 10 MB · visible to every workspace member
+    fileSize: "{name} · {size} KB"
+    upload: Upload
+    uploading: Uploading…
+    tooLarge: The invoice must not exceed 10 MB.
+    uploadFallback: The invoice could not be uploaded.
+    deleteFallback: The invoice could not be deleted.
+    emptyTitle: No invoice documents
+    emptyDescription: Upload the utility invoice or other supporting document before or after payment.
+    fileFallback: Invoice
+    typeFallback: file
+    fileTypeSize: "{type} · {size} KB"
+    download: Download
+    deleting: Deleting…
+    deleteAria: "Delete {name}"
   payment:
     title: Record actual payment
     description: "{name} · expected {amount} in the plan’s native currency"

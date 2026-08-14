@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { insertTestUser, workspaceContext } from "../helpers/workspace-fixtures";
 
 type DatabaseModule = typeof import("@/db");
 type CoreModule = typeof import("@/server/core");
@@ -10,6 +11,7 @@ let core: CoreModule;
 let fx: FxModule;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 const networkFetch = vi.fn(() => Promise.reject(new Error("Unit tests must not call the live BNR feed")));
+const workspace = workspaceContext("fx-owner");
 
 beforeAll(async () => {
   process.env.DATABASE_URL = ":memory:";
@@ -21,13 +23,15 @@ beforeAll(async () => {
   fx = await import("@/server/fx");
   core = await import("@/server/core");
   db.ensureDatabase();
-  db.sqlite.prepare(
-    `INSERT INTO users (id, email, normalized_email, password_hash, display_name)
-     VALUES ('fx-owner', 'fx-owner@example.test', 'fx-owner@example.test', 'unused', 'FX Owner')`,
-  ).run();
+  insertTestUser(db.sqlite, {
+    id: "fx-owner",
+    email: "fx-owner@example.test",
+    displayName: "FX Owner",
+    currency: "USD",
+  });
   db.sqlite.prepare(
     `INSERT INTO accounts
-      (id, user_id, name, type, currency, opening_balance_minor, opening_balance_date)
+      (id, workspace_id, name, type, currency, opening_balance_minor, opening_balance_date)
      VALUES ('ron-current', 'fx-owner', 'RON current', 'current', 'RON', 100000, '2025-07-01')`,
   ).run();
   fx.persistBnrXml(
@@ -147,7 +151,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
 
   it("prepares and validates the persisted BNR snapshot used for posting", async () => {
     const prepared = await fx.prepareTransactionFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       "expense",
       9_200,
@@ -173,7 +177,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
 
   it("keeps a manual rate and the official BNR reference as separate snapshots", async () => {
     const prepared = await fx.prepareTransactionFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       "expense",
       9_000,
@@ -201,7 +205,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
 
   it("rejects a posted account amount that does not reconcile to the persisted rate", async () => {
     await expect(fx.prepareTransactionFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       "expense",
       9_100,
@@ -212,14 +216,14 @@ describe("persisted BNR resolution and transaction preparation", () => {
 
   it("persists both BNR and manual FX snapshots through the ledger writer", async () => {
     const bnrFx = await fx.prepareTransactionFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       "expense",
       9_200,
       "2025-08-03",
       { originalAmountMinor: 2_000, originalCurrency: "USD", fxRateSource: "bnr" },
     );
-    const bnrTransaction = core.createTransaction("fx-owner", {
+    const bnrTransaction = core.createTransaction(workspace, {
       kind: "expense",
       accountId: "ron-current",
       amountMinor: 9_200,
@@ -229,7 +233,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
     });
 
     const manualFx = await fx.prepareTransactionFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       "expense",
       9_000,
@@ -244,7 +248,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
         referenceFxRateDate: "2025-08-01",
       },
     );
-    const manualTransaction = core.createTransaction("fx-owner", {
+    const manualTransaction = core.createTransaction(workspace, {
       kind: "expense",
       accountId: "ron-current",
       amountMinor: 9_000,
@@ -253,7 +257,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
       ...manualFx,
     });
 
-    const persisted = new Map(core.listTransactions("fx-owner").map((item) => [item.id, item]));
+    const persisted = new Map(core.listTransactions(workspace).map((item) => [item.id, item]));
     expect(persisted.get(bnrTransaction.id)).toMatchObject({
       amountMinor: -9_200,
       currency: "RON",
@@ -277,13 +281,13 @@ describe("persisted BNR resolution and transaction preparation", () => {
       referenceFxRateDate: "2025-08-01",
     });
 
-    const account = core.listAccounts("fx-owner").find((item) => item.id === "ron-current");
+    const account = core.listAccounts(workspace).find((item) => item.id === "ron-current");
     expect(account?.balanceMinor).toBe(81_800);
     expect(networkFetch).not.toHaveBeenCalled();
   });
 
   it("creates an account in a currency different from the reporting currency", () => {
-    const account = core.createAccount("fx-owner", {
+    const account = core.createAccount(workspace, {
       name: "EUR savings",
       type: "savings",
       currency: "EUR",
@@ -294,8 +298,8 @@ describe("persisted BNR resolution and transaction preparation", () => {
   });
 
   it("posts a cross-currency transfer as two native account amounts with FX on the destination leg", async () => {
-    const euro = core.listAccounts("fx-owner").find((account) => account.currency === "EUR")
-      ?? core.createAccount("fx-owner", {
+    const euro = core.listAccounts(workspace).find((account) => account.currency === "EUR")
+      ?? core.createAccount(workspace, {
         name: "EUR transfer account",
         type: "savings",
         currency: "EUR",
@@ -303,10 +307,10 @@ describe("persisted BNR resolution and transaction preparation", () => {
         openingDate: "2025-07-01",
       });
     if (!euro) throw new Error("EUR account was not created");
-    const sourceBefore = core.listAccounts("fx-owner").find((account) => account.id === "ron-current")?.balanceMinor ?? 0;
-    const destinationBefore = core.listAccounts("fx-owner").find((account) => account.id === euro.id)?.balanceMinor ?? 0;
+    const sourceBefore = core.listAccounts(workspace).find((account) => account.id === "ron-current")?.balanceMinor ?? 0;
+    const destinationBefore = core.listAccounts(workspace).find((account) => account.id === euro.id)?.balanceMinor ?? 0;
     const prepared = await fx.prepareTransferFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       euro.id,
       50_000,
@@ -320,7 +324,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
       fxRateDate: "2025-07-31",
     });
 
-    const transfer = core.createTransaction("fx-owner", {
+    const transfer = core.createTransaction(workspace, {
       kind: "transfer",
       accountId: "ron-current",
       transferAccountId: euro.id,
@@ -354,17 +358,17 @@ describe("persisted BNR resolution and transaction preparation", () => {
         fxRateDate: "2025-07-31",
       }),
     ]);
-    expect(core.listAccounts("fx-owner").find((account) => account.id === "ron-current")?.balanceMinor)
+    expect(core.listAccounts(workspace).find((account) => account.id === "ron-current")?.balanceMinor)
       .toBe(sourceBefore - 50_000);
-    expect(core.listAccounts("fx-owner").find((account) => account.id === euro.id)?.balanceMinor)
+    expect(core.listAccounts(workspace).find((account) => account.id === euro.id)?.balanceMinor)
       .toBe(destinationBefore + 10_000);
   });
 
   it("rejects a cross-currency transfer whose explicit destination amount disagrees with the rate", async () => {
-    const euro = core.listAccounts("fx-owner").find((account) => account.currency === "EUR");
+    const euro = core.listAccounts(workspace).find((account) => account.currency === "EUR");
     if (!euro) throw new Error("EUR account was not created");
     await expect(fx.prepareTransferFx(
-      "fx-owner",
+      workspace,
       "ron-current",
       euro.id,
       50_000,
@@ -374,16 +378,16 @@ describe("persisted BNR resolution and transaction preparation", () => {
   });
 
   it("converts transaction-page totals to reporting currency and marks uncached totals unavailable", () => {
-    const euro = core.listAccounts("fx-owner").find((account) => account.currency === "EUR");
+    const euro = core.listAccounts(workspace).find((account) => account.currency === "EUR");
     if (!euro) throw new Error("EUR account was not created");
-    core.createTransaction("fx-owner", {
+    core.createTransaction(workspace, {
       kind: "income",
       accountId: euro.id,
       amountMinor: 9_000,
       date: "2025-07-31",
       duplicateConfirmed: true,
     });
-    expect(core.listTransactionPage("fx-owner", { from: "2025-07-31", to: "2025-07-31" }).summary)
+    expect(core.listTransactionPage(workspace, { from: "2025-07-31", to: "2025-07-31" }).summary)
       .toMatchObject({
         currency: "USD",
         monetaryTotalsAvailable: true,
@@ -391,14 +395,14 @@ describe("persisted BNR resolution and transaction preparation", () => {
         netSpendingMinor: 0,
       });
 
-    core.createTransaction("fx-owner", {
+    core.createTransaction(workspace, {
       kind: "income",
       accountId: euro.id,
       amountMinor: 1_000,
       date: "2025-07-01",
       duplicateConfirmed: true,
     });
-    expect(core.listTransactionPage("fx-owner", { from: "2025-07-01", to: "2025-07-01" }).summary)
+    expect(core.listTransactionPage(workspace, { from: "2025-07-01", to: "2025-07-01" }).summary)
       .toMatchObject({
         currency: "USD",
         monetaryTotalsAvailable: false,
@@ -409,14 +413,14 @@ describe("persisted BNR resolution and transaction preparation", () => {
   });
 
   it("settles and undoes a USD planned payment from a RON account using planned-currency progress", async () => {
-    const nativeDefault = core.createPlannedPayment("fx-owner", {
+    const nativeDefault = core.createPlannedPayment(workspace, {
       name: "RON account-native plan",
       expectedAmountMinor: 1_000,
       dueDate: "2025-08-09",
       accountId: "ron-current",
     });
     expect(nativeDefault.currency).toBe("RON");
-    const plan = core.createPlannedPayment("fx-owner", {
+    const plan = core.createPlannedPayment(workspace, {
       name: "USD phone bill",
       expectedAmountMinor: 4_000,
       currency: "USD",
@@ -424,8 +428,8 @@ describe("persisted BNR resolution and transaction preparation", () => {
       type: "expense",
       accountId: "ron-current",
     });
-    const balanceBefore = core.listAccounts("fx-owner").find((account) => account.id === "ron-current")?.balanceMinor ?? 0;
-    const prepared = await core.preparePlannedOccurrencePayment("fx-owner", plan.id, {
+    const balanceBefore = core.listAccounts(workspace).find((account) => account.id === "ron-current")?.balanceMinor ?? 0;
+    const prepared = await core.preparePlannedOccurrencePayment(workspace, plan.id, {
       amountMinor: 9_200,
       appliedAmountMinor: 2_000,
       accountId: "ron-current",
@@ -442,7 +446,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
       fxRateSource: "bnr",
       fxRateDate: "2025-08-01",
     });
-    const paid = core.payPlannedOccurrence("fx-owner", plan.id, prepared);
+    const paid = core.payPlannedOccurrence(workspace, plan.id, prepared);
     expect(paid).toMatchObject({
       status: "scheduled",
       paidAmountMinor: 2_000,
@@ -472,10 +476,10 @@ describe("persisted BNR resolution and transaction preparation", () => {
          JOIN planned_payment_transactions link ON link.occurrence_id = o.id
         WHERE o.id = ?`,
     ).get(plan.id)).toEqual({ paidAmountMinor: 2_000, status: "scheduled", appliedAmountMinor: 2_000 });
-    expect(core.listAccounts("fx-owner").find((account) => account.id === "ron-current")?.balanceMinor)
+    expect(core.listAccounts(workspace).find((account) => account.id === "ron-current")?.balanceMinor)
       .toBe(balanceBefore - 9_200);
 
-    expect(core.undoPlannedOccurrence("fx-owner", plan.id)).toMatchObject({ success: true, voidedTransactions: 1 });
+    expect(core.undoPlannedOccurrence(workspace, plan.id)).toMatchObject({ success: true, voidedTransactions: 1 });
     expect(db.sqlite.prepare(
       "SELECT paid_amount_minor AS paidAmountMinor, status FROM planned_payment_occurrences WHERE id = ?",
     ).get(plan.id)).toEqual({ paidAmountMinor: 0, status: "planned" });
@@ -484,7 +488,7 @@ describe("persisted BNR resolution and transaction preparation", () => {
     expect(db.sqlite.prepare(
       "SELECT COUNT(*) AS count FROM planned_payment_transactions WHERE occurrence_id = ?",
     ).get(plan.id)).toEqual({ count: 0 });
-    expect(core.listAccounts("fx-owner").find((account) => account.id === "ron-current")?.balanceMinor)
+    expect(core.listAccounts(workspace).find((account) => account.id === "ron-current")?.balanceMinor)
       .toBe(balanceBefore);
   });
 });

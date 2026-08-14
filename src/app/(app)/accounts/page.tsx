@@ -269,6 +269,7 @@ export default function AccountsPage() {
                         <small>{account.institution
                           ? t("finance.accounts.card.typeCurrencyInstitution", { type: translatedType, currency, institution: stringFrom(account.institution) })
                           : t("finance.accounts.card.typeCurrency", { type: translatedType, currency })}</small>
+                        {account.holderLabel ? <small>{t("finance.accounts.card.holder", { holder: stringFrom(account.holderLabel) })}</small> : null}
                       </span>
                     </div>
                     {archived ? <Pill>{t("finance.accounts.card.archived")}</Pill> : <IconButton label={isLiability ? t("finance.accounts.card.manageDebt") : t("finance.accounts.card.details")} onClick={openDetails}><Ellipsis size={18} /></IconButton>}
@@ -325,6 +326,7 @@ type AccountFormDraft = {
   customTypeLabel: string;
   currency: string;
   institution: string;
+  holderLabel: string;
   openingBalance: string;
   openingDate: string;
   color: string;
@@ -368,7 +370,7 @@ function initialAccountDraft(defaultCurrency = DEFAULT_CURRENCY): AccountFormDra
   const today = isoToday();
   const zero = minorToInput(0, defaultCurrency);
   return {
-    name: "", type: "current_account", customTypeLabel: "", currency: defaultCurrency, institution: "",
+    name: "", type: "current_account", customTypeLabel: "", currency: defaultCurrency, institution: "", holderLabel: "",
     openingBalance: zero, openingDate: today, color: "#2563eb",
     cardLimit: "", cardOpeningMode: "outstanding", cardOpeningAmount: zero,
     cardStatementDay: "", cardDueDay: "", cardGraceDays: "", cardApr: "",
@@ -523,6 +525,7 @@ function AccountForm({
         customTypeLabel: form.type === "custom" ? form.customTypeLabel.trim() : null,
         currency,
         institution: form.institution.trim() || null,
+        holderLabel: form.holderLabel.trim() || null,
         openingBalanceMinor,
         openingDate: form.openingDate,
         creditLimitMinor,
@@ -598,6 +601,9 @@ function AccountForm({
         </Field>
         <Field label={t("finance.accounts.form.fields.institution")} hint={t("finance.accounts.form.fields.institutionHint")}>
           <Input value={form.institution} onChange={(event) => setValue("institution", event.target.value)} placeholder={t("finance.accounts.form.fields.institutionPlaceholder")} maxLength={120} />
+        </Field>
+        <Field label={t("finance.accounts.form.fields.holderLabel")} hint={t("finance.accounts.form.fields.holderLabelHint")}>
+          <Input value={form.holderLabel} onChange={(event) => setValue("holderLabel", event.target.value)} placeholder={t("finance.accounts.form.fields.holderLabelPlaceholder")} maxLength={120} />
         </Field>
         <Field label={t("finance.accounts.form.fields.balanceDate")}>
           <Input type="date" max={today} value={form.openingDate} onChange={(event) => setValue("openingDate", event.target.value)} />
@@ -888,6 +894,7 @@ function AccountDetail({ account, rangeLabel, onClose, onArchive }: { account: A
       <div className={ui.summaryList}>
         <div className={ui.summaryRow}><span>{t("finance.accounts.detail.accountType")}</span><strong>{typeLabel}</strong></div>
         <div className={ui.summaryRow}><span>{t("finance.accounts.detail.currency")}</span><strong>{currency}</strong></div>
+        {account.holderLabel ? <div className={ui.summaryRow}><span>{t("finance.accounts.detail.holderLabel")}</span><strong>{stringFrom(account.holderLabel)}</strong></div> : null}
         <div className={ui.summaryRow}><span>{t("finance.accounts.detail.reconciliation")}</span><strong>{formatMoney(account.reconciliationDifferenceMinor, currency)}</strong></div>
       </div>
       <div className={`${ui.inlineNotice} ${ui.noticeOffset}`}>

@@ -19,7 +19,8 @@ import {
   toReportingMinor,
   toReportingValue,
 } from "@/server/reporting-currency";
-import { getUserCalendarContext, getUserRegionalSettings } from "@/server/user-settings";
+import { getWorkspaceCalendarContext, getWorkspaceFinancialSettings } from "@/server/user-settings";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 
 type InsightsErrorCode =
   | `INSIGHTS_${string}`
@@ -134,12 +135,12 @@ type ReportingTransactionRow = {
 };
 
 function reportingTransactions(
-  userId: string,
+  context: WorkspaceContext,
   from: string,
   toExclusive: string,
-  context = "transaction statistics",
+  conversionContext = "transaction statistics",
 ): ReportingTransactionRow[] {
-  const reportingCurrency = workspaceCurrency(userId);
+  const reportingCurrency = workspaceCurrency(context);
   return all<{
     id: string;
     kind: string;
@@ -158,15 +159,15 @@ function reportingTransactions(
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
        LEFT JOIN merchants m ON m.id = t.merchant_id
-      WHERE t.user_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
+      WHERE t.workspace_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
         AND substr(t.occurred_at, 1, 10) >= ? AND substr(t.occurred_at, 1, 10) < ?`,
-    [userId, from, toExclusive],
+    [context.workspaceId, from, toExclusive],
   ).map((row) => ({
     id: row.id,
     kind: row.kind,
     nativeAmountMinor: row.amountMinor,
     nativeCurrency: row.currency,
-    amountMinor: toReportingMinor(row, reportingCurrency, context),
+    amountMinor: toReportingMinor(row, reportingCurrency, conversionContext),
     date: row.date,
     accountId: row.accountId,
     accountName: row.accountName,
@@ -186,12 +187,12 @@ type ReportingSpendingAllocation = {
 };
 
 function reportingSpendingAllocations(
-  userId: string,
+  context: WorkspaceContext,
   from: string,
   toExclusive: string,
-  context = "spending statistics",
+  conversionContext = "spending statistics",
 ): ReportingSpendingAllocation[] {
-  const reportingCurrency = workspaceCurrency(userId);
+  const reportingCurrency = workspaceCurrency(context);
   return all<{
     transactionId: string;
     amountMinor: number;
@@ -212,13 +213,13 @@ function reportingSpendingAllocations(
        FROM transactions t
        LEFT JOIN transaction_splits s ON s.transaction_id = t.id AND t.is_split = 1
        LEFT JOIN categories c ON c.id = COALESCE(s.category_id, t.category_id)
-      WHERE t.user_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
+      WHERE t.workspace_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
         AND t.kind IN ('expense', 'refund')
         AND substr(t.occurred_at, 1, 10) >= ? AND substr(t.occurred_at, 1, 10) < ?`,
-    [userId, from, toExclusive],
+    [context.workspaceId, from, toExclusive],
   ).map((row) => ({
     transactionId: row.transactionId,
-    amountMinor: toReportingMinor(row, reportingCurrency, context),
+    amountMinor: toReportingMinor(row, reportingCurrency, conversionContext),
     date: row.date,
     categoryId: row.categoryId,
     categoryName: row.categoryName,
@@ -249,15 +250,15 @@ function groupedSpend<T extends { amountMinor: number; transactionId: string }>(
     .sort((left, right) => right.amountMinor - left.amountMinor);
 }
 
-function actualSummary(userId: string, from: string, toExclusive: string): ActualSummary {
-  const reportingCurrency = workspaceCurrency(userId);
+function actualSummary(context: WorkspaceContext, from: string, toExclusive: string): ActualSummary {
+  const reportingCurrency = workspaceCurrency(context);
   const rows = all<{ kind: string; amountMinor: number; currency: string; date: string }>(
     `SELECT kind, amount_minor AS amountMinor, currency, substr(occurred_at, 1, 10) AS date
        FROM transactions
-      WHERE user_id = ? AND status = 'cleared' AND voided_at IS NULL
+      WHERE workspace_id = ? AND status = 'cleared' AND voided_at IS NULL
         AND kind IN ('income', 'expense', 'refund')
         AND substr(occurred_at, 1, 10) >= ? AND substr(occurred_at, 1, 10) < ?`,
-    [userId, from, toExclusive],
+    [context.workspaceId, from, toExclusive],
   ).map((row) => ({
     ...row,
     amountMinor: toReportingMinor(row, reportingCurrency, "actual cash flow"),
@@ -279,7 +280,7 @@ function actualSummary(userId: string, from: string, toExclusive: string): Actua
   };
 }
 
-function balanceHistory(userId: string, accountId: string, opening: number, openingDate: string, requestedRange?: InsightDateRange) {
+function balanceHistory(context: WorkspaceContext, accountId: string, opening: number, openingDate: string, requestedRange?: InsightDateRange) {
   const range = requestedRange ? normalizeInsightRange(requestedRange) : undefined;
   if (range && range.to < openingDate) return [];
   const historyStart = range && range.from > openingDate ? range.from : openingDate;
@@ -287,12 +288,12 @@ function balanceHistory(userId: string, accountId: string, opening: number, open
     ? "AND substr(occurred_at, 1, 10) >= ? AND substr(occurred_at, 1, 10) <= ?"
     : "AND substr(occurred_at, 1, 10) >= ?";
   const activityParams = range
-    ? [userId, accountId, historyStart, range.to]
-    : [userId, accountId, openingDate];
+    ? [context.workspaceId, accountId, historyStart, range.to]
+    : [context.workspaceId, accountId, openingDate];
   const activity = all<{ month: string; amountMinor: number }>(
     `SELECT substr(occurred_at, 1, 7) AS month, SUM(amount_minor) AS amountMinor
        FROM transactions
-      WHERE user_id = ? AND account_id = ? AND status = 'cleared' AND voided_at IS NULL
+      WHERE workspace_id = ? AND account_id = ? AND status = 'cleared' AND voided_at IS NULL
         ${activityWhere}
       GROUP BY substr(occurred_at, 1, 7) ORDER BY month`,
     activityParams,
@@ -300,9 +301,9 @@ function balanceHistory(userId: string, accountId: string, opening: number, open
   const beforeRange = range && historyStart > openingDate
     ? one<{ amountMinor: number }>(
       `SELECT COALESCE(SUM(amount_minor), 0) AS amountMinor FROM transactions
-        WHERE user_id = ? AND account_id = ? AND status = 'cleared' AND voided_at IS NULL
+        WHERE workspace_id = ? AND account_id = ? AND status = 'cleared' AND voided_at IS NULL
           AND substr(occurred_at, 1, 10) >= ? AND substr(occurred_at, 1, 10) < ?`,
-      [userId, accountId, openingDate, historyStart],
+      [context.workspaceId, accountId, openingDate, historyStart],
     )?.amountMinor ?? 0
     : 0;
   let balance = opening + beforeRange;
@@ -317,9 +318,9 @@ function balanceHistory(userId: string, accountId: string, opening: number, open
   return history;
 }
 
-export function accountsPayload(userId: string, range?: InsightDateRange) {
-  const defaultCurrency = workspaceCurrency(userId);
-  const reportingDate = getUserCalendarContext(userId).today;
+export function accountsPayload(context: WorkspaceContext, range?: InsightDateRange) {
+  const defaultCurrency = workspaceCurrency(context);
+  const reportingDate = getWorkspaceCalendarContext(context).today;
   return {
     defaultCurrency,
     reportingBasis: {
@@ -327,7 +328,7 @@ export function accountsPayload(userId: string, range?: InsightDateRange) {
       balanceDate: reportingDate,
       conversion: "persisted_bnr_on_or_before",
     },
-    accounts: enrichLiabilityAccounts(userId, listAccounts(userId, true)).map((account) => {
+    accounts: enrichLiabilityAccounts(context, listAccounts(context, true)).map((account) => {
       const reporting = toReportingValue(
         { amountMinor: account.balanceMinor, currency: account.currency, date: reportingDate },
         defaultCurrency,
@@ -343,20 +344,20 @@ export function accountsPayload(userId: string, range?: InsightDateRange) {
         reportingCurrency: defaultCurrency,
         reportingConversion: reporting,
         reconciliationDifferenceMinor: 0,
-        balanceHistory: balanceHistory(userId, account.id, account.openingBalanceMinor, account.openingDate, range),
+        balanceHistory: balanceHistory(context, account.id, account.openingBalanceMinor, account.openingDate, range),
       };
     }),
   };
 }
 
-function workspaceCurrency(userId: string) {
-  return getUserRegionalSettings(userId).currency;
+function workspaceCurrency(context: WorkspaceContext) {
+  return getWorkspaceFinancialSettings(context).currency;
 }
 
-function savedUserSettings(userId: string, action: string) {
+function savedUserSettings(context: WorkspaceContext, action: string) {
   const row = one<{ after: string | null }>(
-    "SELECT after FROM audit_logs WHERE user_id = ? AND entity_type = 'user_settings' AND action = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-    [userId, action],
+    "SELECT after FROM audit_logs WHERE actor_user_id = ? AND entity_type = 'user_settings' AND action = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+    [context.actorUserId, action],
   );
   if (!row?.after) return {} as Record<string, unknown>;
   try {
@@ -369,17 +370,17 @@ function savedUserSettings(userId: string, action: string) {
   }
 }
 
-export function dashboard(userId: string, requestedRange?: InsightDateRange) {
-  const calendar = getUserCalendarContext(userId);
+export function dashboard(context: WorkspaceContext, requestedRange?: InsightDateRange) {
+  const calendar = getWorkspaceCalendarContext(context);
   const range = normalizeInsightRange(requestedRange, calendar.month);
   const currentMonth = calendar.month;
   const nextStart = `${nextMonth(currentMonth)}-01`;
   const followingStart = `${nextMonth(currentMonth, 2)}-01`;
-  const accounts = listAccounts(userId).map((account) => ({
+  const accounts = listAccounts(context).map((account) => ({
     ...account,
     type: account.type === "current" ? "current_account" : account.type,
   }));
-  const currency = workspaceCurrency(userId);
+  const currency = workspaceCurrency(context);
   const cashTypes = new Set(["current", "savings", "cash"]);
   const totalCashMinor = accounts
     .filter((account) => cashTypes.has(account.type === "current_account" ? "current" : account.type))
@@ -393,7 +394,7 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
     currency,
     "net worth",
   ), 0);
-  const actual = actualSummary(userId, range.from, addDays(range.to, 1));
+  const actual = actualSummary(context, range.from, addDays(range.to, 1));
   const selectedMonths = monthsInRange(range.from, range.to);
   const budgetApplicable = selectedMonths.length === 1
     && range.from === `${selectedMonths[0]}-01`
@@ -401,15 +402,15 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
   const budget = budgetApplicable
     ? sumInReportingCurrency(
       all<{ amountMinor: number; currency: string }>(
-        "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE user_id = ? AND month = ?",
-        [userId, selectedMonths[0]],
+        "SELECT amount_minor AS amountMinor, currency FROM budgets WHERE workspace_id = ? AND month = ?",
+        [context.workspaceId, selectedMonths[0]],
       ).map((row) => ({ ...row, date: `${selectedMonths[0]}-01` })),
       currency,
       "the selected monthly budget",
     )
     : 0;
 
-  const reminders = savedUserSettings(userId, "reminders");
+  const reminders = savedUserSettings(context, "reminders");
   const dueSoonEnabled = reminders.dueSoon !== false;
   const overdueEnabled = reminders.overdue !== false;
   const budgetWarningsEnabled = reminders.budgetWarnings !== false;
@@ -468,16 +469,16 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
       principalAmountMinor: convert(item.principalAmountMinor),
     };
   };
-  const planned = listPlannedPayments(userId, { from: calendar.today, to: followingStart }).map(convertPlanned);
-  const liabilityPlanned = listLiabilityObligations(userId, { from: calendar.today, to: followingStart }).map(convertLiability);
+  const planned = listPlannedPayments(context, { from: calendar.today, to: followingStart }).map(convertPlanned);
+  const liabilityPlanned = listLiabilityObligations(context, { from: calendar.today, to: followingStart }).map(convertLiability);
   const allPlanned = [...planned, ...liabilityPlanned].sort((left, right) => left.dueDate.localeCompare(right.dueDate));
   const dueSoon = dueSoonEnabled
     ? allPlanned.filter((item) => item.dueDate <= dueSoonEnd && ["planned", "scheduled"].includes(String(item.status)))
     : [];
   const overdue = overdueEnabled
     ? [
-        ...listPlannedPayments(userId, { to: addDays(calendar.today, -1), status: "overdue" }).map(convertPlanned),
-        ...listLiabilityObligations(userId, { to: addDays(calendar.today, -1), status: "overdue" }).map(convertLiability),
+        ...listPlannedPayments(context, { to: addDays(calendar.today, -1), status: "overdue" }).map(convertPlanned),
+        ...listLiabilityObligations(context, { to: addDays(calendar.today, -1), status: "overdue" }).map(convertLiability),
       ]
     : [];
   const nextItems = allPlanned.filter((item) => item.dueDate >= nextStart && item.dueDate < followingStart && !["skipped", "cancelled", "paid"].includes(String(item.status)));
@@ -527,7 +528,7 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
     });
   }
   const selectedDays = inclusiveDayCount(range.from, range.to);
-  const previous = actualSummary(userId, addDays(range.from, -selectedDays), range.from);
+  const previous = actualSummary(context, addDays(range.from, -selectedDays), range.from);
   if (previous.spendingMinor > 0 && actual.spendingMinor > previous.spendingMinor * 1.3) {
     warnings.push({
       id: "spend-change",
@@ -567,14 +568,14 @@ export function dashboard(userId: string, requestedRange?: InsightDateRange) {
       expectedCashOutflowMinor,
       lowestCashPointMinor: lowest,
     },
-    recentTransactions: listTransactions(userId, { from: range.from, to: range.to, limit: 8 }),
+    recentTransactions: listTransactions(context, { from: range.from, to: range.to, limit: 8 }),
     warnings,
   };
 }
 
-export function listBudgets(userId: string, month?: string) {
-  month = requireMonthKey(month ?? getUserCalendarContext(userId).month, "budget month");
-  const reportingCurrency = workspaceCurrency(userId);
+export function listBudgets(context: WorkspaceContext, month?: string) {
+  month = requireMonthKey(month ?? getWorkspaceCalendarContext(context).month, "budget month");
+  const reportingCurrency = workspaceCurrency(context);
   const storedBudgets = all<{
     id: string;
     month: string;
@@ -588,12 +589,12 @@ export function listBudgets(userId: string, month?: string) {
             b.amount_minor AS amountMinor, b.currency, b.rollover
        FROM budgets b
        LEFT JOIN categories c ON c.id = b.category_id
-      WHERE b.user_id = ? AND b.month = ?
+      WHERE b.workspace_id = ? AND b.month = ?
       ORDER BY c.name`,
-    [userId, month],
+    [context.workspaceId, month],
   );
   const allocationRows = reportingSpendingAllocations(
-    userId,
+    context,
     `${month}-01`,
     `${nextMonth(month)}-01`,
     `actual spending for the ${month} budget`,
@@ -638,7 +639,7 @@ export function listBudgets(userId: string, month?: string) {
 }
 
 export function saveBudget(
-  userId: string,
+  context: WorkspaceContext,
   rawInput: {
     month: string;
     categoryId: string;
@@ -653,18 +654,18 @@ export function saveBudget(
       details: { amountMinor: input.amountMinor },
     });
   }
-  const category = one("SELECT id FROM categories WHERE id = ? AND user_id = ? AND archived_at IS NULL", [input.categoryId, userId]);
+  const category = one("SELECT id FROM categories WHERE id = ? AND workspace_id = ? AND archived_at IS NULL", [input.categoryId, context.workspaceId]);
   if (!category) {
     throw insightsError(422, "BUDGET_CATEGORY_INVALID", "Choose an active category that belongs to your profile", {
       details: { categoryId: input.categoryId },
     });
   }
   const existing = one<{ id: string; currency: string }>(
-    "SELECT id, currency FROM budgets WHERE user_id = ? AND month = ? AND category_id = ?",
-    [userId, input.month, input.categoryId],
+    "SELECT id, currency FROM budgets WHERE workspace_id = ? AND month = ? AND category_id = ?",
+    [context.workspaceId, input.month, input.categoryId],
   );
   const id = existing?.id ?? randomUUID();
-  const reportingCurrency = workspaceCurrency(userId);
+  const reportingCurrency = workspaceCurrency(context);
   const amountCurrency = rawInput.amountCurrency?.trim().toUpperCase() ?? reportingCurrency;
   const currency = existing?.currency ?? amountCurrency;
   const storedAmountMinor = toReportingMinor(
@@ -674,14 +675,14 @@ export function saveBudget(
   );
   database()
     .prepare(
-      `INSERT INTO budgets (id, user_id, month, currency, category_id, amount_minor, rollover)
+      `INSERT INTO budgets (id, workspace_id, month, currency, category_id, amount_minor, rollover)
        VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, month, category_id) DO UPDATE SET
+       ON CONFLICT(workspace_id, month, category_id) DO UPDATE SET
          amount_minor = excluded.amount_minor, rollover = excluded.rollover,
          updated_at = CURRENT_TIMESTAMP`,
     )
-    .run(id, userId, input.month, currency, input.categoryId, storedAmountMinor, input.rollover ? 1 : 0);
-  audit(userId, "budget", id, existing ? "update" : "create", existing, input);
+    .run(id, context.workspaceId, input.month, currency, input.categoryId, storedAmountMinor, input.rollover ? 1 : 0);
+  audit(context, "budget", id, existing ? "update" : "create", existing, input);
   return {
     id,
     ...input,
@@ -713,32 +714,32 @@ interface PlanInput {
   }>;
 }
 
-function getOrCreatePlan(userId: string, targetMonth: string) {
+function getOrCreatePlan(context: WorkspaceContext, targetMonth: string) {
   return one<Record<string, unknown>>(
     `SELECT id, month, currency, name, status, expected_income_minor AS expectedIncomeMinor,
             discretionary_target_minor AS discretionaryTargetMinor, notes
-       FROM month_plans WHERE user_id = ? AND month = ?`,
-    [userId, targetMonth],
+       FROM month_plans WHERE workspace_id = ? AND month = ?`,
+    [context.workspaceId, targetMonth],
   );
 }
 
-export function planningWorkspace(userId: string, targetMonth?: string) {
-  const calendar = getUserCalendarContext(userId);
+export function planningWorkspace(context: WorkspaceContext, targetMonth?: string) {
+  const calendar = getWorkspaceCalendarContext(context);
   targetMonth = requireMonthKey(targetMonth ?? nextMonth(calendar.month), "planning month");
-  const plan = getOrCreatePlan(userId, targetMonth);
+  const plan = getOrCreatePlan(context, targetMonth);
   const planId = typeof plan?.id === "string" ? plan.id : null;
-  const accounts = listAccounts(userId);
-  const occurrences = listPlannedPayments(userId, {
+  const accounts = listAccounts(context);
+  const occurrences = listPlannedPayments(context, {
     from: `${targetMonth}-01`,
     to: monthEnd(targetMonth),
   }).filter((item) => !["skipped", "cancelled"].includes(String(item.status)));
-  const liabilityObligations = listLiabilityObligations(userId, {
+  const liabilityObligations = listLiabilityObligations(context, {
     from: `${targetMonth}-01`,
     to: monthEnd(targetMonth),
   }).filter((item) => !["skipped", "cancelled"].includes(String(item.status)));
   const accountTypeById = new Map(accounts.map((account) => [account.id, account.type]));
   const accountCurrencyById = new Map(accounts.map((account) => [account.id, account.currency]));
-  const reportingCurrency = workspaceCurrency(userId);
+  const reportingCurrency = workspaceCurrency(context);
   const cashTypes = new Set(["current", "savings", "cash"]);
   // Planned-payment occurrences are the canonical forecast inputs. Legacy
   // month_plan_items remain in storage for history, but must never replace or
@@ -826,9 +827,9 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
               ELSE 0 END AS amountMinor
        FROM accounts a
        LEFT JOIN transactions t ON t.account_id = a.id
-      WHERE a.user_id = ? AND a.archived_at IS NULL
+      WHERE a.workspace_id = ? AND a.archived_at IS NULL
       GROUP BY a.id`,
-    [monthStart, monthStart, userId],
+    [monthStart, monthStart, context.workspaceId],
   );
   const actualOpeningByAccount = new Map(actualOpenings.map((item) => [item.accountId, item.amountMinor]));
   const savedOpeningByAccount = new Map(savedOpenings.map((item) => [item.accountId, item.amountMinor]));
@@ -845,23 +846,23 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
   const actualActivity = all<{ accountId: string; amountMinor: number }>(
     `SELECT t.account_id AS accountId, COALESCE(SUM(t.amount_minor), 0) AS amountMinor
        FROM transactions t JOIN accounts a ON a.id = t.account_id
-      WHERE t.user_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
+      WHERE t.workspace_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
         AND substr(t.occurred_at, 1, 10) >= ? AND substr(t.occurred_at, 1, 10) < ?
         AND substr(t.occurred_at, 1, 10) >= a.opening_balance_date
       GROUP BY t.account_id`,
-    [userId, monthStart, actualThroughExclusive],
+    [context.workspaceId, monthStart, actualThroughExclusive],
   );
   const actualActivityByAccount = new Map(actualActivity.map((item) => [item.accountId, item.amountMinor]));
   const actualCashRows = all<{ date: string; amountMinor: number; currency: string }>(
     `SELECT substr(t.occurred_at, 1, 10) AS date, t.amount_minor AS amountMinor, t.currency
        FROM transactions t JOIN accounts a ON a.id = t.account_id
-      WHERE t.user_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
+      WHERE t.workspace_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
         AND a.type IN ('current', 'savings', 'cash')
         AND a.archived_at IS NULL
         AND substr(t.occurred_at, 1, 10) >= ? AND substr(t.occurred_at, 1, 10) < ?
         AND substr(t.occurred_at, 1, 10) >= a.opening_balance_date
       ORDER BY date`,
-    [userId, monthStart, actualThroughExclusive],
+    [context.workspaceId, monthStart, actualThroughExclusive],
   );
   const actualCashByDate = new Map<string, number>();
   for (const row of actualCashRows) {
@@ -892,7 +893,7 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
   const expectedCashOutflowMinor = canonicalLines
     .filter((item) => item.direction === "expense")
     .reduce((sum, item) => sum + reportingLineAmount(item, Number(item.cashFlowAmountMinor ?? 0), "expected monthly cash obligations"), 0);
-  const actual = actualSummary(userId, monthStart, actualThroughExclusive);
+  const actual = actualSummary(context, monthStart, actualThroughExclusive);
   const openingTotalMinor = accounts
     .filter((account) => cashTypes.has(account.type))
     .reduce((sum, account) => sum + toReportingMinor(
@@ -1056,8 +1057,8 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
   let scenarioLines: unknown[] = [];
   if (planId) {
     const latestScenario = one<{ after: string | null }>(
-      "SELECT after FROM audit_logs WHERE user_id = ? AND entity_type = 'month_plan_scenario' AND entity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-      [userId, planId],
+      "SELECT after FROM audit_logs WHERE workspace_id = ? AND entity_type = 'month_plan_scenario' AND entity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      [context.workspaceId, planId],
     );
     if (latestScenario?.after) {
       try {
@@ -1181,12 +1182,12 @@ export function planningWorkspace(userId: string, targetMonth?: string) {
       varianceMinor: expectedExpensesMinor - actual.spendingMinor,
     },
     scenarios,
-    categories: listCategories(userId),
+    categories: listCategories(context),
     estimate: true,
   };
 }
 
-export function savePlan(userId: string, rawInput: PlanInput & { action?: string; scenarioName?: string }) {
+export function savePlan(context: WorkspaceContext, rawInput: PlanInput & { action?: string; scenarioName?: string }) {
   const input = {
     ...rawInput,
     month: requireMonthKey(rawInput.month, "planning month"),
@@ -1198,7 +1199,7 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
     let sourcePlanId: string | null = null;
     let sourcePlan: Record<string, unknown> | null = null;
     if (input.copyFromMonth) {
-      sourcePlan = getOrCreatePlan(userId, input.copyFromMonth) ?? null;
+      sourcePlan = getOrCreatePlan(context, input.copyFromMonth) ?? null;
       sourcePlanId = typeof sourcePlan?.id === "string" ? sourcePlan.id : null;
     }
     if (["copy", "copy-assumptions"].includes(input.action ?? "") && input.copyFromMonth && !sourcePlanId) {
@@ -1206,10 +1207,10 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         details: { copyFromMonth: input.copyFromMonth },
       });
     }
-    const existing = getOrCreatePlan(userId, input.month);
+    const existing = getOrCreatePlan(context, input.month);
     const planId = typeof existing?.id === "string" ? existing.id : randomUUID();
-    const planCurrency = typeof existing?.currency === "string" ? existing.currency : workspaceCurrency(userId);
-    const currentReportingCurrency = workspaceCurrency(userId);
+    const planCurrency = typeof existing?.currency === "string" ? existing.currency : workspaceCurrency(context);
+    const currentReportingCurrency = workspaceCurrency(context);
     const denominationDate = `${input.month}-01`;
     let expectedIncomeMinor = input.expectedIncomeMinor === undefined
       ? undefined
@@ -1247,17 +1248,17 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         .prepare(
           `UPDATE month_plans SET name = COALESCE(?, name), expected_income_minor = COALESCE(?, expected_income_minor),
            discretionary_target_minor = COALESCE(?, discretionary_target_minor), notes = COALESCE(?, notes), updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND user_id = ?`,
+           WHERE id = ? AND workspace_id = ?`,
         )
-        .run(input.name ?? null, expectedIncomeMinor ?? null, discretionaryTargetMinor ?? null, input.notes ?? null, planId, userId);
+        .run(input.name ?? null, expectedIncomeMinor ?? null, discretionaryTargetMinor ?? null, input.notes ?? null, planId, context.workspaceId);
     } else {
       database()
         .prepare(
           `INSERT INTO month_plans
-            (id, user_id, month, currency, name, expected_income_minor, discretionary_target_minor, copied_from_plan_id, notes)
+            (id, workspace_id, month, currency, name, expected_income_minor, discretionary_target_minor, copied_from_plan_id, notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(planId, userId, input.month, planCurrency, input.name?.trim() || input.month, expectedIncomeMinor ?? 0, discretionaryTargetMinor ?? null, sourcePlanId, input.notes ?? null);
+        .run(planId, context.workspaceId, input.month, planCurrency, input.name?.trim() || input.month, expectedIncomeMinor ?? 0, discretionaryTargetMinor ?? null, sourcePlanId, input.notes ?? null);
     }
 
     if (input.action === "save-scenario") {
@@ -1270,9 +1271,9 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         ),
       }));
       database()
-        .prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'month_plan_scenario', ?, 'save', ?)")
-        .run(randomUUID(), userId, planId, JSON.stringify({ name: input.scenarioName?.trim() || input.month, lines: storedLines }));
-      return planningWorkspace(userId, input.month);
+        .prepare("INSERT INTO audit_logs (id, workspace_id, actor_user_id, entity_type, entity_id, action, after) VALUES (?, ?, ?, 'month_plan_scenario', ?, 'save', ?)")
+        .run(randomUUID(), context.workspaceId, context.actorUserId, planId, JSON.stringify({ name: input.scenarioName?.trim() || input.month, lines: storedLines }));
+      return planningWorkspace(context, input.month);
     }
 
     if (sourcePlanId && ["copy", "copy-assumptions"].includes(input.action ?? "")) {
@@ -1283,13 +1284,13 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
            SELECT lower(hex(randomblob(16))), ?, source.account_id, source.expected_opening_minor
              FROM month_plan_accounts source
              JOIN accounts a ON a.id = source.account_id
-            WHERE source.month_plan_id = ? AND a.user_id = ?`,
+            WHERE source.month_plan_id = ? AND a.workspace_id = ?`,
         )
-        .run(planId, sourcePlanId, userId);
+        .run(planId, sourcePlanId, context.workspaceId);
 
       const sourceScenario = one<{ after: string | null }>(
-        "SELECT after FROM audit_logs WHERE user_id = ? AND entity_type = 'month_plan_scenario' AND entity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-        [userId, sourcePlanId],
+        "SELECT after FROM audit_logs WHERE workspace_id = ? AND entity_type = 'month_plan_scenario' AND entity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        [context.workspaceId, sourcePlanId],
       );
       let copiedScenario: { name: string; lines: Array<Record<string, unknown>> } = {
         name: input.month,
@@ -1321,12 +1322,12 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         }
       }
       database()
-        .prepare("INSERT INTO audit_logs (id, user_id, entity_type, entity_id, action, after) VALUES (?, ?, 'month_plan_scenario', ?, 'copy', ?)")
-        .run(randomUUID(), userId, planId, JSON.stringify(copiedScenario));
+        .prepare("INSERT INTO audit_logs (id, workspace_id, actor_user_id, entity_type, entity_id, action, after) VALUES (?, ?, ?, 'month_plan_scenario', ?, 'copy', ?)")
+        .run(randomUUID(), context.workspaceId, context.actorUserId, planId, JSON.stringify(copiedScenario));
     }
     if (input.openingBalances) {
       const allowedAccountIds = new Set(
-        all<{ id: string }>("SELECT id FROM accounts WHERE user_id = ? AND archived_at IS NULL", [userId]).map((account) => account.id),
+        all<{ id: string }>("SELECT id FROM accounts WHERE workspace_id = ? AND archived_at IS NULL", [context.workspaceId]).map((account) => account.id),
       );
       const normalizedOpenings: Array<{ accountId: string; amountMinor: number }> = [];
       const seenAccountIds = new Set<string>();
@@ -1374,8 +1375,8 @@ export function savePlan(userId: string, rawInput: PlanInput & { action?: string
         .prepare("INSERT INTO plan_scenarios (id, month_plan_id, name) VALUES (?, ?, ?)")
         .run(randomUUID(), planId, input.scenarioName);
     }
-    audit(userId, "month_plan", planId, existing ? "update" : "create", existing, input);
-    return planningWorkspace(userId, input.month);
+    audit(context, "month_plan", planId, existing ? "update" : "create", existing, input);
+    return planningWorkspace(context, input.month);
   })();
 }
 
@@ -1386,9 +1387,9 @@ interface MonthlyRow {
   netCashFlowMinor: number;
 }
 
-export function statistics(userId: string, months = 12, requestedRange?: InsightDateRange) {
+export function statistics(context: WorkspaceContext, months = 12, requestedRange?: InsightDateRange) {
   months = Number.isSafeInteger(months) ? Math.min(Math.max(months, 1), 60) : 12;
-  const calendar = getUserCalendarContext(userId);
+  const calendar = getWorkspaceCalendarContext(context);
   const normalizedRequestedRange = requestedRange ? normalizeInsightRange(requestedRange) : undefined;
   const selectedMonths = normalizedRequestedRange
     ? monthsInRange(normalizedRequestedRange.from, normalizedRequestedRange.to)
@@ -1398,8 +1399,8 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     : { from: `${selectedMonths[0]}-01`, to: monthEnd(selectedMonths[selectedMonths.length - 1] ?? calendar.month) };
   const first = range.from;
   const lastExclusive = addDays(range.to, 1);
-  const reportingCurrency = workspaceCurrency(userId);
-  const transactionRows = reportingTransactions(userId, first, lastExclusive);
+  const reportingCurrency = workspaceCurrency(context);
+  const transactionRows = reportingTransactions(context, first, lastExclusive);
   const rawMonthlyMap = new Map<string, { month: string; incomeMinor: number; signedSpendingMinor: number }>();
   for (const row of transactionRows) {
     if (!["income", "expense", "refund"].includes(row.kind)) continue;
@@ -1421,22 +1422,22 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
       };
     });
   const byMonthMap = new Map(rawMonthly.map((row) => [row.month, row]));
-  materializePlannedOccurrences(userId, range.to);
+  materializePlannedOccurrences(context, range.to);
   const rawPlanned = all<{ month: string; plannedMinor: number; currency: string; date: string }>(
     `SELECT substr(o.due_date, 1, 7) AS month, o.expected_amount_minor AS plannedMinor,
             p.currency, o.due_date AS date
        FROM planned_payment_occurrences o JOIN planned_payments p ON p.id = o.planned_payment_id
-      WHERE p.user_id = ? AND p.direction = 'expense' AND o.status NOT IN ('skipped', 'cancelled')
+      WHERE p.workspace_id = ? AND p.direction = 'expense' AND o.status NOT IN ('skipped', 'cancelled')
         AND o.due_date >= ? AND o.due_date < ?`,
-    [userId, first, lastExclusive],
+    [context.workspaceId, first, lastExclusive],
   );
   const rawLoanPlanned = all<{ month: string; plannedMinor: number; currency: string; date: string }>(
     `SELECT substr(e.due_date, 1, 7) AS month,
             e.interest_minor + e.fees_minor AS plannedMinor, a.currency, e.due_date AS date
        FROM loan_schedule_entries e JOIN accounts a ON a.id = e.loan_account_id
-      WHERE a.user_id = ? AND e.status <> 'skipped' AND e.due_date >= ? AND e.due_date < ?
+      WHERE a.workspace_id = ? AND e.status <> 'skipped' AND e.due_date >= ? AND e.due_date < ?
       `,
-    [userId, first, lastExclusive],
+    [context.workspaceId, first, lastExclusive],
   );
   const plannedByMonth = new Map<string, number>();
   for (const row of [...rawPlanned, ...rawLoanPlanned]) {
@@ -1470,7 +1471,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   const spendTransactions = transactionRows
     .filter((row) => row.kind === "expense" || row.kind === "refund")
     .map((row) => ({ ...row, transactionId: row.id }));
-  const spendingAllocations = reportingSpendingAllocations(userId, first, lastExclusive);
+  const spendingAllocations = reportingSpendingAllocations(context, first, lastExclusive);
   const byCategory = groupedSpend(spendingAllocations, (row) => ({ id: row.categoryId, name: row.categoryName }));
   const byMerchant = groupedSpend(spendTransactions, (row) => ({
     id: row.merchantId ?? row.merchantName,
@@ -1499,10 +1500,10 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     `SELECT x.transaction_id AS transactionId, g.id, g.name
        FROM tags g JOIN transaction_tags x ON x.tag_id = g.id
        JOIN transactions t ON t.id = x.transaction_id
-      WHERE t.user_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
+      WHERE t.workspace_id = ? AND t.status = 'cleared' AND t.voided_at IS NULL
         AND t.kind IN ('expense', 'refund')
         AND substr(t.occurred_at, 1, 10) >= ? AND substr(t.occurred_at, 1, 10) < ?`,
-    [userId, first, lastExclusive],
+    [context.workspaceId, first, lastExclusive],
   ).flatMap((tag) => {
     const transaction = spendByTransactionId.get(tag.transactionId);
     return transaction ? [{ ...tag, amountMinor: transaction.amountMinor }] : [];
@@ -1544,11 +1545,11 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
     }));
 
   const current = monthly.at(-1) ?? { incomeMinor: 0, spendingMinor: 0, netCashFlowMinor: 0, savingsRate: 0, rollingAverageMinor: 0, expenseMinor: 0, actualMinor: 0, plannedMinor: 0, month: range.to.slice(0, 7) };
-  const periodTotals = actualSummary(userId, first, lastExclusive);
+  const periodTotals = actualSummary(context, first, lastExclusive);
   const rangeDays = inclusiveDayCount(range.from, range.to);
-  const previousPeriod = actualSummary(userId, addDays(range.from, -rangeDays), range.from);
-  const yearAgoPeriod = actualSummary(userId, shiftDateYear(range.from, -1), addDays(shiftDateYear(range.to, -1), 1));
-  const accounts = listAccounts(userId);
+  const previousPeriod = actualSummary(context, addDays(range.from, -rangeDays), range.from);
+  const yearAgoPeriod = actualSummary(context, shiftDateYear(range.from, -1), addDays(shiftDateYear(range.to, -1), 1));
+  const accounts = listAccounts(context);
   const cash = accounts
     .filter((account) => ["current", "savings", "cash"].includes(account.type))
     .reduce((sum, account) => sum + toReportingMinor(
@@ -1561,7 +1562,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   const hasObservedDays = range.from <= observedTo;
   const observedDays = hasObservedDays ? inclusiveDayCount(range.from, observedTo) : 0;
   const observedTotals = hasObservedDays
-    ? actualSummary(userId, range.from, addDays(observedTo, 1))
+    ? actualSummary(context, range.from, addDays(observedTo, 1))
     : null;
   const averageDailySpending = observedDays && observedTotals
     ? observedTotals.spendingMinor / observedDays
@@ -1584,7 +1585,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   const projectionObservedFrom = range.from > currentMonthStart ? range.from : currentMonthStart;
   const projectionObservedDays = projectionApplicable ? inclusiveDayCount(projectionObservedFrom, today) : 0;
   const projectionObservedSpendingMinor = projectionApplicable
-    ? actualSummary(userId, projectionObservedFrom, addDays(today, 1)).spendingMinor
+    ? actualSummary(context, projectionObservedFrom, addDays(today, 1)).spendingMinor
     : null;
   const projectedMonthEndMinor = projectionApplicable && projectionObservedDays && projectionObservedSpendingMinor !== null
     ? Math.round(projectionObservedSpendingMinor / projectionObservedDays * currentMonthDays)
@@ -1593,8 +1594,8 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   const plannedMinor = [...plannedByMonth.values()].reduce((sum, value) => sum + value, 0);
   const recurringCommitmentMinor = sumInReportingCurrency(all<{ amountMinor: number; currency: string; date: string }>(
     `SELECT expected_amount_minor AS amountMinor, currency, due_date AS date FROM planned_payments
-      WHERE user_id = ? AND direction = 'expense' AND recurrence_rule_id IS NOT NULL AND active = 1 AND archived_at IS NULL`,
-    [userId],
+      WHERE workspace_id = ? AND direction = 'expense' AND recurrence_rule_id IS NOT NULL AND active = 1 AND archived_at IS NULL`,
+    [context.workspaceId],
   ), reportingCurrency, "recurring commitments");
   const subscriptions = all<{
     id: string;
@@ -1613,9 +1614,9 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
        FROM planned_payments p JOIN recurrence_rules r ON r.id = p.recurrence_rule_id
        LEFT JOIN planned_payment_occurrences o ON o.planned_payment_id = p.id
        LEFT JOIN categories c ON c.id = p.category_id
-      WHERE p.user_id = ? AND p.direction = 'expense' AND p.active = 1 AND p.archived_at IS NULL
+      WHERE p.workspace_id = ? AND p.direction = 'expense' AND p.active = 1 AND p.archived_at IS NULL
       GROUP BY p.id ORDER BY p.expected_amount_minor DESC`,
-    [userId],
+    [context.workspaceId],
   ).map((item) => {
     const multiplier = item.frequency === "daily" ? 30 / item.interval
       : item.frequency === "weekly" ? 52 / 12 / item.interval
@@ -1639,7 +1640,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   });
   const recurringMonthlyMinor = subscriptions.reduce((sum, item) => sum + item.monthlyAmountMinor, 0);
   const inThirtyDays = addDays(calendar.today, 30);
-  const next30DaysMinor = listPlannedPayments(userId, { from: calendar.today, to: inThirtyDays })
+  const next30DaysMinor = listPlannedPayments(context, { from: calendar.today, to: inThirtyDays })
     .filter((item) => item.direction === "expense" && !["paid", "skipped", "cancelled"].includes(item.status))
     .reduce((sum, item) => sum + toReportingMinor(
       {
@@ -1650,7 +1651,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
       reportingCurrency,
       "planned payments due in the next 30 days",
     ), 0);
-  const liabilityAccounts = enrichLiabilityAccounts(userId, accounts)
+  const liabilityAccounts = enrichLiabilityAccounts(context, accounts)
     .filter((account) => account.type === "credit_card" || account.type === "loan");
   const totalLiabilitiesMinor = liabilityAccounts.reduce(
     (sum, account) => sum + toReportingMinor(
@@ -1699,9 +1700,9 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
          ON interest_transaction.id = p.interest_transaction_id AND interest_transaction.voided_at IS NULL
        LEFT JOIN transactions fee_transaction
          ON fee_transaction.id = p.fee_transaction_id AND fee_transaction.voided_at IS NULL
-      WHERE p.user_id = ? AND p.voided_at IS NULL
+      WHERE p.workspace_id = ? AND p.voided_at IS NULL
         AND p.payment_date >= ? AND p.payment_date < ?`,
-    [userId, first, lastExclusive],
+    [context.workspaceId, first, lastExclusive],
   );
   const loanPayments = loanPaymentRows.reduce((sum, row) => ({
     totalMinor: sum.totalMinor + toReportingMinor({ amountMinor: row.cashTotalMinor, currency: row.cashCurrency, date: row.date }, reportingCurrency, "loan cash payments"),
@@ -1714,9 +1715,9 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
             source_transaction.currency, substr(source_transaction.occurred_at, 1, 10) AS date
        FROM credit_card_payments p
        JOIN transactions source_transaction ON source_transaction.id = p.source_transaction_id
-      WHERE p.user_id = ? AND p.voided_at IS NULL AND source_transaction.voided_at IS NULL
+      WHERE p.workspace_id = ? AND p.voided_at IS NULL AND source_transaction.voided_at IS NULL
         AND p.payment_date >= ? AND p.payment_date < ?`,
-    [userId, first, lastExclusive],
+    [context.workspaceId, first, lastExclusive],
   );
   const cardPaymentsMinor = sumInReportingCurrency(
     cardPaymentRows.map((row) => ({ amountMinor: row.totalMinor, currency: row.currency, date: row.date })),
@@ -1770,7 +1771,7 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
   });
 
   const categoryPeriodRows = (rangeFrom: string, rangeToExclusive: string) => groupedSpend(
-    reportingSpendingAllocations(userId, rangeFrom, rangeToExclusive, "category comparisons"),
+    reportingSpendingAllocations(context, rangeFrom, rangeToExclusive, "category comparisons"),
     (row) => ({ id: row.categoryId, name: row.categoryName }),
   );
   const currentCategories = categoryPeriodRows(first, lastExclusive);
@@ -1862,12 +1863,12 @@ export function statistics(userId: string, months = 12, requestedRange?: Insight
                      THEN t.amount_minor ELSE 0 END
               ), 0) AS accountBalanceMinor
          FROM accounts a
-         LEFT JOIN transactions t ON t.account_id = a.id AND t.user_id = ?
-        WHERE a.user_id = ?
+         LEFT JOIN transactions t ON t.account_id = a.id AND t.workspace_id = ?
+        WHERE a.workspace_id = ?
           AND a.opening_balance_date <= ?
           AND (a.archived_at IS NULL OR substr(a.archived_at, 1, 10) > ?)
         GROUP BY a.id`,
-      [selectedEnd, userId, userId, selectedEnd, selectedEnd],
+      [selectedEnd, context.workspaceId, context.workspaceId, selectedEnd, selectedEnd],
     );
     const netWorthMinor = sumInReportingCurrency(
       balances.map((row) => ({ amountMinor: row.accountBalanceMinor, currency: row.currency, date: selectedEnd })),

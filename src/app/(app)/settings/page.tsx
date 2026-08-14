@@ -238,6 +238,8 @@ function ProfilePreferences({
   const t = useTranslations();
   const preferences = readRecord(initial.preferences ?? initial);
   const user = readRecord(initial.user);
+  const workspace = readRecord(initial.workspace);
+  const canEditWorkspace = workspace.role === "owner";
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const [locale, setLocale] = useState(DEFAULT_LOCALE);
@@ -291,7 +293,7 @@ function ProfilePreferences({
       );
       setCurrency(
         stringFrom(
-          user.defaultCurrency ?? preferences.currency,
+          workspace.defaultCurrency ?? preferences.currency,
           DEFAULT_CURRENCY,
         ).toUpperCase(),
       );
@@ -299,7 +301,7 @@ function ProfilePreferences({
         stringFrom(user.locale ?? preferences.locale, DEFAULT_LOCALE),
       );
       setTimeZone(
-        stringFrom(user.timeZone ?? preferences.timeZone, DEFAULT_TIME_ZONE),
+        stringFrom(workspace.timeZone ?? preferences.timeZone, DEFAULT_TIME_ZONE),
       );
       setUiLanguage(supportedUiLanguage(user.uiLanguage));
       setCompactTables(preferences.compactTables !== false);
@@ -311,12 +313,13 @@ function ProfilePreferences({
     preferences.displayName,
     preferences.locale,
     preferences.timeZone,
-    user.defaultCurrency,
     user.displayName,
     user.locale,
     user.name,
-    user.timeZone,
     user.uiLanguage,
+    workspace.defaultCurrency,
+    workspace.role,
+    workspace.timeZone,
   ]);
 
   async function save() {
@@ -330,8 +333,10 @@ function ProfilePreferences({
           displayName: name.trim(),
           uiLanguage,
           locale,
-          currency,
-          timeZone,
+          ...(canEditWorkspace ? {
+            workspaceCurrency: currency,
+            workspaceTimeZone: timeZone,
+          } : {}),
           compactTables,
         },
         t("settings.preferences.saved"),
@@ -376,6 +381,7 @@ function ProfilePreferences({
                 value={currency}
                 locale={locale}
                 onChange={setCurrency}
+                disabled={!canEditWorkspace}
               />
             </Field>
             <Field
@@ -403,6 +409,7 @@ function ProfilePreferences({
                 value={timeZone}
                 suggestions={timeZoneSuggestions}
                 onValueChange={setTimeZone}
+                disabled={!canEditWorkspace}
                 placeholder={t("settings.preferences.timeZonePlaceholder")}
                 maxLength={100}
                 emptyMessage={t("settings.preferences.timeZoneNoMatches")}

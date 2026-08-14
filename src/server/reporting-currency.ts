@@ -1,5 +1,6 @@
 import { ensureDatabase, sqlite } from "@/db";
 import { HttpError } from "@/lib/api-response";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 import {
   convertMinorAtRate,
   currencyMinorUnitDigits,
@@ -7,7 +8,7 @@ import {
   findPersistedBnrQuote,
   resolveBnrQuote,
 } from "@/server/fx";
-import { getUserCalendarContext } from "@/server/user-settings";
+import { getWorkspaceCalendarContext } from "@/server/user-settings";
 
 export type DatedMoney = {
   amountMinor: number;
@@ -31,9 +32,9 @@ function normalizeCurrency(value: string) {
 }
 
 /**
- * Converts an immutable ledger amount into the user's current reporting
+ * Converts an immutable ledger amount into the workspace's current reporting
  * currency. Reporting conversions are deliberately resolved at read time:
- * changing the profile currency never rewrites native account history.
+ * changing the workspace reporting currency never rewrites native account history.
  */
 export function toReportingValue(
   money: DatedMoney,
@@ -148,11 +149,11 @@ function dateKey(value: unknown): string | null {
  * hydrated.
  */
 export async function hydrateReportingRates(
-  userId: string,
+  context: WorkspaceContext,
   options: ReportingRateHydrationOptions = {},
 ): Promise<ReportingRateHydrationResult> {
   ensureDatabase();
-  const calendar = getUserCalendarContext(userId);
+  const calendar = getWorkspaceCalendarContext(context);
   const reportingCurrency = normalizeCurrency(calendar.currency);
   const asOfDate = dateKey(options.asOfDate) ?? calendar.today;
   const from = options.from === undefined ? undefined : dateKey(options.from);
@@ -189,8 +190,8 @@ export async function hydrateReportingRates(
   };
 
   const accountRows = sqlite.prepare(
-    "SELECT currency, opening_balance_date AS date FROM accounts WHERE user_id = ?",
-  ).all(userId) as Array<{ currency: string; date: string }>;
+    "SELECT currency, opening_balance_date AS date FROM accounts WHERE workspace_id = ?",
+  ).all(context.workspaceId) as Array<{ currency: string; date: string }>;
   for (const row of accountRows) {
     // Current totals translate the whole native balance at the report as-of
     // date. Range endpoints cover historical net-worth snapshots.
@@ -217,29 +218,37 @@ export async function hydrateReportingRates(
 
   const datedRows = sqlite.prepare(
     `SELECT currency, substr(occurred_at, 1, 10) AS date
-       FROM transactions WHERE user_id = ? AND voided_at IS NULL
+       FROM transactions WHERE workspace_id = ? AND voided_at IS NULL
      UNION ALL
      SELECT p.currency, o.due_date AS date
        FROM planned_payments p
        JOIN planned_payment_occurrences o ON o.planned_payment_id = p.id
-      WHERE p.user_id = ?
+       WHERE p.workspace_id = ?
      UNION ALL
-     SELECT currency, month || '-01' AS date FROM budgets WHERE user_id = ?
+     SELECT currency, month || '-01' AS date FROM budgets WHERE workspace_id = ?
      UNION ALL
-     SELECT currency, month || '-01' AS date FROM month_plans WHERE user_id = ?
+     SELECT currency, month || '-01' AS date FROM month_plans WHERE workspace_id = ?
      UNION ALL
      SELECT a.currency, e.due_date AS date
        FROM loan_schedule_entries e JOIN accounts a ON a.id = e.loan_account_id
-      WHERE a.user_id = ?
+       WHERE a.workspace_id = ?
      UNION ALL
      SELECT a.currency, p.payment_date AS date
        FROM loan_payments p JOIN accounts a ON a.id = p.loan_account_id
-      WHERE p.user_id = ? AND p.voided_at IS NULL
+       WHERE p.workspace_id = ? AND p.voided_at IS NULL
      UNION ALL
      SELECT a.currency, p.payment_date AS date
        FROM credit_card_payments p JOIN accounts a ON a.id = p.account_id
-      WHERE p.user_id = ? AND p.voided_at IS NULL`,
-  ).all(userId, userId, userId, userId, userId, userId, userId) as Array<{ currency: string; date: string }>;
+       WHERE p.workspace_id = ? AND p.voided_at IS NULL`,
+  ).all(
+    context.workspaceId,
+    context.workspaceId,
+    context.workspaceId,
+    context.workspaceId,
+    context.workspaceId,
+    context.workspaceId,
+    context.workspaceId,
+  ) as Array<{ currency: string; date: string }>;
   for (const row of datedRows) add(row.currency, row.date);
 
   // One quote request per currency/year is enough because BNR annual feeds are

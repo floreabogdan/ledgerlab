@@ -1,6 +1,7 @@
 metadata:
   loginTitle: Autentificare
   registerTitle: Creează un cont
+  invitationTitle: Alătură-te unei familii
 layout:
   homeAria: Pagina principală LedgerLab
   footnote: Spațiu local · mai multe monede · setările tale regionale
@@ -54,5 +55,22 @@ validation:
   emailInvalid: Introdu o adresă de e-mail validă.
   passwordMinimum: "Parola trebuie să conțină cel puțin {count} caractere."
   passwordsMismatch: Parolele nu coincid.
+invitation:
+  loading: Se verifică invitația…
+  unavailableTitle: Această invitație nu este disponibilă
+  joinedTitle: Te-ai alăturat familiei
+  joinedDescription: "Se deschide {name}…"
+  title: "Alătură-te spațiului {name}"
+  description: "Această invitație de unică folosință este pentru {email}. Autentifică-te sau creează contul LedgerLab cu această adresă."
+  acceptSignedIn: Acceptă invitația
+  accountChoice: Alege dacă te autentifici sau creezi un cont
+  existingAccount: Am deja cont
+  newAccount: Creează un cont
+  emailHelp: Folosește exact adresa de e-mail care a primit invitația.
+  signInAndAccept: Autentifică-te și acceptă
+  registerAndAccept: Creează contul și acceptă
+  errors:
+    loadFailed: Invitația nu a putut fi încărcată. Poate fi invalidă, expirată, revocată sau deja folosită.
+    acceptFailed: Invitația nu a putut fi acceptată. Încearcă din nou.
 errors:
   requestFailed: Cererea nu a putut fi finalizată. Încearcă din nou.

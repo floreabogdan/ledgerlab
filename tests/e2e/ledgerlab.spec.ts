@@ -546,7 +546,7 @@ test.describe("complete desktop finance workflow", () => {
     await accountTrigger.click();
     const accountMenu = page.getByRole("menu", { name: "User account" });
     await expect(accountMenu).toBeVisible();
-    await expect(accountMenu.getByText("LedgerLab E2E", { exact: true })).toBeVisible();
+    await expect(accountMenu.locator(".account-menu-identity strong")).toHaveText("LedgerLab E2E");
     await expect(accountMenu.getByText(email, { exact: true })).toBeVisible();
     await expect(accountMenu.getByRole("menuitem", { name: "Profile settings" })).toBeVisible();
     await expect(accountMenu.getByRole("menuitem", { name: "Data & backups" })).toBeVisible();

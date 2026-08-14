@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
 import type { LedgerDatabase } from "@/db";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 import {
   accounts,
   auditLogs,
@@ -76,7 +77,7 @@ function markPlannedPaymentPaid(
     },
     transaction: {
       id: transactionId,
-      userId: payment.userId,
+      workspaceId: payment.workspaceId,
       accountId: input.accountId,
       categoryId: payment.categoryId,
       merchantId: payment.merchantId,
@@ -104,7 +105,7 @@ function markPlannedPaymentPaid(
 /** Atomically validates ownership, inserts the actual transaction and links it to the occurrence. */
 export function payPlannedOccurrence(
   database: LedgerDatabase,
-  userId: string,
+  context: WorkspaceContext,
   occurrenceId: string,
   input: PayOccurrenceInput,
 ): PlannedPaymentResult {
@@ -113,14 +114,14 @@ export function payPlannedOccurrence(
       .select({ payment: plannedPayments, occurrence: plannedPaymentOccurrences })
       .from(plannedPaymentOccurrences)
       .innerJoin(plannedPayments, eq(plannedPaymentOccurrences.plannedPaymentId, plannedPayments.id))
-      .where(and(eq(plannedPaymentOccurrences.id, occurrenceId), eq(plannedPayments.userId, userId)))
+      .where(and(eq(plannedPaymentOccurrences.id, occurrenceId), eq(plannedPayments.workspaceId, context.workspaceId)))
       .get();
     if (!row) throw new Error("Planned payment occurrence not found.");
 
     const account = tx
       .select({ id: accounts.id })
       .from(accounts)
-      .where(and(eq(accounts.id, input.accountId), eq(accounts.userId, userId)))
+      .where(and(eq(accounts.id, input.accountId), eq(accounts.workspaceId, context.workspaceId)))
       .get();
     if (!account) throw new Error("Payment account not found.");
 
@@ -134,7 +135,8 @@ export function payPlannedOccurrence(
     tx.insert(auditLogs)
       .values({
         id: randomUUID(),
-        userId,
+        workspaceId: context.workspaceId,
+        actorUserId: context.actorUserId,
         entityType: "planned_payment_occurrence",
         entityId: occurrenceId,
         action: result.isPartial ? "partially_paid" : "paid",
@@ -156,7 +158,7 @@ export type UndoPaymentResult = {
 
 export function undoPlannedPayment(
   database: LedgerDatabase,
-  userId: string,
+  context: WorkspaceContext,
   occurrenceId: string,
   transactionId: string,
   now = new Date(),
@@ -171,7 +173,7 @@ export function undoPlannedPayment(
         and(
           eq(plannedPaymentTransactions.occurrenceId, occurrenceId),
           eq(plannedPaymentTransactions.transactionId, transactionId),
-          eq(plannedPayments.userId, userId),
+          eq(plannedPayments.workspaceId, context.workspaceId),
         ),
       )
       .get();
@@ -205,7 +207,8 @@ export function undoPlannedPayment(
     tx.insert(auditLogs)
       .values({
         id: randomUUID(),
-        userId,
+        workspaceId: context.workspaceId,
+        actorUserId: context.actorUserId,
         entityType: "planned_payment_occurrence",
         entityId: occurrenceId,
         action: "payment_undone",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { ensureDatabase, sqlite } from "@/db";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 import {
   HttpError,
   type ApiErrorParameters,
@@ -679,11 +680,11 @@ function rejectTransferOriginalFields(input: TransferFxFields) {
   }
 }
 
-function transferAccountCurrencies(userId: string, sourceAccountId: string, destinationAccountId: string) {
+function transferAccountCurrencies(context: WorkspaceContext, sourceAccountId: string, destinationAccountId: string) {
   const rows = sqlite.prepare(
     `SELECT id, currency FROM accounts
-      WHERE user_id = ? AND archived_at IS NULL AND id IN (?, ?)`,
-  ).all(userId, sourceAccountId, destinationAccountId) as Array<{ id: string; currency: string }>;
+      WHERE workspace_id = ? AND archived_at IS NULL AND id IN (?, ?)`,
+  ).all(context.workspaceId, sourceAccountId, destinationAccountId) as Array<{ id: string; currency: string }>;
   const byId = new Map(rows.map((row) => [row.id, normalizeCurrency(row.currency)]));
   const sourceCurrency = byId.get(sourceAccountId);
   const destinationCurrency = byId.get(destinationAccountId);
@@ -691,7 +692,7 @@ function transferAccountCurrencies(userId: string, sourceAccountId: string, dest
     throw fxError(
       422,
       "FX_TRANSFER_ACCOUNTS_INVALID",
-      "Choose active source and destination accounts that belong to your profile",
+      "Choose active source and destination accounts that belong to this workspace",
     );
   }
   if (sourceAccountId === destinationAccountId) {
@@ -770,7 +771,7 @@ function assertQuoteMatchesSupplied(
 }
 
 export async function prepareTransactionFx(
-  userId: string,
+  context: WorkspaceContext,
   accountId: string,
   kind: string,
   amountMinor: number,
@@ -779,13 +780,13 @@ export async function prepareTransactionFx(
 ): Promise<PreparedTransactionFx> {
   ensureDatabase();
   const account = sqlite.prepare(
-    "SELECT currency FROM accounts WHERE id = ? AND user_id = ? AND archived_at IS NULL",
-  ).get(accountId, userId) as { currency: string } | undefined;
+    "SELECT currency FROM accounts WHERE id = ? AND workspace_id = ? AND archived_at IS NULL",
+  ).get(accountId, context.workspaceId) as { currency: string } | undefined;
   if (!account) {
     throw fxError(
       422,
       "FX_ACCOUNT_INVALID",
-      "Choose an active account that belongs to your profile",
+      "Choose an active account that belongs to this workspace",
     );
   }
   requireDateKey(date, "transaction date", "FX_TRANSACTION_DATE_INVALID");
@@ -913,7 +914,7 @@ export async function prepareTransactionFx(
  * table.
  */
 export async function prepareTransferFx(
-  userId: string,
+  context: WorkspaceContext,
   sourceAccountId: string,
   destinationAccountId: string,
   sourceAmountMinor: number,
@@ -925,7 +926,7 @@ export async function prepareTransferFx(
   assertSafeInteger(sourceAmountMinor, "sourceAmountMinor", 1);
   rejectTransferOriginalFields(input);
   const { sourceCurrency, destinationCurrency } = transferAccountCurrencies(
-    userId,
+    context,
     sourceAccountId,
     destinationAccountId,
   );

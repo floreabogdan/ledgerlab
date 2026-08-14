@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
 
 import { createMemoryDatabase, type LedgerDatabase } from "@/db";
-import { sessions, users } from "@/db/schema";
+import { sessions, users, workspaceMembers, workspaces } from "@/db/schema";
 import { DEFAULT_UI_LANGUAGE, SUPPORTED_UI_LANGUAGE_TAGS } from "@/i18n/language";
 import {
   authenticateUser,
@@ -10,6 +11,7 @@ import {
   hashPassword,
   hashSessionToken,
   validateSessionToken,
+  validateWorkspaceSessionToken,
   verifyPassword,
 } from "@/lib/auth";
 import { profilePreferencesInput, registerInput } from "@/lib/validation";
@@ -142,6 +144,17 @@ describe("local authentication", () => {
       passwordHash: "not-used",
       displayName: "Legacy user",
     }).run();
+    database.insert(workspaces).values({
+      id: "legacy-user",
+      type: "personal",
+      name: "Legacy user",
+      createdByUserId: "legacy-user",
+    }).run();
+    database.insert(workspaceMembers).values({
+      workspaceId: "legacy-user",
+      userId: "legacy-user",
+      role: "owner",
+    }).run();
 
     expect(database.select({ uiLanguage: users.uiLanguage }).from(users).get())
       .toEqual({ uiLanguage: "en" });
@@ -149,16 +162,98 @@ describe("local authentication", () => {
 
   it("atomically limits first-user registration to an empty installation", async () => {
     const database = memoryDatabase();
-    await expect(createUser({
+    const first = await createUser({
       email: "owner@example.test",
       password: "a long test password",
       displayName: "Owner",
-    }, database, { requireEmptyDatabase: true })).resolves.toMatchObject({ email: "owner@example.test" });
+    }, database, { requireEmptyDatabase: true });
+    expect(first).toMatchObject({ email: "owner@example.test", isInstallationAdmin: true });
+    expect(database.select().from(workspaces).all()).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        type: "personal",
+        defaultCurrency: "USD",
+        timeZone: "UTC",
+      }),
+    ]);
+    expect(database.select().from(workspaceMembers).all()).toEqual([
+      expect.objectContaining({ workspaceId: first.id, userId: first.id, role: "owner" }),
+    ]);
 
     await expect(createUser({
       email: "second@example.test",
       password: "a long test password",
       displayName: "Second user",
     }, database, { requireEmptyDatabase: true })).rejects.toMatchObject({ code: "REGISTRATION_CLOSED" });
+  });
+
+  it("assigns installation administration only to the first created user", async () => {
+    const database = memoryDatabase();
+    const first = await createUser({
+      email: "first@example.test",
+      password: "a long test password",
+      displayName: "First",
+    }, database);
+    const second = await createUser({
+      email: "second@example.test",
+      password: "a long test password",
+      displayName: "Second",
+    }, database);
+
+    expect(first.isInstallationAdmin).toBe(true);
+    expect(second.isInstallationAdmin).toBe(false);
+    expect(database.select({ id: users.id }).from(users).where(eq(users.isInstallationAdmin, true)).all())
+      .toEqual([{ id: first.id }]);
+    expect(database.select().from(workspaces).all()).toHaveLength(2);
+    expect(database.select().from(workspaceMembers).all()).toHaveLength(2);
+  });
+
+  it("revalidates membership on every request and falls a revoked session back to personal", async () => {
+    const database = memoryDatabase();
+    const owner = await createUser({
+      email: "owner@example.test",
+      password: "a long test password",
+      displayName: "Owner",
+    }, database);
+    const member = await createUser({
+      email: "member@example.test",
+      password: "a long test password",
+      displayName: "Member",
+    }, database);
+    database.insert(workspaces).values({
+      id: "household",
+      type: "household",
+      name: "Household",
+      createdByUserId: owner.id,
+    }).run();
+    database.insert(workspaceMembers).values([
+      { workspaceId: "household", userId: owner.id, role: "owner" },
+      { workspaceId: "household", userId: member.id, role: "member" },
+    ]).run();
+
+    const issuedAt = new Date("2026-01-01T00:00:00Z");
+    const created = createSession(member.id, {}, database, issuedAt);
+    database.update(sessions)
+      .set({ activeWorkspaceId: "household" })
+      .where(eq(sessions.id, created.sessionId))
+      .run();
+    expect(validateWorkspaceSessionToken(created.token, database, issuedAt)?.context).toEqual({
+      actorUserId: member.id,
+      workspaceId: "household",
+      role: "member",
+    });
+
+    database.delete(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, "household"),
+      eq(workspaceMembers.userId, member.id),
+    )).run();
+    const revalidated = validateWorkspaceSessionToken(created.token, database, issuedAt);
+    expect(revalidated?.context).toEqual({
+      actorUserId: member.id,
+      workspaceId: member.id,
+      role: "owner",
+    });
+    expect(database.select({ activeWorkspaceId: sessions.activeWorkspaceId }).from(sessions).get())
+      .toEqual({ activeWorkspaceId: member.id });
   });
 });

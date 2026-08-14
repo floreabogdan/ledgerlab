@@ -6,15 +6,17 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { open, readFile, rm } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { HttpError, type ApiErrorParameters } from "@/lib/api-response";
+import type { WorkspaceContext } from "@/lib/workspace-context";
 import { audit, database, one } from "@/server/core";
 
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -24,6 +26,12 @@ const MAX_CONFIGURED_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_CONFIGURED_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 const STORAGE_PATH_PATTERN = /^[0-9a-f]{2}\/[0-9a-f]{64}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+// Restore is synchronous, while uploads stream asynchronously. This small
+// single-process gate prevents restore cleanup from observing an upload after
+// its blob has been installed but before its database row has committed.
+let activeAttachmentUploads = 0;
+let attachmentRestoreActive = false;
 
 function attachmentError(
   status: number,
@@ -36,6 +44,33 @@ function attachmentError(
     message,
     params,
   });
+}
+
+function beginAttachmentUpload() {
+  if (attachmentRestoreActive) {
+    throw attachmentError(409, "STORAGE_BUSY", "Attachment storage is being restored; retry the upload after restore completes");
+  }
+  activeAttachmentUploads += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeAttachmentUploads -= 1;
+  };
+}
+
+/** Holds the single-process attachment lifecycle gate for a full restore. */
+export function beginAttachmentRestore() {
+  if (attachmentRestoreActive || activeAttachmentUploads > 0) {
+    throw attachmentError(409, "STORAGE_BUSY", "Attachment storage is busy; retry restore after active uploads complete");
+  }
+  attachmentRestoreActive = true;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    attachmentRestoreActive = false;
+  };
 }
 
 type AttachmentRow = {
@@ -169,12 +204,50 @@ export function resolveAttachmentStoragePath(storagePath: string, sha256?: strin
   return path.join(ensureStorageChildDirectory(shard), fileName);
 }
 
-function assertOwnedTransaction(userId: string, transactionId: string) {
+function assertOwnedTransaction(context: WorkspaceContext, transactionId: string) {
   const transaction = one<{ id: string }>(
-    "SELECT id FROM transactions WHERE id = ? AND user_id = ?",
-    [transactionId, userId],
+    "SELECT id FROM transactions WHERE id = ? AND workspace_id = ?",
+    [transactionId, context.workspaceId],
   );
   if (!transaction) throw attachmentError(404, "TRANSACTION_NOT_FOUND", "Transaction not found");
+}
+
+function assertOwnedPlannedPayment(context: WorkspaceContext, plannedPaymentId: string) {
+  const plannedPayment = one<{ id: string }>(
+    "SELECT id FROM planned_payments WHERE id = ? AND workspace_id = ?",
+    [plannedPaymentId, context.workspaceId],
+  );
+  if (!plannedPayment) throw attachmentError(404, "PLANNED_PAYMENT_NOT_FOUND", "Planned payment not found");
+}
+
+type AttachmentParent =
+  | { kind: "transaction"; id: string; column: "transaction_id" }
+  | { kind: "planned payment"; id: string; column: "planned_payment_id" };
+
+function transactionParent(transactionId: string): AttachmentParent {
+  return { kind: "transaction", id: transactionId, column: "transaction_id" };
+}
+
+function plannedPaymentParent(plannedPaymentId: string): AttachmentParent {
+  return { kind: "planned payment", id: plannedPaymentId, column: "planned_payment_id" };
+}
+
+function assertOwnedParent(context: WorkspaceContext, parent: AttachmentParent) {
+  if (parent.kind === "transaction") assertOwnedTransaction(context, parent.id);
+  else assertOwnedPlannedPayment(context, parent.id);
+}
+
+function assertCurrentWorkspaceAccess(context: WorkspaceContext) {
+  const membership = one<{ role: string }>(
+    "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+    [context.workspaceId, context.actorUserId],
+  );
+  if (!membership || membership.role !== context.role) {
+    throw new HttpError(409, {
+      code: "WORKSPACE_CONTEXT_CHANGED",
+      message: "Workspace access changed while this upload was in progress. Retry from the current workspace",
+    });
+  }
 }
 
 function toMetadata(row: AttachmentRow): AttachmentMetadata {
@@ -182,18 +255,26 @@ function toMetadata(row: AttachmentRow): AttachmentMetadata {
   return { ...metadata, kind: storagePath ? "file" : "reference" };
 }
 
-export function listTransactionAttachments(userId: string, transactionId: string) {
-  assertOwnedTransaction(userId, transactionId);
+function listAttachments(context: WorkspaceContext, parent: AttachmentParent) {
+  assertOwnedParent(context, parent);
   const rows = database().prepare(
     `SELECT id, transaction_id AS transactionId, planned_payment_id AS plannedPaymentId,
             file_name AS fileName, storage_path AS storagePath,
             external_reference AS externalReference, mime_type AS mimeType,
             size_bytes AS sizeBytes, sha256, created_at AS createdAt
        FROM attachments
-      WHERE user_id = ? AND transaction_id = ?
+      WHERE workspace_id = ? AND ${parent.column} = ?
       ORDER BY created_at, id`,
-  ).all(userId, transactionId) as AttachmentRow[];
+  ).all(context.workspaceId, parent.id) as AttachmentRow[];
   return rows.map(toMetadata);
+}
+
+export function listTransactionAttachments(context: WorkspaceContext, transactionId: string) {
+  return listAttachments(context, transactionParent(transactionId));
+}
+
+export function listPlannedPaymentAttachments(context: WorkspaceContext, plannedPaymentId: string) {
+  return listAttachments(context, plannedPaymentParent(plannedPaymentId));
 }
 
 function normalizedFilename(input: string) {
@@ -293,45 +374,48 @@ async function writeUploadToTemporaryFile(body: ReadableStream<Uint8Array> | nul
   }
 }
 
-async function installTemporaryFile(temporaryPath: string, storagePath: string, sha256: string, sizeBytes: number) {
+function installTemporaryFile(temporaryPath: string, storagePath: string, sha256: string, sizeBytes: number) {
   const finalPath = resolveAttachmentStoragePath(storagePath, sha256);
+  let installed = false;
   try {
     copyFileSync(temporaryPath, finalPath, fsConstants.COPYFILE_EXCL);
+    installed = true;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "EEXIST") throw error;
-    const existing = await readFile(finalPath);
+    const existing = readFileSync(finalPath);
     if (existing.length !== sizeBytes || createHash("sha256").update(existing).digest("hex") !== sha256) {
       throw attachmentError(500, "STORAGE_INTEGRITY_FAILED", "Stored attachment content failed its integrity check");
     }
   } finally {
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    rmSync(temporaryPath, { force: true });
   }
-  return finalPath;
+  return { finalPath, installed };
 }
 
 function assertAttachmentCapacity(
-  userId: string,
-  transactionId: string,
+  context: WorkspaceContext,
+  parent: AttachmentParent,
   sizeBytes: number,
   sha256: string,
   limits: ReturnType<typeof attachmentLimits>,
 ) {
   const totalBytes = one<{ totalBytes: number }>(
     `SELECT COALESCE(SUM(size_bytes), 0) AS totalBytes
-       FROM attachments
-      WHERE user_id = ? AND storage_path IS NOT NULL`,
-    [userId],
+      FROM attachments
+      WHERE workspace_id = ? AND storage_path IS NOT NULL`,
+    [context.workspaceId],
   )?.totalBytes ?? 0;
-  const transactionFileCount = one<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM attachments WHERE transaction_id = ? AND storage_path IS NOT NULL",
-    [transactionId],
+  const parentFileCount = one<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM attachments
+      WHERE workspace_id = ? AND ${parent.column} = ? AND storage_path IS NOT NULL`,
+    [context.workspaceId, parent.id],
   )?.count ?? 0;
-  if (transactionFileCount >= limits.maxFilesPerTransaction) {
+  if (parentFileCount >= limits.maxFilesPerTransaction) {
     throw attachmentError(
       409,
       "FILE_LIMIT_REACHED",
-      `A transaction can have at most ${limits.maxFilesPerTransaction} receipt files`,
+      `A ${parent.kind} can have at most ${limits.maxFilesPerTransaction} receipt files`,
       { maxFiles: limits.maxFilesPerTransaction },
     );
   }
@@ -339,23 +423,24 @@ function assertAttachmentCapacity(
     throw attachmentError(413, "QUOTA_REACHED", "The attachment storage quota has been reached");
   }
   const duplicate = one<{ id: string }>(
-    "SELECT id FROM attachments WHERE transaction_id = ? AND sha256 = ? LIMIT 1",
-    [transactionId, sha256],
+    `SELECT id FROM attachments WHERE workspace_id = ? AND ${parent.column} = ? AND sha256 = ? LIMIT 1`,
+    [context.workspaceId, parent.id, sha256],
   );
-  if (duplicate) throw attachmentError(409, "DUPLICATE", "This receipt file is already attached to the transaction");
+  if (duplicate) throw attachmentError(409, "DUPLICATE", `This file is already attached to the ${parent.kind}`);
 }
 
-export async function uploadTransactionAttachment(
-  userId: string,
-  transactionId: string,
+async function uploadAttachmentOperation(
+  context: WorkspaceContext,
+  parent: AttachmentParent,
   input: {
     fileName: string;
     claimedMimeType: string | null;
     contentLength: string | null;
     body: ReadableStream<Uint8Array> | null;
   },
+  revalidateAuthorization?: () => void,
 ) {
-  assertOwnedTransaction(userId, transactionId);
+  assertOwnedParent(context, parent);
   const fileName = normalizedFilename(input.fileName);
   const limits = attachmentLimits();
   assertContentLength(input.contentLength, limits.maxFileBytes);
@@ -379,42 +464,76 @@ export async function uploadTransactionAttachment(
       throw attachmentError(415, "DECLARED_TYPE_MISMATCH", "The declared file type does not match the receipt content");
     }
     const storagePath = attachmentStoragePathForHash(uploaded.sha256);
-    assertAttachmentCapacity(userId, transactionId, uploaded.sizeBytes, uploaded.sha256, limits);
-    await installTemporaryFile(uploaded.temporaryPath, storagePath, uploaded.sha256, uploaded.sizeBytes);
-    const attachment = database().transaction(() => {
-      assertOwnedTransaction(userId, transactionId);
-      assertAttachmentCapacity(userId, transactionId, uploaded.sizeBytes, uploaded.sha256, limits);
-      const id = randomUUID();
-      database().prepare(
-        `INSERT INTO attachments
-          (id, user_id, transaction_id, file_name, storage_path, mime_type, size_bytes, sha256)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        id,
-        userId,
-        transactionId,
-        fileName,
-        storagePath,
-        detected.mimeType,
-        uploaded.sizeBytes,
-        uploaded.sha256,
-      );
-      audit(userId, "attachment", id, "upload", undefined, {
-        transactionId,
-        fileName,
-        mimeType: detected.mimeType,
-        sizeBytes: uploaded.sizeBytes,
-        sha256: uploaded.sha256,
-      });
-      return one<AttachmentRow>(
-        `SELECT id, transaction_id AS transactionId, planned_payment_id AS plannedPaymentId,
-                file_name AS fileName, storage_path AS storagePath,
-                external_reference AS externalReference, mime_type AS mimeType,
-                size_bytes AS sizeBytes, sha256, created_at AS createdAt
-           FROM attachments WHERE id = ?`,
-        [id],
-      )!;
-    })();
+    let installedFile: { finalPath: string; installed: boolean } | null = null;
+    let attachment: AttachmentRow;
+    try {
+      attachment = database().transaction(() => {
+        // Streaming may outlive the membership that authorized the request.
+        // Re-check the originating session plus membership inside the same
+        // immediate transaction as both the content-addressed file install and
+        // metadata write.
+        revalidateAuthorization?.();
+        assertCurrentWorkspaceAccess(context);
+        assertOwnedParent(context, parent);
+        assertAttachmentCapacity(context, parent, uploaded.sizeBytes, uploaded.sha256, limits);
+        installedFile = installTemporaryFile(
+          uploaded.temporaryPath,
+          storagePath,
+          uploaded.sha256,
+          uploaded.sizeBytes,
+        );
+        const id = randomUUID();
+        database().prepare(
+          `INSERT INTO attachments
+            (id, workspace_id, ${parent.column}, file_name, storage_path, mime_type, size_bytes, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          id,
+          context.workspaceId,
+          parent.id,
+          fileName,
+          storagePath,
+          detected.mimeType,
+          uploaded.sizeBytes,
+          uploaded.sha256,
+        );
+        audit(context, "attachment", id, "upload", undefined, {
+          transactionId: parent.kind === "transaction" ? parent.id : null,
+          plannedPaymentId: parent.kind === "planned payment" ? parent.id : null,
+          fileName,
+          mimeType: detected.mimeType,
+          sizeBytes: uploaded.sizeBytes,
+          sha256: uploaded.sha256,
+        });
+        return one<AttachmentRow>(
+          `SELECT id, transaction_id AS transactionId, planned_payment_id AS plannedPaymentId,
+                  file_name AS fileName, storage_path AS storagePath,
+                  external_reference AS externalReference, mime_type AS mimeType,
+                  size_bytes AS sizeBytes, sha256, created_at AS createdAt
+             FROM attachments WHERE id = ?`,
+          [id],
+        )!;
+      }).immediate();
+    } catch (error) {
+      if (installedFile && (installedFile as { installed: boolean }).installed) {
+        try {
+          database().transaction(() => {
+            const references = one<{ count: number }>(
+              "SELECT COUNT(*) AS count FROM attachments WHERE storage_path = ?",
+              [storagePath],
+            )?.count ?? 0;
+            if (references === 0) {
+              rmSync((installedFile as { finalPath: string }).finalPath, { force: true });
+            }
+          }).immediate();
+        } catch (cleanupError) {
+          // A content-addressed orphan is safer than deleting a blob that a
+          // concurrent process may have referenced after our rollback.
+          console.error("Could not clean up an unreferenced upload blob", cleanupError);
+        }
+      }
+      throw error;
+    }
     return toMetadata(attachment);
   } catch (error) {
     await rm(uploaded.temporaryPath, { force: true }).catch(() => undefined);
@@ -422,21 +541,55 @@ export async function uploadTransactionAttachment(
   }
 }
 
-function ownedAttachment(userId: string, attachmentId: string) {
+async function uploadAttachment(
+  context: WorkspaceContext,
+  parent: AttachmentParent,
+  input: Parameters<typeof uploadAttachmentOperation>[2],
+  revalidateAuthorization?: () => void,
+) {
+  const release = beginAttachmentUpload();
+  try {
+    return await uploadAttachmentOperation(context, parent, input, revalidateAuthorization);
+  } finally {
+    release();
+  }
+}
+
+type AttachmentUploadInput = Parameters<typeof uploadAttachment>[2];
+
+export function uploadTransactionAttachment(
+  context: WorkspaceContext,
+  transactionId: string,
+  input: AttachmentUploadInput,
+  revalidateAuthorization?: () => void,
+) {
+  return uploadAttachment(context, transactionParent(transactionId), input, revalidateAuthorization);
+}
+
+export function uploadPlannedPaymentAttachment(
+  context: WorkspaceContext,
+  plannedPaymentId: string,
+  input: AttachmentUploadInput,
+  revalidateAuthorization?: () => void,
+) {
+  return uploadAttachment(context, plannedPaymentParent(plannedPaymentId), input, revalidateAuthorization);
+}
+
+function ownedAttachment(context: WorkspaceContext, attachmentId: string) {
   const row = one<AttachmentRow>(
     `SELECT id, transaction_id AS transactionId, planned_payment_id AS plannedPaymentId,
             file_name AS fileName, storage_path AS storagePath,
             external_reference AS externalReference, mime_type AS mimeType,
             size_bytes AS sizeBytes, sha256, created_at AS createdAt
-       FROM attachments WHERE id = ? AND user_id = ?`,
-    [attachmentId, userId],
+       FROM attachments WHERE id = ? AND workspace_id = ?`,
+    [attachmentId, context.workspaceId],
   );
   if (!row) throw attachmentError(404, "NOT_FOUND", "Attachment not found");
   return row;
 }
 
-export function attachmentDownload(userId: string, attachmentId: string) {
-  const row = ownedAttachment(userId, attachmentId);
+export function attachmentDownload(context: WorkspaceContext, attachmentId: string) {
+  const row = ownedAttachment(context, attachmentId);
   if (!row.storagePath || !row.sha256 || row.sizeBytes === null || !row.mimeType) {
     throw attachmentError(404, "REFERENCE_NOT_DOWNLOADABLE", "This attachment is a reference and has no local file");
   }
@@ -474,41 +627,39 @@ export function attachmentContentDisposition(fileName: string) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-export function deleteAttachment(userId: string, attachmentId: string) {
-  const row = ownedAttachment(userId, attachmentId);
-  const shouldDeleteFile = database().transaction(() => {
-    const result = database().prepare("DELETE FROM attachments WHERE id = ? AND user_id = ?").run(attachmentId, userId);
+export function deleteAttachment(context: WorkspaceContext, attachmentId: string) {
+  const row = ownedAttachment(context, attachmentId);
+  database().transaction(() => {
+    const result = database().prepare("DELETE FROM attachments WHERE id = ? AND workspace_id = ?")
+      .run(attachmentId, context.workspaceId);
     if (result.changes !== 1) throw attachmentError(404, "NOT_FOUND", "Attachment not found");
-    audit(userId, "attachment", attachmentId, "delete", {
+    audit(context, "attachment", attachmentId, "delete", {
       transactionId: row.transactionId,
+      plannedPaymentId: row.plannedPaymentId,
       fileName: row.fileName,
       mimeType: row.mimeType,
       sizeBytes: row.sizeBytes,
       sha256: row.sha256,
     });
-    if (!row.storagePath) return false;
-    return (one<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM attachments WHERE storage_path = ?",
-      [row.storagePath],
-    )?.count ?? 0) === 0;
   })();
-  if (shouldDeleteFile && row.storagePath) {
-    try {
-      rmSync(resolveAttachmentStoragePath(row.storagePath, row.sha256), { force: true });
-    } catch (error) {
-      console.error("Could not remove orphaned receipt content", error);
-    }
-  }
+  // Content-addressed blobs are intentionally retained here. An upload installs
+  // its blob before committing the attachment row, so deleting the apparent
+  // last reference can otherwise race that upload and leave its new row pointing
+  // at a missing file. Full-restore reconciliation (or a future offline GC)
+  // removes unreferenced blobs while uploads are excluded.
   return { deleted: true, id: attachmentId };
 }
 
-export function collectAttachmentBackupFiles(userId: string): AttachmentBackupFile[] {
+function collectAttachmentBackupFilesForScope(
+  where: "workspace_id = ?" | "1 = 1",
+  params: [] | [string],
+) {
   const rows = database().prepare(
     `SELECT DISTINCT storage_path AS storagePath, size_bytes AS sizeBytes, sha256
        FROM attachments
-      WHERE user_id = ? AND storage_path IS NOT NULL
+      WHERE ${where} AND storage_path IS NOT NULL
       ORDER BY storage_path`,
-  ).all(userId) as Array<{ storagePath: string; sizeBytes: number; sha256: string }>;
+  ).all(...params) as Array<{ storagePath: string; sizeBytes: number; sha256: string }>;
   const files = new Map<string, AttachmentBackupFile>();
   for (const row of rows) {
     const storagePath = assertStoragePath(row.storagePath, row.sha256);
@@ -539,6 +690,15 @@ export function collectAttachmentBackupFiles(userId: string): AttachmentBackupFi
     });
   }
   return [...files.values()];
+}
+
+export function collectAttachmentBackupFiles(context: WorkspaceContext): AttachmentBackupFile[] {
+  return collectAttachmentBackupFilesForScope("workspace_id = ?", [context.workspaceId]);
+}
+
+/** Caller must enforce installation-admin authorization before using this full-instance export. */
+export function collectInstallationAttachmentBackupFiles(): AttachmentBackupFile[] {
+  return collectAttachmentBackupFilesForScope("1 = 1", []);
 }
 
 function decodeBackupFile(file: AttachmentBackupFile) {
@@ -591,17 +751,100 @@ export function validateAttachmentBackupFiles(
   return decoded;
 }
 
+function liveAttachmentStoragePaths() {
+  const rows = database().prepare(
+    "SELECT DISTINCT storage_path AS storagePath, sha256 FROM attachments WHERE storage_path IS NOT NULL",
+  ).all() as Array<{ storagePath: string; sha256: string }>;
+  return new Set(rows.map((row) => assertStoragePath(row.storagePath, row.sha256)));
+}
+
+function removeUnreferencedAttachmentBlob(storagePath: string, livePaths = liveAttachmentStoragePaths()) {
+  const normalized = assertStoragePath(storagePath);
+  if (livePaths.has(normalized)) return false;
+  const sha256 = normalized.split("/")[1]!;
+  const target = resolveAttachmentStoragePath(normalized, sha256);
+  rmSync(target, { force: true });
+  return true;
+}
+
+/**
+ * Publishes all validated restore blobs before the database replacement and
+ * returns only the paths this call created. Existing matching blobs are never
+ * overwritten. The caller can safely roll the returned paths back while it
+ * holds the restore gate and the old database is still active.
+ */
 export function installAttachmentBackupFiles(files: Map<string, Buffer>) {
-  for (const [storagePath, content] of files) {
-    const sha256 = createHash("sha256").update(content).digest("hex");
-    const target = resolveAttachmentStoragePath(storagePath, sha256);
-    if (existsSync(target)) {
-      const existing = readFileSync(target);
-      if (existing.length !== content.length || !existing.equals(content)) {
-        throw attachmentError(500, "RESTORE_STORAGE_CONFLICT", "Existing receipt storage conflicts with the restored backup");
+  const createdStoragePaths: string[] = [];
+  try {
+    for (const [storagePath, content] of files) {
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const normalized = assertStoragePath(storagePath, sha256);
+      const target = resolveAttachmentStoragePath(normalized, sha256);
+      if (existsSync(target)) {
+        const direct = lstatSync(target);
+        if (direct.isSymbolicLink() || !direct.isFile()) {
+          throw attachmentError(500, "RESTORE_STORAGE_CONFLICT", "Existing receipt storage conflicts with the restored backup");
+        }
+        const existing = readFileSync(target);
+        if (existing.length !== content.length || !existing.equals(content)) {
+          throw attachmentError(500, "RESTORE_STORAGE_CONFLICT", "Existing receipt storage conflicts with the restored backup");
+        }
+        continue;
       }
-      continue;
+      // Track the path before writing so a short/failed write is also removed.
+      createdStoragePaths.push(normalized);
+      writeFileSync(target, content, { flag: "wx", mode: 0o600 });
     }
-    writeFileSync(target, content, { flag: "wx", mode: 0o600 });
+    return createdStoragePaths;
+  } catch (error) {
+    rollbackInstalledAttachmentBackupFiles(createdStoragePaths);
+    throw error;
   }
+}
+
+/** Best-effort rollback for blobs created before a failed database restore. */
+export function rollbackInstalledAttachmentBackupFiles(storagePaths: readonly string[]) {
+  return database().transaction(() => {
+    const livePaths = liveAttachmentStoragePaths();
+    let removed = 0;
+    for (const storagePath of [...storagePaths].reverse()) {
+      try {
+        if (removeUnreferencedAttachmentBlob(storagePath, livePaths)) removed += 1;
+      } catch (error) {
+        // An orphan is safer than deleting a blob whose ownership is uncertain.
+        console.error("Could not roll back unreferenced restored receipt content", error);
+      }
+    }
+    return removed;
+  }).immediate();
+}
+
+/**
+ * Removes only canonical content-addressed regular files that the committed
+ * database no longer references. Unknown entries and temporary uploads are
+ * retained for explicit operator inspection.
+ */
+export function reconcileAttachmentStorageFiles() {
+  return database().transaction(() => {
+    const livePaths = liveAttachmentStoragePaths();
+    const root = ensureStorageRoot();
+    let removed = 0;
+    let failures = 0;
+    for (const shardEntry of readdirSync(root, { withFileTypes: true })) {
+      if (!/^[0-9a-f]{2}$/.test(shardEntry.name) || !shardEntry.isDirectory() || shardEntry.isSymbolicLink()) continue;
+      const shard = ensureStorageChildDirectory(shardEntry.name);
+      for (const fileEntry of readdirSync(shard, { withFileTypes: true })) {
+        if (!SHA256_PATTERN.test(fileEntry.name) || !fileEntry.isFile() || fileEntry.isSymbolicLink()) continue;
+        const storagePath = `${shardEntry.name}/${fileEntry.name}`;
+        if (attachmentStoragePathForHash(fileEntry.name) !== storagePath || livePaths.has(storagePath)) continue;
+        try {
+          if (removeUnreferencedAttachmentBlob(storagePath, livePaths)) removed += 1;
+        } catch (error) {
+          failures += 1;
+          console.error("Could not remove unreferenced receipt content after restore", error);
+        }
+      }
+    }
+    return { removed, failures };
+  }).immediate();
 }

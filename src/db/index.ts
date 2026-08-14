@@ -44,13 +44,32 @@ export const sqlite = connection.sqlite;
 /** Typed Drizzle database used by application code. */
 export const db = connection.db;
 
+export function runMigrations(connection: Connection): void {
+  const foreignKeysEnabled = connection.sqlite.pragma("foreign_keys", { simple: true }) === 1;
+  connection.sqlite.pragma("foreign_keys = OFF");
+  try {
+    migrate(connection.db, { migrationsFolder: path.join(process.cwd(), "drizzle") });
+    const violations = connection.sqlite.pragma("foreign_key_check") as Array<{
+      table: string;
+      rowid: number | null;
+      parent: string;
+      fkid: number;
+    }>;
+    if (violations.length > 0) {
+      throw new Error(`Database migration left ${violations.length} foreign-key violation(s).`);
+    }
+  } finally {
+    if (foreignKeysEnabled) connection.sqlite.pragma("foreign_keys = ON");
+  }
+}
+
 /**
  * Applies every checked-in migration exactly once (Drizzle records applied files).
  * Safe to call from every server entry point; subsequent calls in this process are a no-op.
  */
 export function ensureDatabase(): LedgerDatabase {
   if (!connection.migrated) {
-    migrate(connection.db, { migrationsFolder: path.join(process.cwd(), "drizzle") });
+    runMigrations(connection);
     connection.migrated = true;
   }
   return connection.db;
@@ -59,7 +78,7 @@ export function ensureDatabase(): LedgerDatabase {
 /** Isolated migrated database intended for domain/integration tests. */
 export function createMemoryDatabase(): Connection {
   const memory = openDatabase(":memory:");
-  migrate(memory.db, { migrationsFolder: path.join(process.cwd(), "drizzle") });
+  runMigrations(memory);
   memory.migrated = true;
   return memory;
 }
