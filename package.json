@@ -50,7 +50,7 @@
     "db:seed": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
-    "better-sqlite3": "13.0.2",
+    "better-sqlite3": "13.0.3",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "intl-messageformat": "^11.2.13",
@@ -91,7 +91,7 @@
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
-    "better-sqlite3@13.0.2": true,
+    "better-sqlite3@13.0.3": false,
     "sharp@0.35.3": true,
     "unrs-resolver@1.12.2": true
   }
